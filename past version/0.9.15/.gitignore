@@ -1,0 +1,17 @@
+.dart_tool/
+.flutter-plugins-dependencies
+.idea/
+.vscode/
+build/
+coverage/
+installer/output/
+MusicFetcher/bin/
+MusicFetcher/obj/
+portable/
+temp/
+*.cer
+*.exe
+*.iml
+*.pdb
+*.user
+windows/flutter/ephemeral/
