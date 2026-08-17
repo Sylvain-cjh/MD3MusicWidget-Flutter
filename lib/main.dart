@@ -14,7 +14,7 @@ void main() async {
 
   WindowOptions windowOptions = WindowOptions(
     size: Size(AppState.playerWidth, AppState.baseWindowHeight),
-    minimumSize: const Size(320, 170),
+    minimumSize: Size.zero,
     center: true,
     backgroundColor: Colors.transparent,
     skipTaskbar: true,
@@ -34,6 +34,7 @@ void main() async {
     );
     await windowManager.show();
     await windowManager.focus();
+    await windowManager.setAspectRatio(0);
     await windowManager.setResizable(false);
     await windowManager.setPreventClose(true);
   });

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
@@ -8,7 +9,9 @@ import 'package:tray_manager/tray_manager.dart' as tm;
 
 import '../core/app_state.dart';
 import '../core/spectrum_packet.dart';
+import 'animations/component_size_motion.dart';
 import 'widgets/dynamic_background.dart';
+import 'widgets/locked_aspect_resize_area.dart';
 import 'widgets/track_controls.dart';
 import 'widgets/slide_menu.dart';
 import 'widgets/settings_panel.dart';
@@ -21,6 +24,8 @@ class PlayerView extends StatefulWidget {
 
 class _PlayerViewState extends State<PlayerView>
     with WindowListener, tm.TrayListener, TickerProviderStateMixin {
+  static const Size _unconstrainedMaximumWindowSize = Size(16384, 16384);
+
   Timer? _pollingTimer;
   Timer? _spectrumTimer;
   final HttpClient _httpBaseClient = HttpClient();
@@ -90,6 +95,12 @@ class _PlayerViewState extends State<PlayerView>
   String _settingsSide = "right";
 
   late AnimationController _menuAnimController;
+  double _frameScale = AppState.componentScale;
+  double _contentScale = AppState.componentScale;
+  bool _isComponentSizeTransitioning = false;
+  bool _customScaleCommitScheduled = false;
+  double? _pendingCustomScale;
+  Timer? _resizeSaveTimer;
 
   bool _isTransitioning = false;
   double _leftPadding = 0.0;
@@ -117,6 +128,7 @@ class _PlayerViewState extends State<PlayerView>
   void dispose() {
     _pollingTimer?.cancel();
     _spectrumTimer?.cancel();
+    _resizeSaveTimer?.cancel();
     windowManager.removeListener(this);
     tm.trayManager.removeListener(this);
     _httpBaseClient.close(force: true);
@@ -776,8 +788,77 @@ class _PlayerViewState extends State<PlayerView>
 
   int _beginWindowTransition() {
     _windowTransitionSerial++;
+    _isComponentSizeTransitioning = false;
     _isTransitioning = true;
     return _windowTransitionSerial;
+  }
+
+  Size _designWindowSize({
+    required WidgetLayout layout,
+    required bool settingsOpen,
+  }) => Size(
+    settingsOpen
+        ? AppState.expandedWindowWidthOf(layout)
+        : AppState.baseWindowWidthOf(layout),
+    settingsOpen
+        ? AppState.expandedWindowHeightOf(layout)
+        : AppState.baseWindowHeightOf(layout),
+  );
+
+  Future<void> _applyResizePolicy() async {
+    await _suspendResizePolicy();
+  }
+
+  Future<void> _suspendResizePolicy() async {
+    await windowManager.setAspectRatio(0);
+    await windowManager.setMinimumSize(const Size(0, 0));
+    await windowManager.setMaximumSize(_unconstrainedMaximumWindowSize);
+    await windowManager.setResizable(false);
+  }
+
+  Future<void> _applyComponentSizeToTarget(int serial) async {
+    final Rect bounds = await windowManager.getBounds();
+    final WidgetLayout targetLayout = AppState.widgetLayout;
+    final bool targetSettingsOpen = _isSettingsOpen;
+    final String targetSettingsSide = _settingsSide;
+    final Size designSize = _designWindowSize(
+      layout: targetLayout,
+      settingsOpen: targetSettingsOpen,
+    );
+    final double targetScale = AppState.componentScale;
+    final double absCardLeft = bounds.left + _leftPadding;
+    final double targetLeftPadding =
+        targetSettingsOpen &&
+            targetLayout == WidgetLayout.vertical &&
+            targetSettingsSide == 'left'
+        ? AppState.innerSettingsSideWidth * targetScale
+        : 0.0;
+    final Rect targetRect = Rect.fromLTWH(
+      absCardLeft - targetLeftPadding,
+      bounds.top,
+      designSize.width * targetScale,
+      designSize.height * targetScale,
+    );
+    final Rect stage = bounds.expandToInclude(targetRect);
+
+    await _suspendResizePolicy();
+    _leftPadding = absCardLeft - stage.left;
+    await windowManager.setBounds(stage, animate: false);
+    if (!_isCurrentWindowTransition(serial)) return;
+
+    setState(() {
+      _isComponentSizeTransitioning = true;
+      _frameScale = targetScale;
+      _contentScale = targetScale;
+    });
+    await WidgetsBinding.instance.endOfFrame;
+    if (!_isCurrentWindowTransition(serial)) return;
+
+    _leftPadding = targetLeftPadding;
+    _isComponentSizeTransitioning = false;
+    if (mounted) setState(() {});
+    await windowManager.setBounds(targetRect, animate: false);
+    await _applyResizePolicy();
   }
 
   bool _isCurrentWindowTransition(int serial) {
@@ -794,17 +875,21 @@ class _PlayerViewState extends State<PlayerView>
     final bool targetSettingsOpen = _isSettingsOpen;
     final String targetSettingsSide = _settingsSide;
 
-    final double targetW = targetSettingsOpen
-        ? AppState.expandedWindowWidthOf(targetLayout)
-        : AppState.baseWindowWidthOf(targetLayout);
-    final double targetH = targetSettingsOpen
-        ? AppState.expandedWindowHeightOf(targetLayout)
-        : AppState.baseWindowHeightOf(targetLayout);
+    final double targetW =
+        (targetSettingsOpen
+            ? AppState.expandedWindowWidthOf(targetLayout)
+            : AppState.baseWindowWidthOf(targetLayout)) *
+        _frameScale;
+    final double targetH =
+        (targetSettingsOpen
+            ? AppState.expandedWindowHeightOf(targetLayout)
+            : AppState.baseWindowHeightOf(targetLayout)) *
+        _frameScale;
     final double targetLeftPadding =
         targetSettingsOpen &&
             targetLayout == WidgetLayout.vertical &&
             targetSettingsSide == "left"
-        ? AppState.innerSettingsSideWidth
+        ? AppState.innerSettingsSideWidth * _frameScale
         : 0.0;
 
     final Rect targetRect = Rect.fromLTWH(
@@ -855,7 +940,9 @@ class _PlayerViewState extends State<PlayerView>
       if (_isSettingsOpen) {
         _settingsSide = _menuSide;
       }
+      await _suspendResizePolicy();
       await _animateToTargetLayout(serial);
+      await _applyResizePolicy();
     } finally {
       if (_isCurrentWindowTransition(serial)) {
         setState(() => _isTransitioning = false);
@@ -869,11 +956,46 @@ class _PlayerViewState extends State<PlayerView>
       _syncSpectrumPolling();
       unawaited(AppState.saveSettings());
       AppState.notifyBackgroundChanged();
-      await _animateToTargetLayout(serial);
+      final bool componentScaleChanged =
+          (AppState.componentScale - _contentScale).abs() > 0.0001;
+      if (componentScaleChanged) {
+        await _applyComponentSizeToTarget(serial);
+      } else {
+        await _suspendResizePolicy();
+        await _animateToTargetLayout(serial);
+        await _applyResizePolicy();
+      }
     } finally {
       if (_isCurrentWindowTransition(serial)) {
         setState(() => _isTransitioning = false);
       }
+    }
+  }
+
+  void _stageCustomScale(double scale) {
+    _pendingCustomScale = scale;
+    if (_customScaleCommitScheduled) return;
+    _customScaleCommitScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _customScaleCommitScheduled = false;
+      final double? pending = _pendingCustomScale;
+      _pendingCustomScale = null;
+      if (!mounted || pending == null || !AppState.isCustomComponentSize) {
+        return;
+      }
+      AppState.customComponentScale = pending;
+      _frameScale = pending;
+      _contentScale = pending;
+    });
+  }
+
+  @override
+  void onWindowResized() {
+    if (AppState.isCustomComponentSize) {
+      _resizeSaveTimer?.cancel();
+      _resizeSaveTimer = Timer(const Duration(milliseconds: 180), () {
+        unawaited(AppState.saveSettings());
+      });
     }
   }
 
@@ -889,10 +1011,9 @@ class _PlayerViewState extends State<PlayerView>
   Future<void> _openMenu(bool toLeft) async {
     if (_isSettingsOpen || _isTransitioning) return;
     try {
+      await _suspendResizePolicy();
       final bounds = await windowManager.getBounds();
-      final double menuWindowHeight = AppState.baseWindowHeightOf(
-        AppState.widgetLayout,
-      );
+      final double menuWindowHeight = AppState.baseWindowHeight;
       if (toLeft) {
         _leftPadding = AppState.menuExtraSpace;
         setState(() {
@@ -941,11 +1062,12 @@ class _PlayerViewState extends State<PlayerView>
         Rect.fromLTWH(
           resetLeft,
           bounds.top,
-          AppState.baseWindowWidthOf(AppState.widgetLayout),
-          AppState.baseWindowHeightOf(AppState.widgetLayout),
+          AppState.baseWindowWidth,
+          AppState.baseWindowHeight,
         ),
         animate: false,
       );
+      await _applyResizePolicy();
     } catch (_) {}
   }
 
@@ -958,12 +1080,10 @@ class _PlayerViewState extends State<PlayerView>
 
     final double clickX = details.localPosition.dx;
     final double clickY = details.globalPosition.dy;
-    final double maxTop =
-        AppState.baseWindowHeightOf(AppState.widgetLayout) - 100.0;
+    final double maxTop = AppState.baseWindowHeight - 100.0 * _frameScale;
     _menuTop = clickY.clamp(12.0, maxTop);
 
-    final bool toLeft =
-        clickX < AppState.baseWindowWidthOf(AppState.widgetLayout) / 2;
+    final bool toLeft = clickX < AppState.baseWindowWidth / 2;
 
     if (_isMenuOpen) {
       if ((toLeft && _menuSide == 'left') ||
@@ -1061,6 +1181,141 @@ class _PlayerViewState extends State<PlayerView>
     double containerH = isV
         ? innerPlayerH
         : (isOpen ? innerPlayerH + innerSettingsH : innerPlayerH);
+    final Alignment componentAlignment = anchorRight
+        ? Alignment.topRight
+        : Alignment.topLeft;
+    double renderFrameScale = _frameScale;
+    double renderContentScale = _contentScale;
+    final bool isLiveCustomResize =
+        AppState.isCustomComponentSize && !_isTransitioning && !_isMenuOpen;
+    if (isLiveCustomResize) {
+      final double viewportScale = ComponentSizeMotion.fitScale(
+        viewport: MediaQuery.sizeOf(context),
+        design: Size(containerW, containerH),
+        maximumScale: AppState.maximumComponentScale,
+      );
+      renderFrameScale = viewportScale;
+      renderContentScale = viewportScale;
+      final bool isPersistableScale =
+          viewportScale >= AppState.minimumComponentScale &&
+          viewportScale <= AppState.maximumComponentScale;
+      if (isPersistableScale &&
+          (viewportScale - AppState.customComponentScale).abs() > 0.0005) {
+        _stageCustomScale(viewportScale);
+      }
+    }
+    final double frameWidth = containerW * renderFrameScale;
+    final double frameHeight = containerH * renderFrameScale;
+    final Duration frameAnimationDuration =
+        _isComponentSizeTransitioning || isLiveCustomResize
+        ? Duration.zero
+        : AppState.layoutSwitchDuration;
+
+    Widget playerContent = Stack(
+      children: [
+        Positioned.fill(
+          child: const RepaintBoundary(child: DynamicBackground()),
+        ),
+        AnimatedPositioned(
+          duration: AppState.layoutSwitchDuration,
+          curve: AppState.layoutSwitchCurve,
+          left: sLeft,
+          top: sTop,
+          width: innerSettingsW,
+          height: innerSettingsH,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 300),
+            opacity: isOpen ? 1.0 : 0.0,
+            child: IgnorePointer(
+              ignoring: !isOpen,
+              child: _buildSettingsPanel(),
+            ),
+          ),
+        ),
+        AnimatedPositioned(
+          duration: AppState.layoutSwitchDuration,
+          curve: AppState.layoutSwitchCurve,
+          left: pLeft,
+          top: pTop,
+          width: innerPlayerW,
+          height: innerPlayerH,
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onPanStart: (_) => windowManager.startDragging(),
+            onSecondaryTapDown: _handleSecondaryTap,
+            onTapDown: (_) {
+              if (_isMenuOpen) _closeMenu();
+            },
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  width: innerPlayerW,
+                  height: corePlayerH,
+                  child: ContinuousTrackControls(isVertical: isV),
+                ),
+                AnimatedPositioned(
+                  duration: AppState.layoutSwitchDuration,
+                  curve: AppState.layoutSwitchCurve,
+                  left: playerHorizontalPadding,
+                  top: corePlayerH + 8.0,
+                  width: innerPlayerW - playerHorizontalPadding * 2,
+                  height: spectrumVisible ? 48.0 : 0.0,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    opacity: spectrumVisible ? 1.0 : 0.0,
+                    child: IgnorePointer(
+                      ignoring: !spectrumVisible,
+                      child: MusicSpectrumPanel(
+                        mode: AppState.spectrumMode,
+                        isPlaying: AppState.isPlaying,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+
+    Widget mainStage = ComponentSizeStage(
+      frameWidth: frameWidth,
+      frameHeight: frameHeight,
+      designWidth: containerW,
+      designHeight: containerH,
+      contentScale: renderContentScale,
+      alignment: componentAlignment,
+      frameAnimationDuration: frameAnimationDuration,
+      frameAnimationCurve: AppState.layoutSwitchCurve,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28 * renderFrameScale),
+        border: Border.all(
+          color: AppState.currentScheme.outlineVariant.withValues(alpha: 0.4),
+          width: math.max(1.0, renderFrameScale),
+        ),
+      ),
+      child: playerContent,
+    );
+
+    if (AppState.isCustomComponentSize && !_isTransitioning && !_isMenuOpen) {
+      mainStage = LockedAspectResizeArea(
+        designSize: Size(containerW, containerH),
+        minimumScale: AppState.minimumComponentScale,
+        maximumScale: AppState.maximumComponentScale,
+        onResizeEnd: () {
+          _resizeSaveTimer?.cancel();
+          _resizeSaveTimer = Timer(const Duration(milliseconds: 180), () {
+            unawaited(AppState.saveSettings());
+          });
+        },
+        child: mainStage,
+      );
+    }
 
     return AnimatedTheme(
       data: ThemeData(
@@ -1085,127 +1340,31 @@ class _PlayerViewState extends State<PlayerView>
                 left: anchorRight ? null : _leftPadding,
                 right: anchorRight ? 0.0 : null,
                 top: 0,
-                child: AnimatedContainer(
-                  duration: AppState.layoutSwitchDuration,
-                  curve: AppState.layoutSwitchCurve,
-                  width: containerW,
-                  height: containerH,
-                  margin: EdgeInsets.all(AppState.cardMargin),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(28),
-                    border: Border.all(
-                      color: AppState.currentScheme.outlineVariant.withValues(
-                        alpha: 0.4,
-                      ),
-                      width: 1,
-                    ),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(28),
-                    child: Stack(
-                      children: [
-                        
-                        
-                        Positioned.fill(
-                          child: const RepaintBoundary(
-                            child: DynamicBackground(),
-                          ),
-                        ),
-
-                        AnimatedPositioned(
-                          duration: AppState.layoutSwitchDuration,
-                          curve: AppState.layoutSwitchCurve,
-                          left: sLeft,
-                          top: sTop,
-                          width: innerSettingsW,
-                          height: innerSettingsH,
-                          child: AnimatedOpacity(
-                            duration: const Duration(milliseconds: 300),
-                            opacity: isOpen ? 1.0 : 0.0,
-                            child: IgnorePointer(
-                              ignoring: !isOpen,
-                              child: _buildSettingsPanel(),
-                            ),
-                          ),
-                        ),
-
-                        AnimatedPositioned(
-                          duration: AppState.layoutSwitchDuration,
-                          curve: AppState.layoutSwitchCurve,
-                          left: pLeft,
-                          top: pTop,
-                          width: innerPlayerW,
-                          height: innerPlayerH,
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.translucent,
-                            onPanStart: (_) => windowManager.startDragging(),
-                            onSecondaryTapDown: (details) =>
-                                _handleSecondaryTap(details),
-                            onTapDown: (_) {
-                              if (_isMenuOpen) _closeMenu();
-                            },
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Positioned(
-                                  left: 0,
-                                  top: 0,
-                                  width: innerPlayerW,
-                                  height: corePlayerH,
-                                  child: ContinuousTrackControls(
-                                    isVertical: isV,
-                                  ),
-                                ),
-                                AnimatedPositioned(
-                                  duration: AppState.layoutSwitchDuration,
-                                  curve: AppState.layoutSwitchCurve,
-                                  left: playerHorizontalPadding,
-                                  top: corePlayerH + 8.0,
-                                  width:
-                                      innerPlayerW -
-                                      playerHorizontalPadding * 2,
-                                  height: spectrumVisible ? 48.0 : 0.0,
-                                  child: AnimatedOpacity(
-                                    duration: const Duration(milliseconds: 220),
-                                    curve: Curves.easeOutCubic,
-                                    opacity: spectrumVisible ? 1.0 : 0.0,
-                                    child: IgnorePointer(
-                                      ignoring: !spectrumVisible,
-                                      child: MusicSpectrumPanel(
-                                        mode: AppState.spectrumMode,
-                                        isPlaying: AppState.isPlaying,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                child: mainStage,
               ),
               if (_isMenuOpen)
                 Positioned(
-                  left: _menuSide == "left"
-                      ? 0
-                      : AppState.baseWindowWidthOf(AppState.widgetLayout),
+                  left: _menuSide == "left" ? 0 : AppState.baseWindowWidth,
                   top: _menuTop,
                   width: AppState.menuExtraSpace,
-                  child: Align(
+                  child: Transform.scale(
+                    scale: renderContentScale,
                     alignment: _menuSide == "left"
                         ? Alignment.topRight
                         : Alignment.topLeft,
-                    child: SlideMenu(
-                      animation: _menuAnimController,
-                      menuSide: _menuSide,
-                      onSettingsTap: _toggleSettings,
-                      onExitTap: () {
-                        windowManager.hide();
-                        unawaited(_exitApplication());
-                      },
+                    child: Align(
+                      alignment: _menuSide == "left"
+                          ? Alignment.topRight
+                          : Alignment.topLeft,
+                      child: SlideMenu(
+                        animation: _menuAnimController,
+                        menuSide: _menuSide,
+                        onSettingsTap: _toggleSettings,
+                        onExitTap: () {
+                          windowManager.hide();
+                          unawaited(_exitApplication());
+                        },
+                      ),
                     ),
                   ),
                 ),

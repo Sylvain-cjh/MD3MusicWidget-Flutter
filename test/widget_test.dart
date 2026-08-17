@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:music_widget_flutter/core/app_state.dart';
 import 'package:music_widget_flutter/core/spectrum_packet.dart';
+import 'package:music_widget_flutter/ui/animations/component_size_motion.dart';
+import 'package:music_widget_flutter/ui/widgets/locked_aspect_resize_area.dart';
 
 void main() {
   test('getShapeRadius 为每种形状返回正确的圆角', () {
@@ -139,6 +141,8 @@ void main() {
         'spectrumMode': 'waveform',
         'progressStyle': 'segmented',
         'widgetLayout': 'vertical',
+        'componentSizeMode': 'custom',
+        'customComponentScale': 1.31,
         'isAlwaysOnTop': false,
         'isMousePassthrough': true,
         'customFontPaths': <String>[],
@@ -153,6 +157,8 @@ void main() {
     expect(AppState.spectrumMode, SpectrumMode.waveform);
     expect(AppState.progressStyle, MD3ProgressStyle.segmented);
     expect(AppState.widgetLayout, WidgetLayout.vertical);
+    expect(AppState.componentSizeMode, ComponentSizeMode.custom);
+    expect(AppState.customComponentScale, 1.31);
     expect(AppState.isAlwaysOnTop, isFalse);
     expect(AppState.isMousePassthrough, isTrue);
   });
@@ -208,5 +214,96 @@ void main() {
 
     expect(decodeSpectrumPacket(bytes, expectedBandCount: 32), isNull);
     expect(decodeSpectrumPacket(Uint8List(8), expectedBandCount: 32), isNull);
+  });
+
+  test('组件固定尺寸档位保持可预期比例', () {
+    expect(AppState.scaleForSizeMode(ComponentSizeMode.small), 0.82);
+    expect(AppState.scaleForSizeMode(ComponentSizeMode.standard), 1.0);
+    expect(AppState.scaleForSizeMode(ComponentSizeMode.large), 1.22);
+
+    AppState.customComponentScale = 1.37;
+    expect(AppState.scaleForSizeMode(ComponentSizeMode.custom), 1.37);
+  });
+
+  test('组件尺寸动画先移动线框，300ms 后才移动内容', () {
+    expect(ComponentSizeMotion.frameProgress(0), 0);
+    expect(ComponentSizeMotion.contentProgress(0), 0);
+    expect(ComponentSizeMotion.frameProgress(0.45), greaterThan(0.9));
+    expect(ComponentSizeMotion.contentProgress(0.45), 0);
+    expect(ComponentSizeMotion.contentProgress(0.75), greaterThan(0));
+    expect(ComponentSizeMotion.frameProgress(1), 1);
+    expect(ComponentSizeMotion.contentProgress(1), 1);
+  });
+
+  testWidgets('component size stage preserves its design canvas when shrunk', (
+    tester,
+  ) async {
+    const stageKey = ValueKey('component-stage');
+    const designKey = ValueKey('design-canvas');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: ComponentSizeStage(
+            key: stageKey,
+            frameWidth: 240,
+            frameHeight: 90,
+            designWidth: 480,
+            designHeight: 180,
+            contentScale: 0.5,
+            alignment: Alignment.topLeft,
+            decoration: const BoxDecoration(),
+            frameAnimationDuration: Duration.zero,
+            frameAnimationCurve: Curves.linear,
+            child: const SizedBox(key: designKey),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.getSize(find.byKey(designKey)), const Size(480, 180));
+    expect(
+      tester.getRect(find.byKey(designKey)),
+      tester.getRect(find.byKey(stageKey)),
+    );
+  });
+
+  test('viewport safety fit never forces an oversized minimum scale', () {
+    final scale = ComponentSizeMotion.fitScale(
+      viewport: const Size(480, 176),
+      design: const Size(340, 584),
+      maximumScale: AppState.maximumComponentScale,
+    );
+
+    expect(scale, closeTo(176 / 584, 0.000001));
+    expect(scale, lessThan(AppState.minimumComponentScale));
+  });
+
+  test('locked resize preserves aspect ratio from the bottom-right corner', () {
+    final target = LockedAspectResizeGeometry.targetBounds(
+      startBounds: const Rect.fromLTWH(100, 100, 480, 240),
+      designSize: const Size(480, 240),
+      edge: LockedResizeEdge.bottomRight,
+      dragDelta: const Offset(120, 60),
+      minimumScale: 0.72,
+      maximumScale: 1.5,
+    );
+
+    expect(target, const Rect.fromLTWH(100, 100, 600, 300));
+    expect(target.width / target.height, 2.0);
+  });
+
+  test('locked resize anchors the opposite edge and clamps its scale', () {
+    final target = LockedAspectResizeGeometry.targetBounds(
+      startBounds: const Rect.fromLTWH(100, 100, 480, 240),
+      designSize: const Size(480, 240),
+      edge: LockedResizeEdge.left,
+      dragDelta: const Offset(300, 0),
+      minimumScale: 0.72,
+      maximumScale: 1.5,
+    );
+
+    expect(target.right, closeTo(580, 0.000001));
+    expect(target.width, closeTo(480 * 0.72, 0.000001));
+    expect(target.height, closeTo(240 * 0.72, 0.000001));
   });
 }

@@ -1,5 +1,5 @@
 #define MyAppName "MD3 Music Widget"
-#define MyAppVersion "0.9.16"
+#define MyAppVersion "0.9.17"
 #define MyAppPublisher "syj"
 #define MyAppExeName "music_widget_flutter.exe"
 

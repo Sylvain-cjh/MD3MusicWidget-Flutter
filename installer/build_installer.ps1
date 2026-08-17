@@ -29,6 +29,6 @@ if (-not $Compiler -or -not (Test-Path $Compiler)) {
 & $Compiler $installerSource
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE." }
 
-$setup = Join-Path $PSScriptRoot 'output\MD3MusicWidget-Setup-0.9.16.exe'
+$setup = Join-Path $PSScriptRoot 'output\MD3MusicWidget-Setup-0.9.17.exe'
 if (-not (Test-Path $setup)) { throw 'Installer output was not created.' }
 Get-Item $setup | Select-Object FullName, Length, LastWriteTime

@@ -27,6 +27,8 @@ enum MD3ProgressStyle { linear, pill, segmented }
 
 enum WidgetLayout { horizontal, vertical }
 
+enum ComponentSizeMode { small, standard, large, custom }
+
 class AppState {
   static Process? csharpEngine;
   static int fetcherPid = 0;
@@ -202,6 +204,25 @@ class AppState {
   static WidgetLayout widgetLayout = WidgetLayout.horizontal;
   static bool get isVertical => widgetLayout == WidgetLayout.vertical;
 
+  static ComponentSizeMode componentSizeMode = ComponentSizeMode.standard;
+  static double customComponentScale = 1.0;
+  static const double minimumComponentScale = 0.72;
+  static const double maximumComponentScale = 1.50;
+
+  static double scaleForSizeMode(ComponentSizeMode mode) => switch (mode) {
+    ComponentSizeMode.small => 0.82,
+    ComponentSizeMode.standard => 1.0,
+    ComponentSizeMode.large => 1.22,
+    ComponentSizeMode.custom => customComponentScale.clamp(
+      minimumComponentScale,
+      maximumComponentScale,
+    ),
+  };
+
+  static double get componentScale => scaleForSizeMode(componentSizeMode);
+  static bool get isCustomComponentSize =>
+      componentSizeMode == ComponentSizeMode.custom;
+
   static const double _menuExtraSpace = 200.0;
   static const double cardMargin = 0.0;
   static double innerPlayerWidthOf(WidgetLayout l) =>
@@ -212,26 +233,42 @@ class AppState {
       spectrumMode == SpectrumMode.off ? 0.0 : 64.0;
   static double innerPlayerHeightOf(WidgetLayout l) =>
       corePlayerHeightOf(l) + spectrumPanelExtentOf(l);
-  static double baseWindowWidthOf(WidgetLayout l) =>
+  static double unscaledBaseWindowWidthOf(WidgetLayout l) =>
       innerPlayerWidthOf(l) + cardMargin * 2;
-  static double baseWindowHeightOf(WidgetLayout l) =>
+  static double unscaledBaseWindowHeightOf(WidgetLayout l) =>
       innerPlayerHeightOf(l) + cardMargin * 2;
+  static double baseWindowWidthOf(WidgetLayout l) =>
+      unscaledBaseWindowWidthOf(l);
+  static double baseWindowHeightOf(WidgetLayout l) =>
+      unscaledBaseWindowHeightOf(l);
   static const double innerSettingsPanelHeight = 460.0;
   static const double innerSettingsSideWidth = 360.0;
   static double expandedWindowWidthOf(WidgetLayout l) =>
+      unscaledExpandedWindowWidthOf(l);
+  static double expandedWindowHeightOf(WidgetLayout l) =>
+      unscaledExpandedWindowHeightOf(l);
+  static double unscaledExpandedWindowWidthOf(WidgetLayout l) =>
       l == WidgetLayout.vertical
       ? innerPlayerWidthOf(l) + innerSettingsSideWidth + cardMargin * 2
-      : baseWindowWidthOf(l);
-  static double expandedWindowHeightOf(WidgetLayout l) =>
+      : unscaledBaseWindowWidthOf(l);
+  static double unscaledExpandedWindowHeightOf(WidgetLayout l) =>
       l == WidgetLayout.vertical
-      ? baseWindowHeightOf(l)
+      ? unscaledBaseWindowHeightOf(l)
       : innerPlayerHeightOf(l) + innerSettingsPanelHeight + cardMargin * 2;
-  static double get playerWidth => baseWindowWidthOf(widgetLayout);
-  static double get baseWindowWidth => baseWindowWidthOf(widgetLayout);
-  static double get baseWindowHeight => baseWindowHeightOf(widgetLayout);
-  static double get expandedWindowWidth => expandedWindowWidthOf(widgetLayout);
+  static double windowBaseWidthOf(WidgetLayout l) =>
+      baseWindowWidthOf(l) * componentScale;
+  static double windowBaseHeightOf(WidgetLayout l) =>
+      baseWindowHeightOf(l) * componentScale;
+  static double windowExpandedWidthOf(WidgetLayout l) =>
+      expandedWindowWidthOf(l) * componentScale;
+  static double windowExpandedHeightOf(WidgetLayout l) =>
+      expandedWindowHeightOf(l) * componentScale;
+  static double get playerWidth => windowBaseWidthOf(widgetLayout);
+  static double get baseWindowWidth => windowBaseWidthOf(widgetLayout);
+  static double get baseWindowHeight => windowBaseHeightOf(widgetLayout);
+  static double get expandedWindowWidth => windowExpandedWidthOf(widgetLayout);
   static double get expandedWindowHeight =>
-      expandedWindowHeightOf(widgetLayout);
+      windowExpandedHeightOf(widgetLayout);
   static double get settingsWindowWidth => expandedWindowWidthOf(widgetLayout);
   static const double settingsPanelHeight = innerSettingsPanelHeight;
   static const double settingsSideWidth = innerSettingsSideWidth;
@@ -246,8 +283,10 @@ class AppState {
   
   static const double canvasWidth = 700.0;
   static const double canvasHeight = 700.0;
-  static double get menuWindowWidth => baseWindowWidth + _menuExtraSpace;
-  static double get menuExtraSpace => _menuExtraSpace;
+  static double get menuWindowWidth =>
+      baseWindowWidth + _menuExtraSpace * componentScale;
+  static double get menuExtraSpace => _menuExtraSpace * componentScale;
+  static double get unscaledMenuExtraSpace => _menuExtraSpace;
   static double glowHeaderHeightOf(WidgetLayout l) =>
       l == WidgetLayout.vertical ? 360.0 : corePlayerHeightOf(l);
   static double get glowHeaderHeight => glowHeaderHeightOf(widgetLayout);
@@ -529,6 +568,14 @@ class AppState {
           snapshot['widgetLayout'],
           WidgetLayout.horizontal,
         );
+        componentSizeMode = _enumFromName(
+          ComponentSizeMode.values,
+          snapshot['componentSizeMode'],
+          ComponentSizeMode.standard,
+        );
+        customComponentScale = snapshot['customComponentScale'] is num
+            ? (snapshot['customComponentScale'] as num).toDouble()
+            : 1.0;
         isAlwaysOnTop = snapshot['isAlwaysOnTop'] is bool
             ? snapshot['isAlwaysOnTop'] as bool
             : true;
@@ -541,6 +588,10 @@ class AppState {
 
       titleWeightIndex = titleWeightIndex.clamp(0, 8);
       artistWeightIndex = artistWeightIndex.clamp(0, 8);
+      customComponentScale = customComponentScale.clamp(
+        minimumComponentScale,
+        maximumComponentScale,
+      );
       await _restoreCustomFonts();
     } catch (_) {}
   }
@@ -596,6 +647,16 @@ class AppState {
       p.getInt('widgetLayout'),
       WidgetLayout.horizontal,
     );
+    componentSizeMode = _enumFromIndex(
+      ComponentSizeMode.values,
+      p.getInt('componentSizeMode'),
+      ComponentSizeMode.standard,
+    );
+    customComponentScale =
+        p
+            .getDouble('customComponentScale')
+            ?.clamp(minimumComponentScale, maximumComponentScale) ??
+        1.0;
     isAlwaysOnTop = p.getBool('isAlwaysOnTop') ?? true;
     isMousePassthrough = p.getBool('isMousePassthrough') ?? false;
   }
@@ -618,6 +679,8 @@ class AppState {
     'playButtonShape': playButtonShape.name,
     'nextButtonShape': nextButtonShape.name,
     'widgetLayout': widgetLayout.name,
+    'componentSizeMode': componentSizeMode.name,
+    'customComponentScale': customComponentScale,
     'isAlwaysOnTop': isAlwaysOnTop,
     'isMousePassthrough': isMousePassthrough,
   };

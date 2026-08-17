@@ -137,15 +137,17 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     with SingleTickerProviderStateMixin {
   late AnimationController _revealController;
   late Animation<double> _revealAnimation;
+  late bool _glowLayerVisible;
 
   @override
   void initState() {
     super.initState();
     AppState.backgroundRevision.addListener(_handleBackgroundChanged);
+    _glowLayerVisible = AppState.enableGlow;
     _revealController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
-    );
+    )..addStatusListener(_handleRevealStatus);
     _revealAnimation = CurvedAnimation(
       parent: _revealController,
       curve: Curves.easeOutCubic,
@@ -155,9 +157,19 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     }
   }
 
+  void _handleRevealStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed &&
+        !AppState.enableGlow &&
+        _glowLayerVisible &&
+        mounted) {
+      setState(() => _glowLayerVisible = false);
+    }
+  }
+
   void _handleBackgroundChanged() {
     if (!mounted) return;
     if (AppState.enableGlow) {
+      _glowLayerVisible = true;
       _revealController.forward();
     } else {
       _revealController.reverse();
@@ -184,6 +196,92 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     AppState.backgroundRevision.removeListener(_handleBackgroundChanged);
     _revealController.dispose();
     super.dispose();
+  }
+
+  Widget _buildWaterfallGlow(
+    ImageProvider bgProvider,
+    String coverKey,
+    double canvasW,
+    double canvasH,
+    double headerH,
+  ) {
+    return Stack(
+      key: const ValueKey('waterfall-glow'),
+      fit: StackFit.expand,
+      children: [
+        Positioned(
+          top: (canvasH / 2) + (headerH / 2) - 1,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: FittedBox(
+            fit: BoxFit.fill,
+            clipBehavior: Clip.hardEdge,
+            child: SizedBox(
+              width: canvasW,
+              height: 1,
+              child: OverflowBox(
+                maxHeight: headerH,
+                minHeight: headerH,
+                alignment: Alignment.bottomCenter,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 800),
+                  child: Image(
+                    key: ValueKey('${coverKey}_stretch'),
+                    image: bgProvider,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.topCenter,
+                    width: canvasW,
+                    filterQuality: FilterQuality.medium,
+                    gaplessPlayback: true,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: (canvasH / 2) - (headerH / 2),
+          left: 0,
+          right: 0,
+          height: headerH,
+          child: ShaderMask(
+            blendMode: BlendMode.dstIn,
+            shaderCallback: (bounds) => const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.white, Colors.white, Colors.transparent],
+              stops: [0.0, 0.85, 1.0],
+            ).createShader(bounds),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 800),
+              child: Image(
+                key: ValueKey('${coverKey}_glow'),
+                image: bgProvider,
+                fit: BoxFit.cover,
+                alignment: Alignment.topCenter,
+                filterQuality: FilterQuality.medium,
+                gaplessPlayback: true,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWallpaperGlow(ImageProvider bgProvider, String coverKey) {
+    return AnimatedSwitcher(
+      key: const ValueKey('wallpaper-glow'),
+      duration: const Duration(milliseconds: 800),
+      child: Image(
+        key: ValueKey('${coverKey}_wallpaper'),
+        image: bgProvider,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.medium,
+        gaplessPlayback: true,
+      ),
+    );
   }
 
   @override
@@ -241,7 +339,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
             ),
           ),
 
-          if (bgProvider != null)
+          if (bgProvider != null && _glowLayerVisible)
             Positioned.fill(
               child: OverflowBox(
                 minWidth: canvasW,
@@ -269,115 +367,134 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                           sigmaY: 80,
                           tileMode: TileMode.clamp,
                         ),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            AnimatedOpacity(
-                              opacity: AppState.glowMode == GlowMode.waterfall
-                                  ? 1.0
-                                  : 0.0,
-                              duration: const Duration(milliseconds: 600),
-                              curve: Curves.easeInOutCubic,
-                              child: Stack(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 600),
+                          switchInCurve: Curves.easeInOutCubic,
+                          switchOutCurve: Curves.easeInOutCubic,
+                          layoutBuilder: (currentChild, previousChildren) =>
+                              Stack(
                                 fit: StackFit.expand,
-                                children: [
-                                  Positioned(
-                                    top:
-                                        (canvasH / 2) -
-                                        (headerH / 2) +
-                                        headerH -
-                                        1,
-                                    left: 0,
-                                    right: 0,
-                                    bottom: 0,
-                                    child: FittedBox(
-                                      fit: BoxFit.fill,
-                                      clipBehavior: Clip.hardEdge,
-                                      child: SizedBox(
-                                        width: canvasW,
-                                        height: 1,
-                                        child: OverflowBox(
-                                          maxHeight: headerH,
-                                          minHeight: headerH,
-                                          alignment: Alignment.bottomCenter,
-                                          child: AnimatedSwitcher(
-                                            duration: const Duration(
-                                              milliseconds: 800,
-                                            ),
-                                            
-                                            child: Image(
-                                              key: ValueKey(
-                                                '${coverKey}_stretch',
-                                              ),
-                                              image: bgProvider,
-                                              fit: BoxFit.cover,
-                                              alignment: Alignment.topCenter,
-                                              width: canvasW,
-                                              filterQuality:
-                                                  FilterQuality.medium,
-                                              gaplessPlayback: true,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  Positioned(
-                                    top: (canvasH / 2) - (headerH / 2),
-                                    left: 0,
-                                    right: 0,
-                                    height: headerH,
-                                    child: ShaderMask(
-                                      blendMode: BlendMode.dstIn,
-                                      shaderCallback: (bounds) =>
-                                          const LinearGradient(
-                                            begin: Alignment.topCenter,
-                                            end: Alignment.bottomCenter,
-                                            colors: [
-                                              Colors.white,
-                                              Colors.white,
-                                              Colors.transparent,
-                                            ],
-                                            stops: [0.0, 0.85, 1.0],
-                                          ).createShader(bounds),
-                                      child: AnimatedSwitcher(
-                                        duration: const Duration(
-                                          milliseconds: 800,
-                                        ),
-                                        
-                                        child: Image(
-                                          key: ValueKey('${coverKey}_glow'),
-                                          image: bgProvider,
-                                          fit: BoxFit.cover,
-                                          alignment: Alignment.topCenter,
-                                          filterQuality: FilterQuality.medium,
-                                          gaplessPlayback: true,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                                children: [...previousChildren, ?currentChild],
                               ),
-                            ),
-                            AnimatedOpacity(
-                              opacity: AppState.glowMode == GlowMode.wallpaper
-                                  ? 1.0
-                                  : 0.0,
-                              duration: const Duration(milliseconds: 600),
-                              curve: Curves.easeInOutCubic,
-                              child: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 800),
-                                
-                                child: Image(
-                                  key: ValueKey('${coverKey}_wallpaper'),
-                                  image: bgProvider,
-                                  fit: BoxFit.cover,
-                                  filterQuality: FilterQuality.medium,
-                                  gaplessPlayback: true,
-                                ),
-                              ),
-                            ),
-                          ],
+                          child: AppState.glowMode == GlowMode.waterfall
+                              ? _buildWaterfallGlow(
+                                  bgProvider,
+                                  coverKey,
+                                  canvasW,
+                                  canvasH,
+                                  headerH,
+                                )
+                              : _buildWallpaperGlow(bgProvider, coverKey),
+                           
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                         ),
                       ),
                     ),

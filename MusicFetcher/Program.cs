@@ -124,6 +124,7 @@ namespace MusicFetcher
             double lastDurationMs = -1;
             long trackVersion = 0;
             long lastPublishedAtMs = 0;
+            int nextPollDelayMs = 650;
 
             while (true)
             {
@@ -145,6 +146,7 @@ namespace MusicFetcher
                         var playback = session.GetPlaybackInfo();
 
                         bool isPlaying = playback.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+                        nextPollDelayMs = isPlaying ? 250 : 650;
                         string title = props.Title ?? "未知歌曲";
                         string artist = props.Artist ?? "未知歌手";
                         string sourceApp = session.SourceAppUserModelId ?? "";
@@ -260,6 +262,7 @@ namespace MusicFetcher
                     }
                     else
                     {
+                        nextPollDelayMs = 900;
                         bool enteringNoMedia = lastTitle != "NO_MEDIA";
                         if (enteringNoMedia || now - lastPublishedAtMs >= 500)
                         {
@@ -297,9 +300,10 @@ namespace MusicFetcher
                 {
                     LogSmtcFailure(ex);
                     _manager = null;
+                    nextPollDelayMs = 650;
                 }
 
-                await Task.Delay(160);
+                await Task.Delay(nextPollDelayMs);
             }
         }
 

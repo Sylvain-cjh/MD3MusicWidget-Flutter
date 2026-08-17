@@ -118,6 +118,24 @@ class _SettingsPanelState extends State<SettingsPanel> {
                         },
                       ),
                       _buildDivider(),
+                      _buildDropdownRow<ComponentSizeMode>(
+                        "组件大小",
+                        AppState.isCustomComponentSize
+                            ? "边框拖动并锁定比例 · 当前 ${(AppState.customComponentScale * 100).round()}%"
+                            : "三种固定尺寸，或锁定比例自由缩放",
+                        AppState.componentSizeMode,
+                        (val) {
+                          if (val == ComponentSizeMode.custom &&
+                              !AppState.isCustomComponentSize) {
+                            AppState.customComponentScale =
+                                AppState.componentScale;
+                          }
+                          setState(() => AppState.componentSizeMode = val);
+                          widget.onLayoutChanged();
+                        },
+                        _componentSizeEntries(),
+                      ),
+                      _buildDivider(),
                       _buildSwitchRow(
                         "总在最前",
                         "将挂件置于其他窗口之上",
@@ -504,6 +522,13 @@ class _SettingsPanelState extends State<SettingsPanel> {
     DropdownMenuEntry(value: MD3ProgressStyle.linear, label: '标准线性 · MD3'),
     DropdownMenuEntry(value: MD3ProgressStyle.pill, label: '圆角胶囊'),
     DropdownMenuEntry(value: MD3ProgressStyle.segmented, label: '动态分段'),
+  ];
+
+  List<DropdownMenuEntry<ComponentSizeMode>> _componentSizeEntries() => const [
+    DropdownMenuEntry(value: ComponentSizeMode.small, label: '小 · 82%'),
+    DropdownMenuEntry(value: ComponentSizeMode.standard, label: '标准 · 100%'),
+    DropdownMenuEntry(value: ComponentSizeMode.large, label: '大 · 122%'),
+    DropdownMenuEntry(value: ComponentSizeMode.custom, label: '自由缩放'),
   ];
 
   Widget _buildOptionalSetting({required bool visible, required Widget child}) {
