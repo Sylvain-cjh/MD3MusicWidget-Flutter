@@ -132,7 +132,7 @@ void main() {
     expect(AppState.trackTransitionRevision.value, before + 1);
   });
 
-  test('设置快照恢复普通窗口行为并安全重置鼠标穿透', () async {
+  test('设置快照使用枚举名称并恢复窗口行为', () async {
     SharedPreferences.setMockInitialValues({
       'settingsSnapshotV2': jsonEncode({
         'themeIsDark': false,
@@ -160,7 +160,7 @@ void main() {
     expect(AppState.componentSizeMode, ComponentSizeMode.custom);
     expect(AppState.customComponentScale, 1.31);
     expect(AppState.isAlwaysOnTop, isFalse);
-    expect(AppState.isMousePassthrough, isFalse);
+    expect(AppState.isMousePassthrough, isTrue);
   });
 
   test('损坏的设置快照会安全回退到旧版设置', () async {

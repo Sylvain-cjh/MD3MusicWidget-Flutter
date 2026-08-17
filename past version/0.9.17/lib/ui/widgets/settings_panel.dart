@@ -7,7 +7,6 @@ class SettingsPanel extends StatefulWidget {
   final VoidCallback onBackgroundChanged;
   final VoidCallback onLayoutChanged;
   final VoidCallback onWindowBehaviorChanged;
-  final bool isMousePassthroughAvailable;
 
   const SettingsPanel({
     super.key,
@@ -16,7 +15,6 @@ class SettingsPanel extends StatefulWidget {
     required this.onBackgroundChanged,
     required this.onLayoutChanged,
     required this.onWindowBehaviorChanged,
-    required this.isMousePassthroughAvailable,
   });
 
   @override
@@ -147,18 +145,16 @@ class _SettingsPanelState extends State<SettingsPanel> {
                           widget.onWindowBehaviorChanged();
                         },
                       ),
-                      if (widget.isMousePassthroughAvailable) ...[
-                        _buildDivider(),
-                        _buildSwitchRow(
-                          "鼠标穿透",
-                          "左键托盘图标可立即恢复鼠标交互",
-                          AppState.isMousePassthrough,
-                          (val) {
-                            setState(() => AppState.isMousePassthrough = val);
-                            widget.onWindowBehaviorChanged();
-                          },
-                        ),
-                      ],
+                      _buildDivider(),
+                      _buildSwitchRow(
+                        "鼠标穿透",
+                        "启用后可从系统托盘恢复鼠标交互",
+                        AppState.isMousePassthrough,
+                        (val) {
+                          setState(() => AppState.isMousePassthrough = val);
+                          widget.onWindowBehaviorChanged();
+                        },
+                      ),
                     ],
                   ),
 

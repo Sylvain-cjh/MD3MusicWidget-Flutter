@@ -22,15 +22,16 @@ void main() async {
     alwaysOnTop: AppState.isAlwaysOnTop,
   );
 
-  final windowReady = Completer<void>();
-  runApp(MusicWidgetApp(windowReady: windowReady.future));
+  runApp(const MusicWidgetApp());
 
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.setAsFrameless();
     await windowManager.setHasShadow(false);
     await windowManager.setAlwaysOnTop(AppState.isAlwaysOnTop);
-    await windowManager.setIgnoreMouseEvents(false, forward: true);
-    if (!windowReady.isCompleted) windowReady.complete();
+    await windowManager.setIgnoreMouseEvents(
+      AppState.isMousePassthrough,
+      forward: true,
+    );
     await windowManager.show();
     await windowManager.focus();
     await windowManager.setAspectRatio(0);
@@ -47,15 +48,13 @@ void main() async {
 }
 
 class MusicWidgetApp extends StatelessWidget {
-  final Future<void> windowReady;
-
-  const MusicWidgetApp({super.key, required this.windowReady});
+  const MusicWidgetApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: PlayerView(windowReady: windowReady),
+      home: PlayerView(),
     );
   }
 }

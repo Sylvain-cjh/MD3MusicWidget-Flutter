@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $releaseDir = Join-Path $projectRoot 'build\windows\x64\runner\Release'
-$setupPath = Join-Path $PSScriptRoot 'output\MD3MusicWidget-Setup-0.9.18.exe'
+$setupPath = Join-Path $PSScriptRoot 'output\MD3MusicWidget-Setup-0.9.17.exe'
 $certificatePath = Join-Path $PSScriptRoot 'output\MD3MusicWidget-CodeSigning.cer'
 $subject = 'CN=MD3 Music Widget, O=syj'
 

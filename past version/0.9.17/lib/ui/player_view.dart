@@ -17,9 +17,7 @@ import 'widgets/slide_menu.dart';
 import 'widgets/settings_panel.dart';
 
 class PlayerView extends StatefulWidget {
-  final Future<void>? windowReady;
-
-  const PlayerView({super.key, this.windowReady});
+  const PlayerView({super.key});
   @override
   State<PlayerView> createState() => _PlayerViewState();
 }
@@ -91,7 +89,6 @@ class _PlayerViewState extends State<PlayerView>
 
   bool _isSettingsOpen = false;
   bool _isMenuOpen = false;
-  bool _isSystemTrayReady = false;
   String _menuSide = "right";
   double _menuTop = 12.0;
 
@@ -140,92 +137,25 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   Future<void> _initSystemTray() async {
-    try {
-      final String iconAsset = Platform.isWindows
-          ? 'images/tray_icon.ico'
-          : 'images/tray_icon.png';
-      if (Platform.isWindows) {
-        final String bundledIconPath = [
-          File(Platform.resolvedExecutable).parent.path,
-          'data',
-          'flutter_assets',
-          'images',
-          'tray_icon.ico',
-        ].join(Platform.pathSeparator);
-        if (!File(bundledIconPath).existsSync()) {
-          throw FileSystemException('托盘图标资源不存在', bundledIconPath);
-        }
-      }
-
-      await tm.trayManager.setIcon(iconAsset);
-      await tm.trayManager.setToolTip('MD3 Music Widget');
-      final tm.Menu menu = tm.Menu(
-        items: [
-          tm.MenuItem(key: 'restore_interaction', label: '恢复鼠标交互'),
-          tm.MenuItem.separator(),
-          tm.MenuItem(key: 'rescue_exit', label: '完全退出挂件'),
-        ],
-      );
-      await tm.trayManager.setContextMenu(menu);
-      if (!mounted) return;
-      setState(() => _isSystemTrayReady = true);
-
-      await (widget.windowReady ?? Future<void>.value());
-      if (!mounted) return;
-      await windowManager.setIgnoreMouseEvents(
-        AppState.isMousePassthrough,
-        forward: true,
-      );
-    } catch (error, stackTrace) {
-      debugPrint('系统托盘初始化失败: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      await _restoreMouseInteraction(flushSettings: true);
-    }
-  }
-
-  Future<void> _showTrayContextMenu() async {
-    if (!_isSystemTrayReady) {
-      await _restoreMouseInteraction(flushSettings: true);
-      return;
-    }
-    try {
-      await tm.trayManager.popUpContextMenu();
-    } catch (error) {
-      debugPrint('系统托盘菜单打开失败: $error');
-      await _restoreMouseInteraction(flushSettings: true);
-    }
-  }
-
-  Future<void> _restoreMouseInteraction({bool flushSettings = false}) async {
-    AppState.isMousePassthrough = false;
-    try {
-      await windowManager.setIgnoreMouseEvents(false, forward: true);
-    } catch (error) {
-      debugPrint('恢复鼠标交互失败: $error');
-    }
-    if (mounted) setState(() {});
-    await AppState.saveSettings();
-    if (flushSettings) await AppState.flushSettings();
-  }
-
-  @override
-  void onTrayIconMouseDown() {
-    if (AppState.isMousePassthrough) {
-      unawaited(_restoreMouseInteraction(flushSettings: true));
-    } else {
-      unawaited(_showTrayContextMenu());
-    }
-  }
-
-  @override
-  void onTrayIconRightMouseDown() {
-    unawaited(_showTrayContextMenu());
+    await tm.trayManager.setIcon(
+      Platform.isWindows ? 'images/tray_icon.ico' : 'images/tray_icon.png',
+    );
+    tm.Menu menu = tm.Menu(
+      items: [
+        tm.MenuItem(key: 'restore_interaction', label: '恢复鼠标交互'),
+        tm.MenuItem.separator(),
+        tm.MenuItem(key: 'rescue_exit', label: '完全退出挂件'),
+      ],
+    );
+    await tm.trayManager.setContextMenu(menu);
   }
 
   @override
   void onTrayMenuItemClick(tm.MenuItem menuItem) {
     if (menuItem.key == 'restore_interaction') {
-      unawaited(_restoreMouseInteraction(flushSettings: true));
+      AppState.isMousePassthrough = false;
+      unawaited(windowManager.setIgnoreMouseEvents(false));
+      unawaited(AppState.saveSettings());
     } else if (menuItem.key == 'rescue_exit') {
       windowManager.hide();
       unawaited(_exitApplication());
@@ -1071,10 +1001,6 @@ class _PlayerViewState extends State<PlayerView>
 
   Future<void> _handleWindowBehaviorChanged() async {
     await windowManager.setAlwaysOnTop(AppState.isAlwaysOnTop);
-    if (AppState.isMousePassthrough && !_isSystemTrayReady) {
-      await _restoreMouseInteraction(flushSettings: true);
-      return;
-    }
     await windowManager.setIgnoreMouseEvents(
       AppState.isMousePassthrough,
       forward: true,
@@ -1174,7 +1100,6 @@ class _PlayerViewState extends State<PlayerView>
 
   Widget _buildSettingsPanel() {
     return SettingsPanel(
-      isMousePassthroughAvailable: _isSystemTrayReady,
       onThemeChanged: () {
         setState(() {});
         unawaited(_updateColorScheme());

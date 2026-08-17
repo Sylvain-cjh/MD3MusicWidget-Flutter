@@ -592,7 +592,6 @@ class AppState {
         minimumComponentScale,
         maximumComponentScale,
       );
-      isMousePassthrough = false;
       await _restoreCustomFonts();
     } catch (_) {}
   }
