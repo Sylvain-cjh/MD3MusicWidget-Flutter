@@ -13,8 +13,101 @@ import 'package:music_widget_flutter/core/app_state.dart';
 import 'package:music_widget_flutter/core/spectrum_packet.dart';
 import 'package:music_widget_flutter/ui/animations/component_size_motion.dart';
 import 'package:music_widget_flutter/ui/widgets/locked_aspect_resize_area.dart';
+import 'package:music_widget_flutter/ui/widgets/md3_anchored_select.dart';
 
 void main() {
+  testWidgets('MD3 选择菜单围绕当前项展开并返回新选择', (tester) async {
+    int selected = 1;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(colorSchemeSeed: Colors.green, useMaterial3: true),
+        home: Scaffold(
+          body: Center(
+            child: Md3AnchoredSelect<int>(
+              value: selected,
+              entries: const [
+                DropdownMenuEntry(value: 0, label: '小'),
+                DropdownMenuEntry(value: 1, label: '标准'),
+                DropdownMenuEntry(value: 2, label: '大'),
+              ],
+              onSelected: (value) => selected = value,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final Offset anchorCenter = tester.getCenter(
+      find.byType(Md3AnchoredSelect<int>),
+    );
+    await tester.tap(find.byType(Md3AnchoredSelect<int>));
+    await tester.pumpAndSettle();
+
+    expect(find.text('标准'), findsNWidgets(2));
+    final Offset selectedItemCenter = tester.getCenter(find.text('标准').last);
+    expect(selectedItemCenter.dy, closeTo(anchorCenter.dy, 1.0));
+
+    await tester.tap(find.text('大'));
+    await tester.pumpAndSettle();
+    expect(selected, 2);
+  });
+
+  testWidgets('MD3 选择菜单继承外层组件的真实缩放尺寸', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(colorSchemeSeed: Colors.green, useMaterial3: true),
+        home: Scaffold(
+          body: Center(
+            child: Transform.scale(
+              scale: 1.22,
+              child: Md3AnchoredSelect<int>(
+                value: 1,
+                entries: const [
+                  DropdownMenuEntry(value: 0, label: '小'),
+                  DropdownMenuEntry(value: 1, label: '标准'),
+                  DropdownMenuEntry(value: 2, label: '大'),
+                ],
+                onSelected: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final RenderBox anchor = tester.renderObject(
+      find.byType(Md3AnchoredSelect<int>),
+    );
+    final Offset anchorTopLeft = anchor.localToGlobal(Offset.zero);
+    final Offset anchorBottomRight = anchor.localToGlobal(
+      anchor.size.bottomRight(Offset.zero),
+    );
+    final Size paintedAnchorSize = Size(
+      anchorBottomRight.dx - anchorTopLeft.dx,
+      anchorBottomRight.dy - anchorTopLeft.dy,
+    );
+
+    await tester.tap(find.byType(Md3AnchoredSelect<int>));
+    await tester.pump();
+
+    final Size menuSize = tester.getSize(
+      find.byKey(const ValueKey('md3-select-menu-surface')),
+    );
+    expect(menuSize.width, closeTo(paintedAnchorSize.width, 0.01));
+
+    final ClipPath reveal = tester.widget(
+      find.byKey(const ValueKey('md3-select-reveal')),
+    );
+    final Rect initialRevealBounds = reveal.clipper!
+        .getClip(menuSize)
+        .getBounds();
+    expect(initialRevealBounds.height, closeTo(paintedAnchorSize.height, 0.01));
+
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('大'));
+    await tester.pumpAndSettle();
+  });
+
   test('getShapeRadius 为每种形状返回正确的圆角', () {
     const double h = 58;
 
@@ -225,14 +318,35 @@ void main() {
     expect(AppState.scaleForSizeMode(ComponentSizeMode.custom), 1.37);
   });
 
-  test('组件尺寸动画先移动线框，300ms 后才移动内容', () {
-    expect(ComponentSizeMotion.frameProgress(0), 0);
-    expect(ComponentSizeMotion.contentProgress(0), 0);
-    expect(ComponentSizeMotion.frameProgress(0.45), greaterThan(0.9));
-    expect(ComponentSizeMotion.contentProgress(0.45), 0);
-    expect(ComponentSizeMotion.contentProgress(0.75), greaterThan(0));
-    expect(ComponentSizeMotion.frameProgress(1), 1);
-    expect(ComponentSizeMotion.contentProgress(1), 1);
+  test('组件尺寸使用快速错峰的临界阻尼弹簧', () {
+    final simulation = ComponentSizeMotion.frameSimulation(
+      begin: 0.82,
+      end: 1.22,
+    );
+    final firstStep = simulation.x(0.04) - simulation.x(0);
+    final secondStep = simulation.x(0.08) - simulation.x(0.04);
+
+    expect(ComponentSizeMotion.contentDelay, const Duration(milliseconds: 150));
+    expect(ComponentSizeMotion.scaleTolerance.distance, 0.0005);
+    expect(ComponentSizeMotion.scaleTolerance.velocity, 0.01);
+    expect(firstStep, greaterThan(0));
+    expect(secondStep, greaterThan(firstStep));
+    expect(simulation.x(0.45), closeTo(1.22, 0.005));
+  });
+
+  test('组件尺寸弹簧可从中间状态继承速度并连续重定向', () {
+    final outgoing = ComponentSizeMotion.frameSimulation(begin: 1.0, end: 1.22);
+    final currentScale = outgoing.x(0.1);
+    final currentVelocity = outgoing.dx(0.1);
+    final redirected = ComponentSizeMotion.frameSimulation(
+      begin: currentScale,
+      end: 0.82,
+      velocity: currentVelocity,
+    );
+
+    expect(redirected.x(0), closeTo(currentScale, 0.000001));
+    expect(redirected.dx(0), closeTo(currentVelocity, 0.000001));
+    expect(redirected.x(0.6), closeTo(0.82, 0.005));
   });
 
   testWidgets('component size stage preserves its design canvas when shrunk', (
@@ -249,6 +363,7 @@ void main() {
             frameHeight: 90,
             designWidth: 480,
             designHeight: 180,
+            frameScale: 0.5,
             contentScale: 0.5,
             alignment: Alignment.topLeft,
             decoration: const BoxDecoration(),

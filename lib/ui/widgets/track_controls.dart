@@ -112,8 +112,22 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
 
   @override
   Widget build(BuildContext context) {
-    final textColor = AppState.currentScheme.onSurface;
-    final subTextColor = AppState.currentScheme.onSurfaceVariant;
+    final bool textOverArtwork = AppState.enableGlow;
+    final Color textColor = textOverArtwork
+        ? Colors.white
+        : AppState.currentScheme.onSurface;
+    final Color subTextColor = textOverArtwork
+        ? Colors.white.withValues(alpha: 0.78)
+        : AppState.currentScheme.onSurfaceVariant;
+    final List<Shadow>? artworkTextShadow = textOverArtwork
+        ? [
+            Shadow(
+              color: Colors.black.withValues(alpha: 0.42),
+              blurRadius: 8,
+              offset: const Offset(0, 1),
+            ),
+          ]
+        : null;
     final bool isV = widget.isVertical;
     final double uiOpacity = AppState.isPlaying ? 1.0 : 0.5;
     final bool hasProgress = _hasTimeline;
@@ -346,6 +360,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                       fontSize: titleFontSize,
                       fontWeight: AppState.titleWeight,
                       color: textColor.withValues(alpha: uiOpacity),
+                      shadows: artworkTextShadow,
                       fontFamilyFallback: AppState.textFontFallback,
                       letterSpacing: 0.0,
                       height: 1.2,
@@ -399,6 +414,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                       fontSize: artistFontSize,
                       fontWeight: AppState.artistWeight,
                       color: subTextColor.withValues(alpha: uiOpacity),
+                      shadows: artworkTextShadow,
                       fontFamilyFallback: AppState.textFontFallback,
                       letterSpacing: 0.0,
                       height: 1.2,

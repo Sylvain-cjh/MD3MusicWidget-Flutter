@@ -205,12 +205,17 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     double canvasH,
     double headerH,
   ) {
+    final double seamOverlap = (headerH * 0.16).clamp(24.0, 48.0);
+    final double headerBottom = (canvasH / 2) + (headerH / 2);
     return Stack(
       key: const ValueKey('waterfall-glow'),
       fit: StackFit.expand,
       children: [
         Positioned(
-          top: (canvasH / 2) + (headerH / 2) - 1,
+          
+          
+          
+          top: headerBottom - seamOverlap,
           left: 0,
           right: 0,
           bottom: 0,

@@ -26,8 +26,6 @@ class PlayerView extends StatefulWidget {
 
 class _PlayerViewState extends State<PlayerView>
     with WindowListener, tm.TrayListener, TickerProviderStateMixin {
-  static const Size _unconstrainedMaximumWindowSize = Size(16384, 16384);
-
   Timer? _pollingTimer;
   Timer? _spectrumTimer;
   final HttpClient _httpBaseClient = HttpClient();
@@ -98,8 +96,12 @@ class _PlayerViewState extends State<PlayerView>
   String _settingsSide = "right";
 
   late AnimationController _menuAnimController;
-  double _frameScale = AppState.componentScale;
-  double _contentScale = AppState.componentScale;
+  late AnimationController _frameScaleController;
+  late AnimationController _contentScaleController;
+  late Listenable _componentSizeScaleListenable;
+  double _frameScaleVelocity = 0.0;
+  double _contentScaleVelocity = 0.0;
+  double _componentSizeStageScale = AppState.componentScale;
   bool _isComponentSizeTransitioning = false;
   bool _customScaleCommitScheduled = false;
   double? _pendingCustomScale;
@@ -123,6 +125,18 @@ class _PlayerViewState extends State<PlayerView>
       reverseDuration: const Duration(milliseconds: 200),
       vsync: this,
     );
+    _frameScaleController = AnimationController.unbounded(
+      value: AppState.componentScale,
+      vsync: this,
+    );
+    _contentScaleController = AnimationController.unbounded(
+      value: AppState.componentScale,
+      vsync: this,
+    );
+    _componentSizeScaleListenable = Listenable.merge([
+      _frameScaleController,
+      _contentScaleController,
+    ]);
     unawaited(_initSystemTray());
     unawaited(_bootEngineAndListen());
   }
@@ -136,7 +150,35 @@ class _PlayerViewState extends State<PlayerView>
     tm.trayManager.removeListener(this);
     _httpBaseClient.close(force: true);
     _menuAnimController.dispose();
+    _frameScaleController.dispose();
+    _contentScaleController.dispose();
     super.dispose();
+  }
+
+  double get _frameScale => _frameScaleController.value;
+  set _frameScale(double value) => _frameScaleController.value = value;
+
+  double get _contentScale => _contentScaleController.value;
+  set _contentScale(double value) => _contentScaleController.value = value;
+
+  TickerFuture _animateFrameScale(double target) {
+    return _frameScaleController.animateWith(
+      ComponentSizeMotion.frameSimulation(
+        begin: _frameScale,
+        end: target,
+        velocity: _frameScaleVelocity,
+      ),
+    );
+  }
+
+  TickerFuture _animateContentScale(double target) {
+    return _contentScaleController.animateWith(
+      ComponentSizeMotion.contentSimulation(
+        begin: _contentScale,
+        end: target,
+        velocity: _contentScaleVelocity,
+      ),
+    );
   }
 
   Future<void> _initSystemTray() async {
@@ -858,6 +900,14 @@ class _PlayerViewState extends State<PlayerView>
 
   int _beginWindowTransition() {
     _windowTransitionSerial++;
+    _frameScaleVelocity = _frameScaleController.isAnimating
+        ? _frameScaleController.velocity
+        : 0.0;
+    _contentScaleVelocity = _contentScaleController.isAnimating
+        ? _contentScaleController.velocity
+        : 0.0;
+    _frameScaleController.stop();
+    _contentScaleController.stop();
     _isComponentSizeTransitioning = false;
     _isTransitioning = true;
     return _windowTransitionSerial;
@@ -875,18 +925,17 @@ class _PlayerViewState extends State<PlayerView>
         : AppState.baseWindowHeightOf(layout),
   );
 
-  Future<void> _applyResizePolicy() async {
-    await _suspendResizePolicy();
-  }
-
-  Future<void> _suspendResizePolicy() async {
-    await windowManager.setAspectRatio(0);
-    await windowManager.setMinimumSize(const Size(0, 0));
-    await windowManager.setMaximumSize(_unconstrainedMaximumWindowSize);
-    await windowManager.setResizable(false);
+  bool _rectNearlyEquals(Rect first, Rect second) {
+    const double tolerance = 0.5;
+    return (first.left - second.left).abs() <= tolerance &&
+        (first.top - second.top).abs() <= tolerance &&
+        (first.width - second.width).abs() <= tolerance &&
+        (first.height - second.height).abs() <= tolerance;
   }
 
   Future<void> _applyComponentSizeToTarget(int serial) async {
+    final bool disableAnimations =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final Rect bounds = await windowManager.getBounds();
     final WidgetLayout targetLayout = AppState.widgetLayout;
     final bool targetSettingsOpen = _isSettingsOpen;
@@ -911,24 +960,62 @@ class _PlayerViewState extends State<PlayerView>
     );
     final Rect stage = bounds.expandToInclude(targetRect);
 
-    await _suspendResizePolicy();
-    _leftPadding = absCardLeft - stage.left;
-    await windowManager.setBounds(stage, animate: false);
-    if (!_isCurrentWindowTransition(serial)) return;
+    if (disableAnimations) {
+      setState(() {
+        _frameScale = targetScale;
+        _contentScale = targetScale;
+        _componentSizeStageScale = targetScale;
+        _leftPadding = targetLeftPadding;
+        _isComponentSizeTransitioning = false;
+      });
+      if (!_rectNearlyEquals(bounds, targetRect)) {
+        await windowManager.setBounds(targetRect, animate: false);
+      }
+      return;
+    } else {
+      _componentSizeStageScale = math.max(_frameScale, targetScale);
+      _leftPadding = absCardLeft - stage.left;
+      setState(() {
+        _isComponentSizeTransitioning = true;
+      });
 
-    setState(() {
-      _isComponentSizeTransitioning = true;
-      _frameScale = targetScale;
-      _contentScale = targetScale;
-    });
-    await WidgetsBinding.instance.endOfFrame;
-    if (!_isCurrentWindowTransition(serial)) return;
+      final Future<void> stageResize = _rectNearlyEquals(bounds, stage)
+          ? Future<void>.value()
+          : windowManager.setBounds(stage, animate: false);
+      await Future.wait<void>([
+        stageResize,
+        WidgetsBinding.instance.endOfFrame,
+      ]);
+      if (!_isCurrentWindowTransition(serial)) return;
+
+      final TickerFuture frameMotion = _animateFrameScale(targetScale);
+      final Future<void> contentMotion = () async {
+        await Future<void>.delayed(ComponentSizeMotion.contentDelay);
+        if (!_isCurrentWindowTransition(serial)) return;
+        await _animateContentScale(targetScale).orCancel;
+      }();
+      try {
+        await Future.wait<void>([frameMotion.orCancel, contentMotion]);
+      } on TickerCanceled {
+        return;
+      }
+      if (!_isCurrentWindowTransition(serial)) return;
+      setState(() {
+        _frameScale = targetScale;
+        _contentScale = targetScale;
+        _componentSizeStageScale = targetScale;
+      });
+    }
 
     _leftPadding = targetLeftPadding;
-    _isComponentSizeTransitioning = false;
-    if (mounted) setState(() {});
-    await windowManager.setBounds(targetRect, animate: false);
-    await _applyResizePolicy();
+    if (mounted) {
+      setState(() {
+        _isComponentSizeTransitioning = false;
+      });
+    }
+    if (!_rectNearlyEquals(stage, targetRect)) {
+      await windowManager.setBounds(targetRect, animate: false);
+    }
   }
 
   bool _isCurrentWindowTransition(int serial) {
@@ -1010,9 +1097,7 @@ class _PlayerViewState extends State<PlayerView>
       if (_isSettingsOpen) {
         _settingsSide = _menuSide;
       }
-      await _suspendResizePolicy();
       await _animateToTargetLayout(serial);
-      await _applyResizePolicy();
     } finally {
       if (_isCurrentWindowTransition(serial)) {
         setState(() => _isTransitioning = false);
@@ -1027,13 +1112,14 @@ class _PlayerViewState extends State<PlayerView>
       unawaited(AppState.saveSettings());
       AppState.notifyBackgroundChanged();
       final bool componentScaleChanged =
-          (AppState.componentScale - _contentScale).abs() > 0.0001;
+          (AppState.componentScale - _frameScale).abs() > 0.0001 ||
+          (AppState.componentScale - _contentScale).abs() > 0.0001 ||
+          _frameScaleController.isAnimating ||
+          _contentScaleController.isAnimating;
       if (componentScaleChanged) {
         await _applyComponentSizeToTarget(serial);
       } else {
-        await _suspendResizePolicy();
         await _animateToTargetLayout(serial);
-        await _applyResizePolicy();
       }
     } finally {
       if (_isCurrentWindowTransition(serial)) {
@@ -1085,7 +1171,6 @@ class _PlayerViewState extends State<PlayerView>
   Future<void> _openMenu(bool toLeft) async {
     if (_isSettingsOpen || _isTransitioning) return;
     try {
-      await _suspendResizePolicy();
       final bounds = await windowManager.getBounds();
       final double menuWindowHeight = AppState.baseWindowHeight;
       if (toLeft) {
@@ -1141,7 +1226,6 @@ class _PlayerViewState extends State<PlayerView>
         ),
         animate: false,
       );
-      await _applyResizePolicy();
     } catch (_) {}
   }
 
@@ -1279,18 +1363,19 @@ class _PlayerViewState extends State<PlayerView>
         _stageCustomScale(viewportScale);
       }
     }
-    final double frameWidth = containerW * renderFrameScale;
-    final double frameHeight = containerH * renderFrameScale;
+    final double stageScale = _isComponentSizeTransitioning
+        ? _componentSizeStageScale
+        : renderFrameScale;
+    final double frameWidth = containerW * stageScale;
+    final double frameHeight = containerH * stageScale;
     final Duration frameAnimationDuration =
         _isComponentSizeTransitioning || isLiveCustomResize
         ? Duration.zero
         : AppState.layoutSwitchDuration;
 
+    const Widget playerBackground = RepaintBoundary(child: DynamicBackground());
     Widget playerContent = Stack(
       children: [
-        Positioned.fill(
-          child: const RepaintBoundary(child: DynamicBackground()),
-        ),
         AnimatedPositioned(
           duration: AppState.layoutSwitchDuration,
           curve: AppState.layoutSwitchCurve,
@@ -1358,23 +1443,43 @@ class _PlayerViewState extends State<PlayerView>
       ],
     );
 
-    Widget mainStage = ComponentSizeStage(
-      frameWidth: frameWidth,
-      frameHeight: frameHeight,
-      designWidth: containerW,
-      designHeight: containerH,
-      contentScale: renderContentScale,
-      alignment: componentAlignment,
-      frameAnimationDuration: frameAnimationDuration,
-      frameAnimationCurve: AppState.layoutSwitchCurve,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28 * renderFrameScale),
-        border: Border.all(
-          color: AppState.currentScheme.outlineVariant.withValues(alpha: 0.4),
-          width: math.max(1.0, renderFrameScale),
-        ),
-      ),
+    Widget mainStage = AnimatedBuilder(
+      animation: _componentSizeScaleListenable,
       child: playerContent,
+      builder: (context, child) {
+        final bool transformOnly = _isComponentSizeTransitioning;
+        final double animatedFrameScale = transformOnly
+            ? _frameScale
+            : renderFrameScale;
+        final double animatedContentScale = transformOnly
+            ? _contentScale
+            : renderContentScale;
+        return ComponentSizeStage(
+          frameWidth: frameWidth,
+          frameHeight: frameHeight,
+          designWidth: containerW,
+          designHeight: containerH,
+          frameScale: animatedFrameScale,
+          contentScale: animatedContentScale,
+          alignment: componentAlignment,
+          frameAnimationDuration: frameAnimationDuration,
+          frameAnimationCurve: AppState.layoutSwitchCurve,
+          transformOnly: transformOnly,
+          background: playerBackground,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(
+              transformOnly ? 28.0 : 28.0 * animatedFrameScale,
+            ),
+            border: Border.all(
+              color: AppState.currentScheme.outlineVariant.withValues(
+                alpha: 0.4,
+              ),
+              width: transformOnly ? 1.0 : math.max(1.0, animatedFrameScale),
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
 
     if (AppState.isCustomComponentSize && !_isTransitioning && !_isMenuOpen) {

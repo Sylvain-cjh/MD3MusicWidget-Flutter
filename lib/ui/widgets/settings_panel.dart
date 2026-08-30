@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
+import 'md3_anchored_select.dart';
 
 class SettingsPanel extends StatefulWidget {
   final VoidCallback onThemeChanged;
@@ -54,6 +55,22 @@ class _SettingsPanelState extends State<SettingsPanel> {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final bool headingsOverArtwork = AppState.enableGlow;
+    final Color headingColor = headingsOverArtwork
+        ? Colors.white
+        : AppState.currentScheme.onSurface;
+    final Color headingSupportingColor = headingsOverArtwork
+        ? Colors.white.withValues(alpha: 0.78)
+        : AppState.currentScheme.onSurfaceVariant;
+    final List<Shadow>? headingShadows = headingsOverArtwork
+        ? [
+            Shadow(
+              color: Colors.black.withValues(alpha: 0.38),
+              blurRadius: 8,
+              offset: const Offset(0, 1),
+            ),
+          ]
+        : null;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 16, 16),
@@ -68,7 +85,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
                 Text(
                   "偏好设置",
                   style: textTheme.headlineSmall?.copyWith(
-                    color: AppState.currentScheme.onSurface,
+                    color: headingColor,
+                    shadows: headingShadows,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.0,
                   ),
@@ -77,7 +95,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
                 Text(
                   "布局、视觉与播放体验",
                   style: textTheme.bodySmall?.copyWith(
-                    color: AppState.currentScheme.onSurfaceVariant,
+                    color: headingSupportingColor,
+                    shadows: headingShadows,
                     letterSpacing: 0.0,
                   ),
                 ),
@@ -448,6 +467,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
     required List<Widget> children,
   }) {
     final textTheme = Theme.of(context).textTheme;
+    final bool headingOverArtwork = AppState.enableGlow;
     return Padding(
       padding: const EdgeInsets.only(bottom: 24),
       child: Column(
@@ -475,7 +495,18 @@ class _SettingsPanelState extends State<SettingsPanel> {
                 Text(
                   title,
                   style: textTheme.titleSmall?.copyWith(
-                    color: AppState.currentScheme.onSurface,
+                    color: headingOverArtwork
+                        ? Colors.white
+                        : AppState.currentScheme.onSurface,
+                    shadows: headingOverArtwork
+                        ? [
+                            Shadow(
+                              color: Colors.black.withValues(alpha: 0.38),
+                              blurRadius: 8,
+                              offset: const Offset(0, 1),
+                            ),
+                          ]
+                        : null,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.0,
                   ),
@@ -584,95 +615,59 @@ class _SettingsPanelState extends State<SettingsPanel> {
     List<DropdownMenuEntry<T>> items, {
     Widget? actionButton,
   }) {
-    final Widget titleBlock = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: _settingTitleStyle()),
-        Text(subtitle, style: _settingSubtitleStyle()),
-      ],
-    );
-
-    final Widget control = DropdownMenu<T>(
-      key: ValueKey<String>('dropdown_${T.toString()}_$current'),
-      initialSelection: current,
-      width: 156,
-      requestFocusOnTap: false,
-      textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
-        color: AppState.currentScheme.onSurface,
-        fontFamilyFallback: AppState.textFontFallback,
-        fontWeight: FontWeight.w500,
-      ),
-      trailingIcon: const Icon(Icons.arrow_drop_down_rounded),
-      selectedTrailingIcon: const Icon(Icons.arrow_drop_up_rounded),
-      inputDecorationTheme: InputDecorationTheme(
-        isDense: true,
-        filled: true,
-        fillColor: AppState.currentScheme.secondaryContainer.withValues(
-          alpha: 0.62,
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-      ),
-      menuStyle: MenuStyle(
-        backgroundColor: WidgetStatePropertyAll(
-          AppState.currentScheme.surfaceContainerHigh,
-        ),
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
-        side: const WidgetStatePropertyAll(BorderSide.none),
-        elevation: const WidgetStatePropertyAll(3),
-        padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(vertical: 8),
-        ),
-      ),
-      onSelected: (val) {
-        if (val != null) onChanged(val);
-      },
-      dropdownMenuEntries: items,
-    );
-
-    if (AppState.isVertical) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        child: Column(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double availableWidth = (constraints.maxWidth - 36).clamp(
+          0.0,
+          double.infinity,
+        );
+        final double controlWidth = AppState.isVertical
+            ? (availableWidth * 0.52).clamp(148.0, 176.0)
+            : (availableWidth * 0.38).clamp(148.0, 168.0);
+        final Widget titleBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            titleBlock,
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [?actionButton, control],
-            ),
+            Text(title, style: _settingTitleStyle()),
+            Text(subtitle, style: _settingSubtitleStyle()),
           ],
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(child: titleBlock),
-          ?actionButton,
-          const SizedBox(width: 8),
-          control,
-        ],
-      ),
+        );
+        final Widget control = Md3AnchoredSelect<T>(
+          key: ValueKey<String>('dropdown_${T.toString()}_$current'),
+          value: current,
+          width: controlWidth,
+          entries: items,
+          onSelected: onChanged,
+        );
+
+        if (AppState.isVertical) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                titleBlock,
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [?actionButton, control],
+                ),
+              ],
+            ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(child: titleBlock),
+              ?actionButton,
+              const SizedBox(width: 8),
+              control,
+            ],
+          ),
+        );
+      },
     );
   }
 

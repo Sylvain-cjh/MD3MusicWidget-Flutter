@@ -6,6 +6,8 @@ import 'package:window_manager/window_manager.dart';
 import 'core/app_state.dart';
 import 'ui/player_view.dart';
 
+const Size _maximumWindowSize = Size(16384, 16384);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
@@ -30,12 +32,14 @@ void main() async {
     await windowManager.setHasShadow(false);
     await windowManager.setAlwaysOnTop(AppState.isAlwaysOnTop);
     await windowManager.setIgnoreMouseEvents(false, forward: true);
+    await windowManager.setAspectRatio(0);
+    await windowManager.setMinimumSize(Size.zero);
+    await windowManager.setMaximumSize(_maximumWindowSize);
+    await windowManager.setResizable(false);
+    await windowManager.setPreventClose(true);
     if (!windowReady.isCompleted) windowReady.complete();
     await windowManager.show();
     await windowManager.focus();
-    await windowManager.setAspectRatio(0);
-    await windowManager.setResizable(false);
-    await windowManager.setPreventClose(true);
   });
 
   unawaited(
