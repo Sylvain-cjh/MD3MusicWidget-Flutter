@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' show ImageFilter, PointMode;
 import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
+import '../../core/media_provider.dart';
 import '../../widgets/parallax_button.dart';
 
 int _globalSlideDirection = 1;
@@ -130,7 +131,23 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         : null;
     final bool isV = widget.isVertical;
     final double uiOpacity = AppState.isPlaying ? 1.0 : 0.5;
-    final bool hasProgress = _hasTimeline;
+    final bool canShowTimeline = MediaCapability.supports(
+      AppState.mediaCapabilities,
+      MediaCapability.timeline,
+    );
+    final bool canPrevious = MediaCapability.supports(
+      AppState.mediaCapabilities,
+      MediaCapability.previous,
+    );
+    final bool canPlayPause = MediaCapability.supports(
+      AppState.mediaCapabilities,
+      MediaCapability.playPause,
+    );
+    final bool canNext = MediaCapability.supports(
+      AppState.mediaCapabilities,
+      MediaCapability.next,
+    );
+    final bool hasProgress = _hasTimeline && canShowTimeline;
 
     return Builder(
       builder: (context) {
@@ -247,16 +264,42 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         double shapedWidth(MD3Shape shape, double height, double extra) =>
             height + (shape == MD3Shape.stadium ? height * extra : 0.0);
 
-        final double prevW = shapedWidth(AppState.prevButtonShape, btnH, 0.34);
-        final double playW = shapedWidth(AppState.playButtonShape, playH, 0.31);
-        final double nextW = shapedWidth(AppState.nextButtonShape, btnH, 0.34);
+        final double prevW = canPrevious
+            ? shapedWidth(AppState.prevButtonShape, btnH, 0.34)
+            : 0.0;
+        final double playW = canPlayPause
+            ? shapedWidth(AppState.playButtonShape, playH, 0.31)
+            : 0.0;
+        final double nextW = canNext
+            ? shapedWidth(AppState.nextButtonShape, btnH, 0.34)
+            : 0.0;
         final double buttonGap = (infoW * 0.052).clamp(8.0, 16.0);
-        final double buttonGroupWidth = prevW + playW + nextW + buttonGap * 2.0;
-        final double prevL = isV
+        final int visibleButtonCount =
+            (canPrevious ? 1 : 0) + (canPlayPause ? 1 : 0) + (canNext ? 1 : 0);
+        final double buttonGroupWidth =
+            prevW +
+            playW +
+            nextW +
+            buttonGap * math.max(0, visibleButtonCount - 1);
+        double buttonCursor = isV
             ? (availableW - buttonGroupWidth) / 2.0
             : titleL;
-        final double playL = prevL + prevW + buttonGap;
-        final double nextL = playL + playW + buttonGap;
+        double takeButtonLeft(bool visible, double width, bool hasFollowing) {
+          final double left = buttonCursor;
+          if (visible) {
+            buttonCursor += width;
+            if (hasFollowing) buttonCursor += buttonGap;
+          }
+          return left;
+        }
+
+        final double prevL = takeButtonLeft(
+          canPrevious,
+          prevW,
+          canPlayPause || canNext,
+        );
+        final double playL = takeButtonLeft(canPlayPause, playW, canNext);
+        final double nextL = takeButtonLeft(canNext, nextW, false);
 
         
         
@@ -441,29 +484,31 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               top: btnT,
               width: prevW,
               height: btnH,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 500),
-                curve: Curves.easeOutCubic,
-                opacity: uiOpacity,
-                child: WpfParallaxItem(
-                  width: prevW,
-                  height: btnH,
-                  borderRadius: AppState.getShapeRadius(
-                    AppState.prevButtonShape,
-                    btnH,
-                  ),
-                  bgColor: AppState.currentScheme.primaryContainer,
-                  foreground: Icon(
-                    Icons.skip_previous_rounded,
-                    size: btnH * 0.54,
-                    color: AppState.currentScheme.onPrimaryContainer,
-                  ),
-                  onTap: () {
-                    _globalSlideDirection = -1;
-                    AppState.sendCommand("PREV");
-                  },
-                ),
-              ),
+              child: canPrevious
+                  ? AnimatedOpacity(
+                      duration: const Duration(milliseconds: 500),
+                      curve: Curves.easeOutCubic,
+                      opacity: uiOpacity,
+                      child: WpfParallaxItem(
+                        width: prevW,
+                        height: btnH,
+                        borderRadius: AppState.getShapeRadius(
+                          AppState.prevButtonShape,
+                          btnH,
+                        ),
+                        bgColor: AppState.currentScheme.primaryContainer,
+                        foreground: Icon(
+                          Icons.skip_previous_rounded,
+                          size: btnH * 0.54,
+                          color: AppState.currentScheme.onPrimaryContainer,
+                        ),
+                        onTap: () {
+                          _globalSlideDirection = -1;
+                          AppState.sendCommand("PREV");
+                        },
+                      ),
+                    )
+                  : const SizedBox.shrink(),
             ),
 
             AnimatedPositioned(
@@ -473,27 +518,31 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               top: playT,
               width: playW,
               height: playH,
-              child: WpfParallaxItem(
-                width: playW,
-                height: playH,
-                borderRadius: AppState.getShapeRadius(
-                  AppState.playButtonShape,
-                  playH,
-                ),
-                bgColor: AppState.currentScheme.primary,
-                foreground: Icon(
-                  AppState.isPlaying
-                      ? Icons.pause_rounded
-                      : Icons.play_arrow_rounded,
-                  size: playH * 0.59,
-                  color: AppState.currentScheme.onPrimary,
-                ),
-                onTap: () {
-                  AppState.sendCommand("TOGGLE");
-                  setState(() => AppState.isPlaying = !AppState.isPlaying);
-                  AppState.notifyBackgroundChanged();
-                },
-              ),
+              child: canPlayPause
+                  ? WpfParallaxItem(
+                      width: playW,
+                      height: playH,
+                      borderRadius: AppState.getShapeRadius(
+                        AppState.playButtonShape,
+                        playH,
+                      ),
+                      bgColor: AppState.currentScheme.primary,
+                      foreground: Icon(
+                        AppState.isPlaying
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        size: playH * 0.59,
+                        color: AppState.currentScheme.onPrimary,
+                      ),
+                      onTap: () {
+                        AppState.sendCommand("TOGGLE");
+                        setState(
+                          () => AppState.isPlaying = !AppState.isPlaying,
+                        );
+                        AppState.notifyBackgroundChanged();
+                      },
+                    )
+                  : const SizedBox.shrink(),
             ),
 
             AnimatedPositioned(
@@ -503,29 +552,31 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               top: btnT,
               width: nextW,
               height: btnH,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 500),
-                curve: Curves.easeOutCubic,
-                opacity: uiOpacity,
-                child: WpfParallaxItem(
-                  width: nextW,
-                  height: btnH,
-                  borderRadius: AppState.getShapeRadius(
-                    AppState.nextButtonShape,
-                    btnH,
-                  ),
-                  bgColor: AppState.currentScheme.primaryContainer,
-                  foreground: Icon(
-                    Icons.skip_next_rounded,
-                    size: btnH * 0.54,
-                    color: AppState.currentScheme.onPrimaryContainer,
-                  ),
-                  onTap: () {
-                    _globalSlideDirection = 1;
-                    AppState.sendCommand("NEXT");
-                  },
-                ),
-              ),
+              child: canNext
+                  ? AnimatedOpacity(
+                      duration: const Duration(milliseconds: 500),
+                      curve: Curves.easeOutCubic,
+                      opacity: uiOpacity,
+                      child: WpfParallaxItem(
+                        width: nextW,
+                        height: btnH,
+                        borderRadius: AppState.getShapeRadius(
+                          AppState.nextButtonShape,
+                          btnH,
+                        ),
+                        bgColor: AppState.currentScheme.primaryContainer,
+                        foreground: Icon(
+                          Icons.skip_next_rounded,
+                          size: btnH * 0.54,
+                          color: AppState.currentScheme.onPrimaryContainer,
+                        ),
+                        onTap: () {
+                          _globalSlideDirection = 1;
+                          AppState.sendCommand("NEXT");
+                        },
+                      ),
+                    )
+                  : const SizedBox.shrink(),
             ),
           ],
         );

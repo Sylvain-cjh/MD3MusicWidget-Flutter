@@ -1,6 +1,8 @@
 using System;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Threading;
+using NAudio.CoreAudioApi;
 using NAudio.Dsp;
 using NAudio.Wave;
 
@@ -27,6 +29,7 @@ namespace MusicFetcher
         private const int AnalysisHopSamples = 1024;
         private const long AnalysisIntervalMs = 33;
         private const long ClientIdleTimeoutMs = 1200;
+        private const long TargetAudioHoldMs = 420;
 
         private readonly object _sync = new();
         private readonly float[] _ring = new float[FftLength];
@@ -34,6 +37,7 @@ namespace MusicFetcher
         private readonly Complex[] _fft = new Complex[FftLength];
         private readonly float[] _levels = new float[BandCount];
         private readonly Timer _idleTimer;
+        private readonly Timer _targetAudioTimer;
 
         private int _writeIndex;
         private int _sampleCount;
@@ -51,6 +55,10 @@ namespace MusicFetcher
         private long _sampleFrames;
         private string _format = "";
         private WasapiLoopbackCapture? _capture;
+        private string _targetApplication = "";
+        private bool _targetPlaying;
+        private float _targetGate = 1f;
+        private long _lastTargetAudioAtMs;
 
         public SpectrumAnalyzer()
         {
@@ -62,6 +70,85 @@ namespace MusicFetcher
             
             
             _idleTimer = new Timer(_ => StopIfIdle(), null, 1000, 1000);
+            _targetAudioTimer = new Timer(_ => RefreshTargetAudioGate(), null, 250, 250);
+        }
+
+        public void SetTargetApplication(string sourceAppId, bool isPlaying)
+        {
+            lock (_sync)
+            {
+                _targetApplication = sourceAppId ?? "";
+                _targetPlaying = isPlaying;
+                if (!isPlaying)
+                {
+                    _targetGate = 0;
+                    _lastTargetAudioAtMs = 0;
+                }
+            }
+        }
+
+        private void RefreshTargetAudioGate()
+        {
+            string target;
+            bool playing;
+            lock (_sync)
+            {
+                if (_capture == null) return;
+                target = _targetApplication;
+                playing = _targetPlaying;
+            }
+
+            if (!playing || string.IsNullOrWhiteSpace(target))
+            {
+                lock (_sync) _targetGate = 0;
+                return;
+            }
+
+            bool matched = false;
+            float peak = 0;
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                using MMDevice device = enumerator.GetDefaultAudioEndpoint(
+                    DataFlow.Render,
+                    Role.Multimedia
+                );
+                SessionCollection sessions = device.AudioSessionManager.Sessions;
+                string targetKey = target.ToLowerInvariant();
+                for (int index = 0; index < sessions.Count; index++)
+                {
+                    using AudioSessionControl session = sessions[index];
+                    if (session.IsSystemSoundsSession) continue;
+                    string processName = "";
+                    try
+                    {
+                        processName = Process.GetProcessById((int)session.GetProcessID)
+                            .ProcessName.ToLowerInvariant();
+                    }
+                    catch { }
+                    string identifier = session.GetSessionIdentifier?.ToLowerInvariant() ?? "";
+                    string displayName = session.DisplayName?.ToLowerInvariant() ?? "";
+                    bool isMatch =
+                        (!string.IsNullOrEmpty(processName) && targetKey.Contains(processName)) ||
+                        (!string.IsNullOrEmpty(processName) && identifier.Contains(processName)) ||
+                        (!string.IsNullOrEmpty(targetKey) && identifier.Contains(targetKey)) ||
+                        (!string.IsNullOrEmpty(displayName) && targetKey.Contains(displayName));
+                    if (!isMatch) continue;
+                    matched = true;
+                    peak = Math.Max(peak, session.AudioMeterInformation.MasterPeakValue);
+                }
+            }
+            catch
+            {
+                matched = false;
+            }
+
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            lock (_sync)
+            {
+                if (peak > 0.0003f) _lastTargetAudioAtMs = now;
+                _targetGate = !matched || now - _lastTargetAudioAtMs <= TargetAudioHoldMs ? 1f : 0f;
+            }
         }
 
         public bool TryActivate()
@@ -254,6 +341,7 @@ namespace MusicFetcher
                 float target = rms < 0.0007
                     ? 0f
                     : (float)Math.Sqrt(Math.Clamp((decibels + 92.0) / 72.0, 0.0, 1.0));
+                target *= _targetGate;
                 float smoothing = target > _levels[band] ? 0.62f : 0.18f;
                 _levels[band] += (target - _levels[band]) * smoothing;
             }
@@ -347,6 +435,7 @@ namespace MusicFetcher
         public void Dispose()
         {
             _idleTimer.Dispose();
+            _targetAudioTimer.Dispose();
             StopCapture();
         }
     }

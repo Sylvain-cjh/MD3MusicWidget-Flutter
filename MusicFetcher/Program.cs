@@ -14,6 +14,7 @@ namespace MusicFetcher
 {
     class Program
     {
+        private const int MediaCapabilities = 0xFF;
         private static readonly int ProcessId = Environment.ProcessId;
         private static byte[] _currentInfoBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
@@ -27,13 +28,18 @@ namespace MusicFetcher
             positionMs = 0,
             durationMs = 0,
             timelineUpdatedAtMs = 0,
-            fetcherUpdatedAtMs = 0
+            fetcherUpdatedAtMs = 0,
+            capabilities = MediaCapabilities
         });
         private static byte[] _currentCover = Array.Empty<byte>();
         private static string _currentCoverVersion = "";
         private static readonly object _stateLock = new();
         private static readonly SpectrumAnalyzer _spectrumAnalyzer = new();
         private static GlobalSystemMediaTransportControlsSessionManager? _manager;
+        private static GlobalSystemMediaTransportControlsSession? _observedSession;
+        private static StreamHub? _streamHub;
+        private static readonly SemaphoreSlim _smtcWake = new(0, 1);
+        private static long _mediaPropertiesRevision = 1;
         private static readonly TimeSpan MediaPropertiesTimeout = TimeSpan.FromMilliseconds(900);
         private static readonly TimeSpan ThumbnailOpenTimeout = TimeSpan.FromMilliseconds(650);
         private static readonly TimeSpan ThumbnailReadTimeout = TimeSpan.FromMilliseconds(900);
@@ -68,10 +74,13 @@ namespace MusicFetcher
             if (_manager != null) return true;
             try
             {
-                _manager = await AwaitWinRtAsync(
+                var manager = await AwaitWinRtAsync(
                     GlobalSystemMediaTransportControlsSessionManager.RequestAsync(),
                     TimeSpan.FromSeconds(2)
                 );
+                manager.CurrentSessionChanged += OnCurrentSessionChanged;
+                manager.SessionsChanged += OnSessionsChanged;
+                _manager = manager;
                 return _manager != null;
             }
             catch (Exception ex)
@@ -82,6 +91,59 @@ namespace MusicFetcher
             }
         }
 
+        private static void WakeSmtc(bool mediaPropertiesChanged)
+        {
+            if (mediaPropertiesChanged) Interlocked.Increment(ref _mediaPropertiesRevision);
+            if (_smtcWake.CurrentCount == 0)
+            {
+                try { _smtcWake.Release(); } catch (SemaphoreFullException) { }
+            }
+        }
+
+        private static void OnCurrentSessionChanged(
+            GlobalSystemMediaTransportControlsSessionManager sender,
+            CurrentSessionChangedEventArgs args
+        ) => WakeSmtc(mediaPropertiesChanged: true);
+
+        private static void OnSessionsChanged(
+            GlobalSystemMediaTransportControlsSessionManager sender,
+            SessionsChangedEventArgs args
+        ) => WakeSmtc(mediaPropertiesChanged: true);
+
+        private static void OnMediaPropertiesChanged(
+            GlobalSystemMediaTransportControlsSession sender,
+            MediaPropertiesChangedEventArgs args
+        ) => WakeSmtc(mediaPropertiesChanged: true);
+
+        private static void OnPlaybackInfoChanged(
+            GlobalSystemMediaTransportControlsSession sender,
+            PlaybackInfoChangedEventArgs args
+        ) => WakeSmtc(mediaPropertiesChanged: false);
+
+        private static void OnTimelinePropertiesChanged(
+            GlobalSystemMediaTransportControlsSession sender,
+            TimelinePropertiesChangedEventArgs args
+        ) => WakeSmtc(mediaPropertiesChanged: false);
+
+        private static void ObserveSession(GlobalSystemMediaTransportControlsSession? session)
+        {
+            if (ReferenceEquals(_observedSession, session)) return;
+            if (_observedSession != null)
+            {
+                _observedSession.MediaPropertiesChanged -= OnMediaPropertiesChanged;
+                _observedSession.PlaybackInfoChanged -= OnPlaybackInfoChanged;
+                _observedSession.TimelinePropertiesChanged -= OnTimelinePropertiesChanged;
+            }
+            _observedSession = session;
+            if (session != null)
+            {
+                session.MediaPropertiesChanged += OnMediaPropertiesChanged;
+                session.PlaybackInfoChanged += OnPlaybackInfoChanged;
+                session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
+            }
+            Interlocked.Increment(ref _mediaPropertiesRevision);
+        }
+
         static async Task Main(string[] args)
         {
             Console.WriteLine("=========================================");
@@ -90,9 +152,16 @@ namespace MusicFetcher
 
             try
             {
-                
-                
-                
+                _streamHub = new StreamHub(
+                    GetCurrentInfoBytes,
+                    () =>
+                    {
+                        bool available = _spectrumAnalyzer.TryActivate();
+                        return _spectrumAnalyzer.GetCompactSnapshot(available);
+                    }
+                );
+                _streamHub.Start();
+
                 _ = Task.Run(StartSmtcListeningLoop);
 
                 
@@ -113,6 +182,11 @@ namespace MusicFetcher
             }
         }
 
+        private static byte[] GetCurrentInfoBytes()
+        {
+            lock (_stateLock) return _currentInfoBytes;
+        }
+
         private static async Task StartSmtcListeningLoop()
         {
             string? lastTitle = null;
@@ -125,6 +199,8 @@ namespace MusicFetcher
             long trackVersion = 0;
             long lastPublishedAtMs = 0;
             int nextPollDelayMs = 650;
+            GlobalSystemMediaTransportControlsSessionMediaProperties? cachedProperties = null;
+            long cachedPropertiesRevision = -1;
 
             while (true)
             {
@@ -139,17 +215,25 @@ namespace MusicFetcher
                     long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     if (session != null)
                     {
-                        var props = await AwaitWinRtAsync(
-                            session.TryGetMediaPropertiesAsync(),
-                            MediaPropertiesTimeout
-                        );
+                        ObserveSession(session);
+                        long mediaRevision = Interlocked.Read(ref _mediaPropertiesRevision);
+                        if (cachedProperties == null || cachedPropertiesRevision != mediaRevision)
+                        {
+                            cachedProperties = await AwaitWinRtAsync(
+                                session.TryGetMediaPropertiesAsync(),
+                                MediaPropertiesTimeout
+                            );
+                            cachedPropertiesRevision = mediaRevision;
+                        }
+                        var props = cachedProperties;
                         var playback = session.GetPlaybackInfo();
 
                         bool isPlaying = playback.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-                        nextPollDelayMs = isPlaying ? 250 : 650;
+                        nextPollDelayMs = isPlaying ? 1000 : 2000;
                         string title = props.Title ?? "未知歌曲";
                         string artist = props.Artist ?? "未知歌手";
                         string sourceApp = session.SourceAppUserModelId ?? "";
+                        _spectrumAnalyzer.SetTargetApplication(sourceApp, isPlaying);
                         var timeline = session.GetTimelineProperties();
                         var capturedAt = DateTimeOffset.UtcNow;
                         double durationMs = Math.Max(0, (timeline.EndTime - timeline.StartTime).TotalMilliseconds);
@@ -242,13 +326,13 @@ namespace MusicFetcher
                                 positionMs,
                                 durationMs,
                                 timelineUpdatedAtMs,
-                                fetcherUpdatedAtMs = now
+                                fetcherUpdatedAtMs = now,
+                                capabilities = MediaCapabilities
                             };
 
-                            lock (_stateLock)
-                            {
-                                _currentInfoBytes = JsonSerializer.SerializeToUtf8Bytes(info);
-                            }
+                            byte[] infoBytes = JsonSerializer.SerializeToUtf8Bytes(info);
+                            lock (_stateLock) _currentInfoBytes = infoBytes;
+                            _streamHub?.PublishInfo(infoBytes);
 
                             lastTitle = title;
                             lastArtist = artist;
@@ -262,30 +346,37 @@ namespace MusicFetcher
                     }
                     else
                     {
-                        nextPollDelayMs = 900;
+                        ObserveSession(null);
+                        cachedProperties = null;
+                        cachedPropertiesRevision = -1;
+                        _spectrumAnalyzer.SetTargetApplication("", false);
+                        nextPollDelayMs = 2500;
                         bool enteringNoMedia = lastTitle != "NO_MEDIA";
                         if (enteringNoMedia || now - lastPublishedAtMs >= 500)
                         {
                             if (enteringNoMedia) trackVersion++;
+                            byte[] infoBytes = JsonSerializer.SerializeToUtf8Bytes(new
+                            {
+                                processId = ProcessId,
+                                isPlaying = false,
+                                title = "暂无音乐播放",
+                                artist = "请打开播放软件",
+                                hasCover = false,
+                                coverVersion = "",
+                                trackVersion = trackVersion.ToString(),
+                                positionMs = 0,
+                                durationMs = 0,
+                                timelineUpdatedAtMs = 0,
+                                fetcherUpdatedAtMs = now,
+                                capabilities = MediaCapabilities
+                            });
                             lock (_stateLock)
                             {
-                                _currentInfoBytes = JsonSerializer.SerializeToUtf8Bytes(new
-                                {
-                                    processId = ProcessId,
-                                    isPlaying = false,
-                                    title = "暂无音乐播放",
-                                    artist = "请打开播放软件",
-                                    hasCover = false,
-                                    coverVersion = "",
-                                    trackVersion = trackVersion.ToString(),
-                                    positionMs = 0,
-                                    durationMs = 0,
-                                    timelineUpdatedAtMs = 0,
-                                    fetcherUpdatedAtMs = now
-                                });
+                                _currentInfoBytes = infoBytes;
                                 _currentCover = Array.Empty<byte>();
                                 _currentCoverVersion = "";
                             }
+                            _streamHub?.PublishInfo(infoBytes);
                             lastTitle = "NO_MEDIA";
                             lastArtist = null;
                             lastSourceApp = "";
@@ -299,11 +390,14 @@ namespace MusicFetcher
                 catch (Exception ex)
                 {
                     LogSmtcFailure(ex);
+                    ObserveSession(null);
+                    cachedProperties = null;
+                    cachedPropertiesRevision = -1;
                     _manager = null;
                     nextPollDelayMs = 650;
                 }
 
-                await Task.Delay(nextPollDelayMs);
+                await _smtcWake.WaitAsync(nextPollDelayMs);
             }
         }
 

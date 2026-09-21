@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
+import '../../core/media_provider.dart';
 import 'md3_anchored_select.dart';
 
 class SettingsPanel extends StatefulWidget {
@@ -307,24 +308,32 @@ class _SettingsPanelState extends State<SettingsPanel> {
                             widget.onVisualChanged();
                           },
                         ),
-                      _buildDivider(),
-                      _buildDropdownRow<SpectrumMode>(
-                        "音乐频谱",
-                        "在播放器底部显示独立的动态频谱控件",
-                        AppState.spectrumMode,
-                        (val) {
-                          final bool visibilityChanged =
-                              (AppState.spectrumMode == SpectrumMode.off) !=
-                              (val == SpectrumMode.off);
-                          setState(() => AppState.spectrumMode = val);
-                          if (visibilityChanged) {
-                            widget.onLayoutChanged();
-                          } else {
-                            widget.onVisualChanged();
-                          }
-                        },
-                        _spectrumEntries(),
-                      ),
+                      if (MediaCapability.supports(
+                        AppState.mediaCapabilities,
+                        MediaCapability.spectrum,
+                      ))
+                        _buildDivider(),
+                      if (MediaCapability.supports(
+                        AppState.mediaCapabilities,
+                        MediaCapability.spectrum,
+                      ))
+                        _buildDropdownRow<SpectrumMode>(
+                          "音乐频谱",
+                          "在播放器底部显示独立的动态频谱控件",
+                          AppState.spectrumMode,
+                          (val) {
+                            final bool visibilityChanged =
+                                (AppState.spectrumMode == SpectrumMode.off) !=
+                                (val == SpectrumMode.off);
+                            setState(() => AppState.spectrumMode = val);
+                            if (visibilityChanged) {
+                              widget.onLayoutChanged();
+                            } else {
+                              widget.onVisualChanged();
+                            }
+                          },
+                          _spectrumEntries(),
+                        ),
                     ],
                   ),
 
@@ -332,17 +341,25 @@ class _SettingsPanelState extends State<SettingsPanel> {
                     title: "播放控件形状",
                     icon: Icons.widgets_rounded,
                     children: [
-                      _buildDropdownRow<MD3ProgressStyle>(
-                        "进度条样式",
-                        "Material 3 线性、胶囊或分段轨道",
-                        AppState.progressStyle,
-                        (val) {
-                          setState(() => AppState.progressStyle = val);
-                          widget.onVisualChanged();
-                        },
-                        _progressStyleEntries(),
-                      ),
-                      _buildDivider(),
+                      if (MediaCapability.supports(
+                        AppState.mediaCapabilities,
+                        MediaCapability.timeline,
+                      ))
+                        _buildDropdownRow<MD3ProgressStyle>(
+                          "进度条样式",
+                          "Material 3 线性、胶囊或分段轨道",
+                          AppState.progressStyle,
+                          (val) {
+                            setState(() => AppState.progressStyle = val);
+                            widget.onVisualChanged();
+                          },
+                          _progressStyleEntries(),
+                        ),
+                      if (MediaCapability.supports(
+                        AppState.mediaCapabilities,
+                        MediaCapability.timeline,
+                      ))
+                        _buildDivider(),
                       _buildDropdownRow<MD3Shape>(
                         "播放按钮",
                         "中心播放键的 Material 3 形状",

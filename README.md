@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>当前版本：0.9.18</strong>
+  <strong>当前版本：0.9.19</strong>
 </p>
 
 MD3 Music Widget 使用 Flutter 构建界面，通过独立的 MusicFetcher 读取 Windows 系统媒体会话和音频输出。它可以显示当前歌曲、封面、播放进度和真实音乐频谱，同时提供横版与竖版布局、动态取色、流光背景、毛玻璃和丰富的 MD3 个性化设置。
@@ -83,15 +83,14 @@ MD3 Music Widget 使用 Flutter 构建界面，通过独立的 MusicFetcher 读�
 flowchart LR
     A["音乐播放器<br>SMTC 媒体会话"] --> B["MusicFetcher<br>.NET 8"]
     C["Windows 音频输出<br>WASAPI Loopback"] --> B
-    B --> D["本机 HTTP 服务<br>127.0.0.1:12580"]
-    D --> E["媒体信息与时间线"]
-    D --> F["歌曲封面"]
-    D --> G["32 段真实频谱"]
+    B --> D["持久推送通道<br>TCP 127.0.0.1:12581"]
+    B --> J["兼容与控制接口<br>HTTP 127.0.0.1:12580"]
+    D --> E["媒体信息、时间线与按需频谱"]
+    J --> F["歌曲封面与兼容回退"]
     E --> H["Flutter 状态层"]
     F --> H
-    G --> H
     H --> I["MD3 界面、动画与动态背景"]
-    I -->|播放控制命令| D
+    I -->|播放控制命令| J
 ```
 
 ### 媒体信息采集
@@ -112,10 +111,11 @@ MusicFetcher 使用 WASAPI Loopback 捕获当前系统输出的音频采样，�
 
 ### 本机通信
 
-Flutter 与 MusicFetcher 只通过本机回环地址通信：
+Flutter 与 MusicFetcher 只通过本机回环地址通信。媒体状态与频谱优先通过持久连接推送，HTTP 接口作为封面、控制和兼容回退：
 
 | 接口 | 用途 |
 | --- | --- |
+| `TCP 127.0.0.1:12581` | 主动推送媒体状态、心跳与按需频谱数据 |
 | `/info` | 歌曲信息、播放状态和进度时间线 |
 | `/cover` | 当前歌曲封面 |
 | `/spectrum.bin` | 低开销二进制实时频谱数据 |
@@ -135,6 +135,8 @@ Flutter 与 MusicFetcher 只通过本机回环地址通信：
 - 播放时以屏幕刷新节奏更新进度，暂停或无媒体时停止无效逐帧刷新
 - 媒体信息、封面和频谱请求具有独立超时和并发保护
 - MusicFetcher 具备心跳检测、超时恢复和自动重连
+- 媒体状态由 SMTC 事件驱动，减少固定频率轮询与无效 JSON 分配
+- Flutter 优先复用持久连接；连接不可用时自动回退到旧 HTTP 通道
 - 频谱使用固定长度二进制包传输，关闭后停止轮询和音频采集
 - 时间线会过滤无效值并限制在歌曲时长范围内
 - 切歌事件会在新进度写入前保存旧画面位置，避免进度条瞬间归零
@@ -156,7 +158,7 @@ Flutter 与 MusicFetcher 只通过本机回环地址通信：
 
 ### 安装版
 
-运行 `MD3MusicWidget-Setup-0.9.18.exe`，按照安装向导完成安装。
+运行 `MD3MusicWidget-Setup-0.9.19.exe`，按照安装向导完成安装。
 
 ### 免安装版
 

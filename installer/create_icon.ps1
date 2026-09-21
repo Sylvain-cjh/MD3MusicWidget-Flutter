@@ -1,5 +1,5 @@
 param(
-  [string]$Source = (Join-Path $PSScriptRoot '..\assets\logo_concepts_fresh\fresh-equalizer-glow.png')
+  [string]$Source = (Join-Path $PSScriptRoot '..\assets\logo_concepts_fresh\fresh-equalizer-full.png')
 )
 
 $ErrorActionPreference = 'Stop'

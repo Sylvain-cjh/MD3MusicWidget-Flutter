@@ -8,7 +8,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $releaseDir = Join-Path $projectRoot 'build\windows\x64\runner\Release'
-$setupPath = Join-Path $PSScriptRoot 'output\MD3MusicWidget-Setup-0.9.18.exe'
+$installerSource = Join-Path $PSScriptRoot 'MD3MusicWidget.iss'
+$installerText = [IO.File]::ReadAllText($installerSource)
+$versionMatch = [regex]::Match($installerText, '#define\s+MyAppVersion\s+"([^"]+)"')
+if (-not $versionMatch.Success) { throw 'Unable to read MyAppVersion from the Inno Setup script.' }
+$setupPath = Join-Path $PSScriptRoot "output\MD3MusicWidget-Setup-$($versionMatch.Groups[1].Value).exe"
 $certificatePath = Join-Path $PSScriptRoot 'output\MD3MusicWidget-CodeSigning.cer'
 $subject = 'CN=MD3 Music Widget, O=syj'
 

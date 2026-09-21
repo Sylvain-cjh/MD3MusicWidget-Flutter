@@ -8,6 +8,8 @@ import 'package:window_manager/window_manager.dart';
 import 'package:tray_manager/tray_manager.dart' as tm;
 
 import '../core/app_state.dart';
+import '../core/media_provider.dart';
+import '../core/music_fetcher_provider.dart';
 import '../core/spectrum_packet.dart';
 import 'animations/component_size_motion.dart';
 import 'widgets/dynamic_background.dart';
@@ -28,6 +30,10 @@ class _PlayerViewState extends State<PlayerView>
     with WindowListener, tm.TrayListener, TickerProviderStateMixin {
   Timer? _pollingTimer;
   Timer? _spectrumTimer;
+  Timer? _mediaReconnectTimer;
+  MusicFetcherProvider? _mediaProvider;
+  StreamSubscription<MediaProviderEvent>? _mediaProviderSubscription;
+  bool _mediaProviderConnectInFlight = false;
   final HttpClient _httpBaseClient = HttpClient();
   int? _lastInfoFingerprint;
   int _lastInfoLength = 0;
@@ -145,6 +151,9 @@ class _PlayerViewState extends State<PlayerView>
   void dispose() {
     _pollingTimer?.cancel();
     _spectrumTimer?.cancel();
+    _mediaReconnectTimer?.cancel();
+    unawaited(_mediaProviderSubscription?.cancel());
+    unawaited(_mediaProvider?.close());
     _resizeSaveTimer?.cancel();
     windowManager.removeListener(this);
     tm.trayManager.removeListener(this);
@@ -277,6 +286,9 @@ class _PlayerViewState extends State<PlayerView>
   Future<void> _exitApplication() async {
     _pollingTimer?.cancel();
     _spectrumTimer?.cancel();
+    _mediaReconnectTimer?.cancel();
+    await _mediaProviderSubscription?.cancel();
+    await _mediaProvider?.close();
     _httpBaseClient.close(force: true);
     try {
       await tm.trayManager.destroy();
@@ -663,11 +675,10 @@ class _PlayerViewState extends State<PlayerView>
     }
   }
 
-  void _recordFetcherHeartbeat(Map<String, dynamic> data) {
+  void _recordFetcherHeartbeat([int heartbeat = 0]) {
     final now = DateTime.now().millisecondsSinceEpoch;
     _lastInfoSuccessAtMs = now;
     _infoFailureStreak = 0;
-    final heartbeat = (data['fetcherUpdatedAtMs'] as num?)?.toInt() ?? 0;
     if (heartbeat > 0) _lastFetcherHeartbeatAtMs = heartbeat;
     final effectiveHeartbeat = heartbeat > 0
         ? heartbeat
@@ -676,6 +687,89 @@ class _PlayerViewState extends State<PlayerView>
         now - effectiveHeartbeat > 2400 &&
         now - _lastFetcherRestartAtMs >= 5000) {
       unawaited(_restartFetcher());
+    }
+  }
+
+  void _applyMediaSnapshot(MediaSnapshot snapshot) {
+    _recordFetcherHeartbeat(snapshot.fetcherUpdatedAtMs);
+    if (snapshot.processId > 0) AppState.fetcherPid = snapshot.processId;
+    if (!mounted) return;
+
+    final bool trackChanged =
+        AppState.trackTitle != snapshot.title ||
+        AppState.artistName != snapshot.artist ||
+        AppState.trackVersion != snapshot.trackVersion;
+    final bool playbackStateChanged = AppState.isPlaying != snapshot.isPlaying;
+    final bool capabilitiesChanged =
+        AppState.mediaCapabilities != snapshot.capabilities;
+    if (trackChanged && AppState.playbackDurationMs > 0) {
+      AppState.notifyTrackTransition();
+    }
+
+    if (trackChanged || playbackStateChanged || capabilitiesChanged) {
+      setState(() {
+        AppState.trackTitle = snapshot.title;
+        AppState.artistName = snapshot.artist;
+        AppState.trackVersion = snapshot.trackVersion;
+        AppState.isPlaying = snapshot.isPlaying;
+        AppState.mediaCapabilities = snapshot.capabilities;
+      });
+      AppState.notifyBackgroundChanged();
+    }
+
+    AppState.updatePlaybackTimeline(
+      positionMs: snapshot.positionMs,
+      durationMs: snapshot.durationMs,
+      updatedAtMs: snapshot.timelineUpdatedAtMs > 0
+          ? snapshot.timelineUpdatedAtMs
+          : DateTime.now().millisecondsSinceEpoch,
+    );
+
+    _latestCoverVersion = snapshot.coverVersion;
+    if (snapshot.coverVersion.isNotEmpty &&
+        snapshot.coverVersion != AppState.currentCoverVersion) {
+      unawaited(_loadCover(snapshot.coverVersion));
+    } else if (snapshot.coverVersion.isEmpty &&
+        snapshot.legacyCoverBase64.isNotEmpty) {
+      unawaited(_loadLegacyCover(snapshot.legacyCoverBase64));
+    } else if (snapshot.coverVersion.isEmpty &&
+        snapshot.legacyCoverBase64.isEmpty) {
+      unawaited(_clearCover());
+    }
+  }
+
+  void _handleMediaProviderEvent(MediaProviderEvent event) {
+    switch (event) {
+      case MediaSnapshotEvent(:final snapshot):
+        _applyMediaSnapshot(snapshot);
+      case MediaSpectrumEvent(:final packet):
+        final decoded = decodeSpectrumPacket(
+          packet,
+          expectedBandCount: AppState.spectrumBandCount,
+          targetLevels: _spectrumDecodeBuffer,
+        );
+        if (decoded != null) {
+          AppState.updateSpectrumTyped(decoded.levels, decoded.updatedAtMs);
+        }
+      case MediaHeartbeatEvent():
+        _recordFetcherHeartbeat();
+      case MediaDisconnectedEvent():
+        if (mounted) _syncSpectrumPolling();
+    }
+  }
+
+  Future<void> _connectMediaProvider() async {
+    if (!mounted || _mediaProviderConnectInFlight) return;
+    final provider = _mediaProvider ??= MusicFetcherProvider();
+    if (provider.isConnected) return;
+    _mediaProviderSubscription ??= provider.events.listen(
+      _handleMediaProviderEvent,
+    );
+    _mediaProviderConnectInFlight = true;
+    try {
+      if (await provider.connect() && mounted) _syncSpectrumPolling();
+    } finally {
+      _mediaProviderConnectInFlight = false;
     }
   }
 
@@ -708,9 +802,16 @@ class _PlayerViewState extends State<PlayerView>
 
   void _startPollingTimers() {
     if (_pollingTimer != null) return;
+    unawaited(_connectMediaProvider());
+    _mediaReconnectTimer ??= Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_mediaProvider?.isConnected != true) {
+        unawaited(_connectMediaProvider());
+      }
+    });
     _pollingTimer = Timer.periodic(const Duration(milliseconds: 300), (
       timer,
     ) async {
+      if (_mediaProvider?.isConnected == true) return;
       if (_pollInFlight) return;
       _pollInFlight = true;
       try {
@@ -721,7 +822,7 @@ class _PlayerViewState extends State<PlayerView>
         final fingerprint = _fingerprintBytes(bytes);
         if (_lastInfoLength == bytes.length &&
             _lastInfoFingerprint == fingerprint) {
-          _recordFetcherHeartbeat(const <String, dynamic>{});
+          _recordFetcherHeartbeat();
           return;
         }
         _lastInfoLength = bytes.length;
@@ -729,59 +830,7 @@ class _PlayerViewState extends State<PlayerView>
         final decoded = jsonDecode(utf8.decode(bytes));
         if (decoded is! Map) throw const FormatException('Invalid /info JSON');
         final data = Map<String, dynamic>.from(decoded);
-        final int reportedFetcherPid =
-            (data['processId'] as num?)?.toInt() ?? 0;
-        if (reportedFetcherPid > 0) AppState.fetcherPid = reportedFetcherPid;
-        _recordFetcherHeartbeat(data);
-
-        if (mounted) {
-          final String newTitle = data['title']?.toString() ?? "未知歌曲";
-          final String newArtist = data['artist']?.toString() ?? "未知歌手";
-          final String newTrackVersion = data['trackVersion']?.toString() ?? "";
-          final bool newIsPlaying = data['isPlaying'] == true;
-          final String coverVersion = data['coverVersion']?.toString() ?? "";
-          final String legacyCoverBase64 =
-              data['coverBase64']?.toString() ?? "";
-          _latestCoverVersion = coverVersion;
-
-          final bool trackChanged =
-              AppState.trackTitle != newTitle ||
-              AppState.artistName != newArtist ||
-              AppState.trackVersion != newTrackVersion;
-          final bool playbackStateChanged = AppState.isPlaying != newIsPlaying;
-          if (trackChanged && AppState.playbackDurationMs > 0) {
-            AppState.notifyTrackTransition();
-          }
-
-          if (trackChanged || playbackStateChanged) {
-            setState(() {
-              AppState.trackTitle = newTitle;
-              AppState.artistName = newArtist;
-              AppState.trackVersion = newTrackVersion;
-              AppState.isPlaying = newIsPlaying;
-            });
-            AppState.notifyBackgroundChanged();
-          }
-
-          if (data.containsKey('durationMs')) {
-            AppState.updatePlaybackTimeline(
-              positionMs: (data['positionMs'] as num?)?.toDouble() ?? 0.0,
-              durationMs: (data['durationMs'] as num?)?.toDouble() ?? 0.0,
-              updatedAtMs:
-                  (data['timelineUpdatedAtMs'] as num?)?.toInt() ??
-                  DateTime.now().millisecondsSinceEpoch,
-            );
-          }
-
-          if (coverVersion.isNotEmpty &&
-              coverVersion != AppState.currentCoverVersion) {
-            unawaited(_loadCover(coverVersion));
-          } else if (coverVersion.isEmpty && legacyCoverBase64.isNotEmpty) {
-            unawaited(_loadLegacyCover(legacyCoverBase64));
-          } else if (coverVersion.isEmpty && legacyCoverBase64.isEmpty) {
-            unawaited(_clearCover());
-          }
-        }
+        _applyMediaSnapshot(MediaSnapshot.fromJson(data));
       } catch (_) {
         _recordFetcherFailure();
       } finally {
@@ -796,6 +845,14 @@ class _PlayerViewState extends State<PlayerView>
         mounted &&
         _pollingTimer != null &&
         AppState.spectrumMode != SpectrumMode.off;
+    final provider = _mediaProvider;
+    if (provider?.isConnected == true) {
+      _spectrumTimer?.cancel();
+      _spectrumTimer = null;
+      provider!.setSpectrumEnabled(shouldPoll);
+      if (!shouldPoll) AppState.clearSpectrum();
+      return;
+    }
     if (!shouldPoll) {
       _spectrumTimer?.cancel();
       _spectrumTimer = null;

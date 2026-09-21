@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 
+import 'media_provider.dart';
+
 
 
 enum MD3Shape {
@@ -36,6 +38,7 @@ class AppState {
   static String artistName = "无媒体会话";
   static String trackVersion = "";
   static bool isPlaying = false;
+  static int mediaCapabilities = MediaCapability.smtcDefault;
   static double playbackPositionMs = 0.0;
   static double playbackDurationMs = 0.0;
   static int playbackUpdatedAtMs = 0;
