@@ -135,8 +135,13 @@ class DynamicBackground extends StatefulWidget {
 
 class _DynamicBackgroundState extends State<DynamicBackground>
     with SingleTickerProviderStateMixin {
+  static final ImageFilter _glowBlur = ImageFilter.blur(
+    sigmaX: 80,
+    sigmaY: 80,
+    tileMode: TileMode.clamp,
+  );
   late AnimationController _revealController;
-  late Animation<double> _revealAnimation;
+  late CurvedAnimation _revealAnimation;
   late bool _glowLayerVisible;
 
   @override
@@ -194,6 +199,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
   @override
   void dispose() {
     AppState.backgroundRevision.removeListener(_handleBackgroundChanged);
+    _revealAnimation.dispose();
     _revealController.dispose();
     super.dispose();
   }
@@ -367,11 +373,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                     child: Transform.scale(
                       scale: 1.25,
                       child: ImageFiltered(
-                        imageFilter: ImageFilter.blur(
-                          sigmaX: 80,
-                          sigmaY: 80,
-                          tileMode: TileMode.clamp,
-                        ),
+                        imageFilter: _glowBlur,
                         child: AnimatedSwitcher(
                           duration: const Duration(milliseconds: 600),
                           switchInCurve: Curves.easeInOutCubic,

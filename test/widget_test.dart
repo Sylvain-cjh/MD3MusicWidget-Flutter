@@ -10,12 +10,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:music_widget_flutter/core/app_state.dart';
+import 'package:music_widget_flutter/core/artwork_resources.dart';
+import 'package:music_widget_flutter/core/media_provider.dart';
+import 'package:music_widget_flutter/core/music_fetcher_protocol.dart';
 import 'package:music_widget_flutter/core/spectrum_packet.dart';
 import 'package:music_widget_flutter/ui/animations/component_size_motion.dart';
 import 'package:music_widget_flutter/ui/widgets/locked_aspect_resize_area.dart';
 import 'package:music_widget_flutter/ui/widgets/md3_anchored_select.dart';
 
 void main() {
+  testWidgets('封面缓存使用预算并支持空闲清理', (tester) async {
+    final resources = ArtworkResources();
+    final cache = PaintingBinding.instance.imageCache;
+    expect(cache.maximumSize, 24);
+    expect(cache.maximumSizeBytes, 48 * 1024 * 1024);
+    resources.trimWhenIdle();
+    await tester.pump(const Duration(seconds: 3));
+    resources.dispose();
+  });
+
   testWidgets('MD3 选择菜单围绕当前项展开并返回新选择', (tester) async {
     int selected = 1;
     await tester.pumpWidget(
@@ -307,6 +320,39 @@ void main() {
 
     expect(decodeSpectrumPacket(bytes, expectedBandCount: 32), isNull);
     expect(decodeSpectrumPacket(Uint8List(8), expectedBandCount: 32), isNull);
+  });
+
+  test('MusicFetcher 封面帧保留版本并提取原始图片字节', () {
+    final versionBytes = utf8.encode('cover-v2');
+    final imageBytes = Uint8List.fromList(<int>[0x89, 0x50, 0x4e, 0x47]);
+    final payload = Uint8List(2 + versionBytes.length + imageBytes.length);
+    ByteData.sublistView(
+      payload,
+    ).setUint16(0, versionBytes.length, Endian.little);
+    payload.setRange(2, 2 + versionBytes.length, versionBytes);
+    payload.setRange(2 + versionBytes.length, payload.length, imageBytes);
+
+    final artwork = MusicFetcherProtocol.decodeArtwork(payload);
+
+    expect(artwork, isNotNull);
+    expect(artwork!.version, 'cover-v2');
+    expect(artwork.bytes, imageBytes);
+  });
+
+  test('MusicFetcher 播放命令使用版本化帧并保持固定编码', () {
+    final frame = MusicFetcherProtocol.encodeFrame(
+      MusicFetcherProtocol.commandType,
+      Uint8List.fromList(<int>[MediaCommand.next.wireValue]),
+    );
+    final data = ByteData.sublistView(frame);
+
+    expect(data.getUint32(0, Endian.little), MusicFetcherProtocol.magic);
+    expect(data.getUint8(4), MusicFetcherProtocol.version);
+    expect(data.getUint8(5), MusicFetcherProtocol.commandType);
+    expect(data.getUint32(8, Endian.little), 1);
+    expect(frame[MusicFetcherProtocol.headerSize], 3);
+    expect(MediaCommand.previous.httpValue, 'PREV');
+    expect(MediaCommand.togglePlayPause.httpValue, 'TOGGLE');
   });
 
   test('组件固定尺寸档位保持可预期比例', () {

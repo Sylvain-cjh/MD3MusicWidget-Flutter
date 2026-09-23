@@ -8,13 +8,16 @@ import 'package:window_manager/window_manager.dart';
 import 'package:tray_manager/tray_manager.dart' as tm;
 
 import '../core/app_state.dart';
+import '../core/artwork_resources.dart';
 import '../core/media_provider.dart';
 import '../core/music_fetcher_provider.dart';
+import '../core/platform_provider.dart';
 import '../core/spectrum_packet.dart';
 import 'animations/component_size_motion.dart';
 import 'widgets/dynamic_background.dart';
 import 'widgets/locked_aspect_resize_area.dart';
 import 'widgets/track_controls.dart';
+import 'widgets/music_lyrics_panel.dart';
 import 'widgets/slide_menu.dart';
 import 'widgets/settings_panel.dart';
 
@@ -46,10 +49,14 @@ class _PlayerViewState extends State<PlayerView>
   );
   String _latestCoverVersion = "";
   bool _coverRequestInFlight = false;
+  Timer? _coverFallbackTimer;
   int _colorSchemeRequestSerial = 0;
   String _legacyCoverFingerprint = "";
   bool _fetcherRestartInFlight = false;
   int _lastFetcherRestartAtMs = 0;
+  int _fetcherRestartFailures = 0;
+  int _nextFetcherRestartAtMs = 0;
+  late final ArtworkResources _artworkResources;
   int _lastInfoSuccessAtMs = 0;
   int _lastFetcherHeartbeatAtMs = 0;
   int _infoFailureStreak = 0;
@@ -123,6 +130,7 @@ class _PlayerViewState extends State<PlayerView>
   @override
   void initState() {
     super.initState();
+    _artworkResources = ArtworkResources();
     windowManager.addListener(this);
     tm.trayManager.addListener(this);
 
@@ -152,9 +160,12 @@ class _PlayerViewState extends State<PlayerView>
     _pollingTimer?.cancel();
     _spectrumTimer?.cancel();
     _mediaReconnectTimer?.cancel();
+    _coverFallbackTimer?.cancel();
+    AppState.mediaCommandSender = null;
     unawaited(_mediaProviderSubscription?.cancel());
     unawaited(_mediaProvider?.close());
     _resizeSaveTimer?.cancel();
+    _artworkResources.dispose();
     windowManager.removeListener(this);
     tm.trayManager.removeListener(this);
     _httpBaseClient.close(force: true);
@@ -287,6 +298,8 @@ class _PlayerViewState extends State<PlayerView>
     _pollingTimer?.cancel();
     _spectrumTimer?.cancel();
     _mediaReconnectTimer?.cancel();
+    _coverFallbackTimer?.cancel();
+    AppState.mediaCommandSender = null;
     await _mediaProviderSubscription?.cancel();
     await _mediaProvider?.close();
     _httpBaseClient.close(force: true);
@@ -344,6 +357,7 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   Future<void> _clearCover() async {
+    _coverFallbackTimer?.cancel();
     _latestCoverVersion = "";
     if (AppState.coverProvider == null &&
         AppState.currentCoverVersion.isEmpty) {
@@ -353,16 +367,20 @@ class _PlayerViewState extends State<PlayerView>
     AppState.currentCoverVersion = "";
     AppState.currentRawBase64 = "";
     _legacyCoverFingerprint = "";
+    unawaited(_artworkResources.retire(AppState.coverProvider));
+    unawaited(_artworkResources.retire(AppState.bgBlurProvider));
     if (mounted) {
       setState(() {
         AppState.coverProvider = null;
         AppState.bgBlurProvider = null;
       });
       await _updateColorScheme();
+      _artworkResources.trimWhenIdle();
     }
   }
 
   Future<void> _loadCover(String version) async {
+    _coverFallbackTimer?.cancel();
     _latestCoverVersion = version;
     if (version.isEmpty) {
       await _clearCover();
@@ -378,19 +396,7 @@ class _PlayerViewState extends State<PlayerView>
         Uri.http('localhost:12580', '/cover'),
         timeout: const Duration(milliseconds: 700),
       );
-      if (!mounted || bytes.isEmpty || version != _latestCoverVersion) return;
-
-      
-      
-      final image = MemoryImage(bytes);
-      AppState.currentCoverVersion = version;
-      AppState.currentRawBase64 = "";
-      setState(() {
-        AppState.coverProvider = image;
-        AppState.bgBlurProvider = ResizeImage(image, width: 256);
-      });
-      AppState.notifyBackgroundChanged();
-      await _updateColorScheme();
+      await _applyCoverBytes(version, bytes);
     } catch (_) {
       
     } finally {
@@ -408,6 +414,83 @@ class _PlayerViewState extends State<PlayerView>
         });
       }
     }
+  }
+
+  Future<void> _applyCoverBytes(String version, Uint8List bytes) async {
+    if (!mounted ||
+        version.isEmpty ||
+        bytes.isEmpty ||
+        version != _latestCoverVersion) {
+      return;
+    }
+    _coverFallbackTimer?.cancel();
+    if (version == AppState.currentCoverVersion &&
+        AppState.coverProvider != null) {
+      return;
+    }
+
+    final image = MemoryImage(bytes);
+    final coverReady = await _precacheArtwork(image);
+    if (!mounted || version != _latestCoverVersion || !coverReady) {
+      unawaited(_artworkResources.retire(image));
+      if (mounted &&
+          version == _latestCoverVersion &&
+          version != AppState.currentCoverVersion &&
+          !coverReady) {
+        await _clearCover();
+      }
+      return;
+    }
+    final background = ResizeImage(image, width: 256);
+    final backgroundReady = await _precacheArtwork(background);
+    if (!mounted || version != _latestCoverVersion || !backgroundReady) {
+      unawaited(_artworkResources.retire(image));
+      unawaited(_artworkResources.retire(background));
+      if (mounted &&
+          version == _latestCoverVersion &&
+          version != AppState.currentCoverVersion &&
+          !backgroundReady) {
+        await _clearCover();
+      }
+      return;
+    }
+    unawaited(_artworkResources.retire(AppState.coverProvider));
+    unawaited(_artworkResources.retire(AppState.bgBlurProvider));
+    AppState.currentCoverVersion = version;
+    AppState.currentRawBase64 = "";
+    setState(() {
+      AppState.coverProvider = image;
+      AppState.bgBlurProvider = background;
+    });
+    AppState.notifyBackgroundChanged();
+    await _updateColorScheme();
+  }
+
+  Future<bool> _precacheArtwork(ImageProvider provider) async {
+    Object? decodeError;
+    try {
+      await precacheImage(
+        provider,
+        context,
+        onError: (error, stack) {
+          decodeError = error;
+        },
+      );
+    } catch (_) {
+      return false;
+    }
+    return decodeError == null;
+  }
+
+  void _scheduleCoverFallback(String version) {
+    _coverFallbackTimer?.cancel();
+    _coverFallbackTimer = Timer(const Duration(milliseconds: 420), () {
+      if (mounted &&
+          version == _latestCoverVersion &&
+          version != AppState.currentCoverVersion) {
+        unawaited(_loadCover(version));
+      }
+    });
   }
 
   
@@ -724,11 +807,20 @@ class _PlayerViewState extends State<PlayerView>
           ? snapshot.timelineUpdatedAtMs
           : DateTime.now().millisecondsSinceEpoch,
     );
+    AppState.currentPlatformTrack = PlatformTrack.fromSnapshot(snapshot);
+    AppState.refreshLyrics();
+    if (AppState.showLyrics) {
+      AppState.lyrics.setPositionMs(AppState.estimatedPlaybackPositionMs);
+    }
 
     _latestCoverVersion = snapshot.coverVersion;
     if (snapshot.coverVersion.isNotEmpty &&
         snapshot.coverVersion != AppState.currentCoverVersion) {
-      unawaited(_loadCover(snapshot.coverVersion));
+      if (_mediaProvider?.isConnected == true) {
+        _scheduleCoverFallback(snapshot.coverVersion);
+      } else {
+        unawaited(_loadCover(snapshot.coverVersion));
+      }
     } else if (snapshot.coverVersion.isEmpty &&
         snapshot.legacyCoverBase64.isNotEmpty) {
       unawaited(_loadLegacyCover(snapshot.legacyCoverBase64));
@@ -751,9 +843,16 @@ class _PlayerViewState extends State<PlayerView>
         if (decoded != null) {
           AppState.updateSpectrumTyped(decoded.levels, decoded.updatedAtMs);
         }
+      case MediaArtworkEvent(:final version, :final bytes):
+        unawaited(_applyCoverBytes(version, bytes));
       case MediaHeartbeatEvent():
         _recordFetcherHeartbeat();
       case MediaDisconnectedEvent():
+        AppState.mediaCommandSender = null;
+        if (_latestCoverVersion.isNotEmpty &&
+            _latestCoverVersion != AppState.currentCoverVersion) {
+          unawaited(_loadCover(_latestCoverVersion));
+        }
         if (mounted) _syncSpectrumPolling();
     }
   }
@@ -767,7 +866,10 @@ class _PlayerViewState extends State<PlayerView>
     );
     _mediaProviderConnectInFlight = true;
     try {
-      if (await provider.connect() && mounted) _syncSpectrumPolling();
+      if (await provider.connect() && mounted) {
+        AppState.mediaCommandSender = provider.sendCommand;
+        _syncSpectrumPolling();
+      }
     } finally {
       _mediaProviderConnectInFlight = false;
     }
@@ -776,7 +878,9 @@ class _PlayerViewState extends State<PlayerView>
   Future<void> _restartFetcher() async {
     if (!mounted || _fetcherRestartInFlight) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastFetcherRestartAtMs < 5000) return;
+    if (now - _lastFetcherRestartAtMs < 5000 || now < _nextFetcherRestartAtMs) {
+      return;
+    }
     _fetcherRestartInFlight = true;
     _lastFetcherRestartAtMs = now;
     try {
@@ -792,10 +896,20 @@ class _PlayerViewState extends State<PlayerView>
       _spectrumBinarySupported = true;
       _spectrumBinaryFailureStreak = 0;
       _lastFetcherHeartbeatAtMs = 0;
-      await _waitForFetcherReady();
+      if (await _waitForFetcherReady()) {
+        _fetcherRestartFailures = 0;
+        _nextFetcherRestartAtMs = 0;
+      } else {
+        _fetcherRestartFailures++;
+      }
     } catch (_) {
-      
+      _fetcherRestartFailures++;
     } finally {
+      if (_fetcherRestartFailures > 0) {
+        _nextFetcherRestartAtMs =
+            DateTime.now().millisecondsSinceEpoch +
+            math.min(60000, 5000 * (1 << math.min(_fetcherRestartFailures, 4)));
+      }
       _fetcherRestartInFlight = false;
     }
   }
@@ -1155,6 +1269,7 @@ class _PlayerViewState extends State<PlayerView>
         _settingsSide = _menuSide;
       }
       await _animateToTargetLayout(serial);
+      if (!_isSettingsOpen) _artworkResources.trimWhenIdle();
     } finally {
       if (_isCurrentWindowTransition(serial)) {
         setState(() => _isTransitioning = false);
@@ -1349,6 +1464,7 @@ class _PlayerViewState extends State<PlayerView>
     double innerPlayerH = AppState.innerPlayerHeightOf(AppState.widgetLayout);
     double corePlayerH = AppState.corePlayerHeightOf(AppState.widgetLayout);
     bool spectrumVisible = AppState.spectrumMode != SpectrumMode.off;
+    bool lyricsVisible = AppState.showLyrics;
     double playerHorizontalPadding = isV ? 24.0 : 16.0;
 
     double innerSettingsW = isV
@@ -1445,7 +1561,10 @@ class _PlayerViewState extends State<PlayerView>
             opacity: isOpen ? 1.0 : 0.0,
             child: IgnorePointer(
               ignoring: !isOpen,
-              child: _buildSettingsPanel(),
+              child: TickerMode(
+                enabled: isOpen || _isTransitioning,
+                child: _buildSettingsPanel(),
+              ),
             ),
           ),
         ),
@@ -1490,6 +1609,26 @@ class _PlayerViewState extends State<PlayerView>
                         mode: AppState.spectrumMode,
                         isPlaying: AppState.isPlaying,
                       ),
+                    ),
+                  ),
+                ),
+                AnimatedPositioned(
+                  duration: AppState.layoutSwitchDuration,
+                  curve: AppState.layoutSwitchCurve,
+                  left: playerHorizontalPadding,
+                  top:
+                      corePlayerH +
+                      AppState.spectrumPanelExtentOf(AppState.widgetLayout) +
+                      8.0,
+                  width: innerPlayerW - playerHorizontalPadding * 2,
+                  height: lyricsVisible ? 48.0 : 0.0,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    opacity: lyricsVisible ? 1.0 : 0.0,
+                    child: IgnorePointer(
+                      ignoring: !lyricsVisible,
+                      child: const MusicLyricsPanel(),
                     ),
                   ),
                 ),

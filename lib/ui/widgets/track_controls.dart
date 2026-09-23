@@ -135,19 +135,26 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
       AppState.mediaCapabilities,
       MediaCapability.timeline,
     );
-    final bool canPrevious = MediaCapability.supports(
-      AppState.mediaCapabilities,
-      MediaCapability.previous,
-    );
-    final bool canPlayPause = MediaCapability.supports(
-      AppState.mediaCapabilities,
-      MediaCapability.playPause,
-    );
-    final bool canNext = MediaCapability.supports(
-      AppState.mediaCapabilities,
-      MediaCapability.next,
-    );
+    final bool canPrevious =
+        AppState.showPlaybackControls &&
+        MediaCapability.supports(
+          AppState.mediaCapabilities,
+          MediaCapability.previous,
+        );
+    final bool canPlayPause =
+        AppState.showPlaybackControls &&
+        MediaCapability.supports(
+          AppState.mediaCapabilities,
+          MediaCapability.playPause,
+        );
+    final bool canNext =
+        AppState.showPlaybackControls &&
+        MediaCapability.supports(
+          AppState.mediaCapabilities,
+          MediaCapability.next,
+        );
     final bool hasProgress = _hasTimeline && canShowTimeline;
+    final bool hasControls = canPrevious || canPlayPause || canNext;
 
     return Builder(
       builder: (context) {
@@ -195,10 +202,11 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
           artistH = artistFontSize * 1.38;
           progressH = hasProgress ? md3ProgressHeight : 0.0;
           progressW = (infoW * 0.78).clamp(180.0, 228.0);
-          playH = (availableH * 0.116).clamp(52.0, 60.0);
+          playH = hasControls ? (availableH * 0.116).clamp(52.0, 60.0) : 0.0;
           btnH = playH * 0.83;
 
-          final int gapCount = hasProgress ? 4 : 3;
+          final int gapCount =
+              2 + (hasProgress ? 1 : 0) + (hasControls ? 1 : 0);
           final double desiredGap = (availableH * 0.024).clamp(8.0, 14.0);
           final double nonCoverHeight = titleH + artistH + progressH + playH;
           final double coverSpace =
@@ -242,10 +250,11 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
             80.0,
             availableH - padding * 2.0,
           );
-          playH = (contentHeight * 0.44).clamp(48.0, 58.0);
+          playH = hasControls ? (contentHeight * 0.44).clamp(48.0, 58.0) : 0.0;
           btnH = playH * 0.83;
 
-          final int gapCount = hasProgress ? 3 : 2;
+          final int gapCount =
+              1 + (hasProgress ? 1 : 0) + (hasControls ? 1 : 0);
           final double fixedHeight = titleH + artistH + progressH + playH;
           final double gap = ((contentHeight - fixedHeight) / gapCount).clamp(
             2.0,
@@ -504,7 +513,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                         ),
                         onTap: () {
                           _globalSlideDirection = -1;
-                          AppState.sendCommand("PREV");
+                          AppState.sendCommand(MediaCommand.previous);
                         },
                       ),
                     )
@@ -535,7 +544,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                         color: AppState.currentScheme.onPrimary,
                       ),
                       onTap: () {
-                        AppState.sendCommand("TOGGLE");
+                        AppState.sendCommand(MediaCommand.togglePlayPause);
                         setState(
                           () => AppState.isPlaying = !AppState.isPlaying,
                         );
@@ -572,7 +581,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                         ),
                         onTap: () {
                           _globalSlideDirection = 1;
-                          AppState.sendCommand("NEXT");
+                          AppState.sendCommand(MediaCommand.next);
                         },
                       ),
                     )
@@ -871,6 +880,7 @@ class MusicSpectrumPanel extends StatefulWidget {
 
 class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
     with SingleTickerProviderStateMixin {
+  static final ImageFilter _glassBlur = ImageFilter.blur(sigmaX: 13, sigmaY: 13);
   late final AnimationController _controller;
   final Float32List _displayLevels = Float32List(AppState.spectrumBandCount);
   final Float32List _startLevels = Float32List(AppState.spectrumBandCount);
@@ -936,7 +946,7 @@ class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
     return ClipRRect(
       borderRadius: radius,
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 13, sigmaY: 13),
+        filter: _glassBlur,
         child: DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(

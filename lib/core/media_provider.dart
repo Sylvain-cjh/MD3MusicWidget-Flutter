@@ -9,6 +9,8 @@ abstract final class MediaCapability {
   static const int next = 1 << 5;
   static const int seek = 1 << 6;
   static const int spectrum = 1 << 7;
+  static const int lyrics = 1 << 8;
+  static const int queue = 1 << 9;
 
   static const int smtcDefault =
       metadata |
@@ -24,8 +26,20 @@ abstract final class MediaCapability {
       capabilities & capability != 0;
 }
 
+enum MediaCommand {
+  previous(1, 'PREV'),
+  togglePlayPause(2, 'TOGGLE'),
+  next(3, 'NEXT');
+
+  final int wireValue;
+  final String httpValue;
+
+  const MediaCommand(this.wireValue, this.httpValue);
+}
+
 final class MediaSnapshot {
   final int processId;
+  final String sourceAppId;
   final String title;
   final String artist;
   final String trackVersion;
@@ -40,6 +54,7 @@ final class MediaSnapshot {
 
   const MediaSnapshot({
     required this.processId,
+    this.sourceAppId = '',
     required this.title,
     required this.artist,
     required this.trackVersion,
@@ -55,6 +70,7 @@ final class MediaSnapshot {
 
   factory MediaSnapshot.fromJson(Map<String, dynamic> data) => MediaSnapshot(
     processId: (data['processId'] as num?)?.toInt() ?? 0,
+    sourceAppId: data['sourceAppId']?.toString() ?? '',
     title: data['title']?.toString() ?? '未知歌曲',
     artist: data['artist']?.toString() ?? '未知歌手',
     trackVersion: data['trackVersion']?.toString() ?? '',
@@ -86,6 +102,13 @@ final class MediaSpectrumEvent extends MediaProviderEvent {
   const MediaSpectrumEvent(this.packet);
 }
 
+final class MediaArtworkEvent extends MediaProviderEvent {
+  final String version;
+  final Uint8List bytes;
+
+  const MediaArtworkEvent(this.version, this.bytes);
+}
+
 final class MediaHeartbeatEvent extends MediaProviderEvent {
   const MediaHeartbeatEvent();
 }
@@ -102,5 +125,6 @@ abstract interface class MediaProvider {
 
   Future<bool> connect();
   void setSpectrumEnabled(bool enabled);
+  bool sendCommand(MediaCommand command);
   Future<void> close();
 }

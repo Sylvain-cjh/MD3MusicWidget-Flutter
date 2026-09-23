@@ -15,10 +15,14 @@ namespace MusicFetcher
     class Program
     {
         private const int MediaCapabilities = 0xFF;
+        private const byte PreviousCommand = 1;
+        private const byte TogglePlayPauseCommand = 2;
+        private const byte NextCommand = 3;
         private static readonly int ProcessId = Environment.ProcessId;
         private static byte[] _currentInfoBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
             processId = ProcessId,
+            sourceAppId = "",
             isPlaying = false,
             title = "暂无音乐播放",
             artist = "请打开播放软件",
@@ -154,11 +158,13 @@ namespace MusicFetcher
             {
                 _streamHub = new StreamHub(
                     GetCurrentInfoBytes,
+                    GetCurrentArtwork,
                     () =>
                     {
                         bool available = _spectrumAnalyzer.TryActivate();
                         return _spectrumAnalyzer.GetCompactSnapshot(available);
-                    }
+                    },
+                    ExecuteMediaCommandAsync
                 );
                 _streamHub.Start();
 
@@ -185,6 +191,24 @@ namespace MusicFetcher
         private static byte[] GetCurrentInfoBytes()
         {
             lock (_stateLock) return _currentInfoBytes;
+        }
+
+        private static (string Version, byte[] Bytes) GetCurrentArtwork()
+        {
+            lock (_stateLock)
+                return (_currentCoverVersion, (byte[])_currentCover.Clone());
+        }
+
+        private static async Task ExecuteMediaCommandAsync(byte command)
+        {
+            var session = _manager?.GetCurrentSession();
+            if (session == null) return;
+            if (command == TogglePlayPauseCommand)
+                await session.TryTogglePlayPauseAsync();
+            else if (command == NextCommand)
+                await session.TrySkipNextAsync();
+            else if (command == PreviousCommand)
+                await session.TrySkipPreviousAsync();
         }
 
         private static async Task StartSmtcListeningLoop()
@@ -317,6 +341,7 @@ namespace MusicFetcher
                             var info = new
                             {
                                 processId = ProcessId,
+                                sourceAppId = sourceApp,
                                 isPlaying,
                                 title,
                                 artist,
@@ -333,6 +358,12 @@ namespace MusicFetcher
                             byte[] infoBytes = JsonSerializer.SerializeToUtf8Bytes(info);
                             lock (_stateLock) _currentInfoBytes = infoBytes;
                             _streamHub?.PublishInfo(infoBytes);
+                            if (coverVersion != lastCoverVersion && coverVersion.Length > 0)
+                            {
+                                var artwork = GetCurrentArtwork();
+                                if (artwork.Version == coverVersion && artwork.Bytes.Length > 0)
+                                    _streamHub?.PublishArtwork(artwork.Version, artwork.Bytes);
+                            }
 
                             lastTitle = title;
                             lastArtist = artist;
@@ -358,6 +389,7 @@ namespace MusicFetcher
                             byte[] infoBytes = JsonSerializer.SerializeToUtf8Bytes(new
                             {
                                 processId = ProcessId,
+                                sourceAppId = "",
                                 isPlaying = false,
                                 title = "暂无音乐播放",
                                 artist = "请打开播放软件",
@@ -480,7 +512,9 @@ namespace MusicFetcher
                             error = snapshot.Error,
                             rms = snapshot.Rms,
                             sampleFrames = snapshot.SampleFrames,
-                            format = snapshot.Format
+                            format = snapshot.Format,
+                            captureMode = snapshot.CaptureMode,
+                            targetProcessId = snapshot.TargetProcessId
                         });
                         await WriteHttpResponseAsync(
                             stream,
@@ -521,13 +555,9 @@ namespace MusicFetcher
                     else if (path == "/command")
                     {
                         string? cmd = QueryValue(uri, "cmd");
-                        var session = _manager?.GetCurrentSession();
-                        if (session != null && !string.IsNullOrEmpty(cmd))
-                        {
-                            if (cmd == "TOGGLE") await session.TryTogglePlayPauseAsync();
-                            else if (cmd == "NEXT") await session.TrySkipNextAsync();
-                            else if (cmd == "PREV") await session.TrySkipPreviousAsync();
-                        }
+                        if (cmd == "TOGGLE") await ExecuteMediaCommandAsync(TogglePlayPauseCommand);
+                        else if (cmd == "NEXT") await ExecuteMediaCommandAsync(NextCommand);
+                        else if (cmd == "PREV") await ExecuteMediaCommandAsync(PreviousCommand);
                         await WriteHttpResponseAsync(stream, 200, null, Array.Empty<byte>());
                     }
                     else

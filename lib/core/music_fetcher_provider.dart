@@ -4,23 +4,20 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'media_provider.dart';
+import 'music_fetcher_protocol.dart';
+import 'music_fetcher_frame_decoder.dart';
 
 final class MusicFetcherProvider implements MediaProvider {
-  static const int _magic = 0x3153574d;
-  static const int _protocolVersion = 1;
-  static const int _headerSize = 12;
-  static const int _maxPayloadSize = 16 * 1024 * 1024;
-
-  static const int _typeInfo = 1;
-  static const int _typeSpectrum = 2;
-  static const int _typeHeartbeat = 3;
-  static const int _typeSetSpectrum = 16;
-
   final StreamController<MediaProviderEvent> _events =
       StreamController<MediaProviderEvent>.broadcast(sync: true);
   Socket? _socket;
   StreamSubscription<Uint8List>? _socketSubscription;
-  Uint8List _pending = Uint8List(0);
+  late final MusicFetcherFrameDecoder _decoder = MusicFetcherFrameDecoder(
+    _handleFrame,
+  );
+  Timer? _heartbeatWatchdog;
+  final Stopwatch _lastFrame = Stopwatch();
+  bool _closed = false;
   int _connectionSerial = 0;
   bool _spectrumEnabled = false;
 
@@ -32,6 +29,7 @@ final class MusicFetcherProvider implements MediaProvider {
 
   @override
   Future<bool> connect() async {
+    if (_closed) return false;
     if (_socket != null) return true;
     final int serial = ++_connectionSerial;
     try {
@@ -45,7 +43,7 @@ final class MusicFetcherProvider implements MediaProvider {
         return false;
       }
       socket.setOption(SocketOption.tcpNoDelay, true);
-      _pending = Uint8List(0);
+      _decoder.reset();
       _socket = socket;
       _socketSubscription = socket.listen(
         _handleBytes,
@@ -56,6 +54,18 @@ final class MusicFetcherProvider implements MediaProvider {
         cancelOnError: true,
       );
       setSpectrumEnabled(_spectrumEnabled);
+      _lastFrame
+        ..reset()
+        ..start();
+      _heartbeatWatchdog?.cancel();
+      _heartbeatWatchdog = Timer.periodic(const Duration(seconds: 2), (_) {
+        if (_lastFrame.elapsed > const Duration(seconds: 6)) {
+          _handleDisconnect(
+            serial,
+            const SocketException('Media stream timed out'),
+          );
+        }
+      });
       return true;
     } catch (error) {
       if (serial == _connectionSerial) {
@@ -66,47 +76,18 @@ final class MusicFetcherProvider implements MediaProvider {
   }
 
   void _handleBytes(Uint8List chunk) {
-    if (chunk.isEmpty) return;
-    final Uint8List combined = Uint8List(_pending.length + chunk.length)
-      ..setRange(0, _pending.length, _pending)
-      ..setRange(_pending.length, _pending.length + chunk.length, chunk);
-    int offset = 0;
-    while (combined.length - offset >= _headerSize) {
-      final ByteData header = ByteData.sublistView(
-        combined,
-        offset,
-        offset + _headerSize,
-      );
-      if (header.getUint32(0, Endian.little) != _magic ||
-          header.getUint8(4) != _protocolVersion) {
-        _socket?.destroy();
-        return;
-      }
-      final int type = header.getUint8(5);
-      final int payloadLength = header.getUint32(8, Endian.little);
-      if (payloadLength > _maxPayloadSize) {
-        _socket?.destroy();
-        return;
-      }
-      final int frameLength = _headerSize + payloadLength;
-      if (combined.length - offset < frameLength) break;
-      final Uint8List payload = Uint8List.sublistView(
-        combined,
-        offset + _headerSize,
-        offset + frameLength,
-      );
-      _handleFrame(type, payload);
-      offset += frameLength;
+    try {
+      _decoder.add(chunk);
+    } on FormatException catch (error) {
+      _handleDisconnect(_connectionSerial, error);
     }
-    _pending = offset == combined.length
-        ? Uint8List(0)
-        : Uint8List.fromList(combined.sublist(offset));
   }
 
   void _handleFrame(int type, Uint8List payload) {
+    _lastFrame.reset();
     try {
       switch (type) {
-        case _typeInfo:
+        case MusicFetcherProtocol.infoType:
           final Object? decoded = jsonDecode(utf8.decode(payload));
           if (decoded is Map) {
             _events.add(
@@ -116,11 +97,18 @@ final class MusicFetcherProvider implements MediaProvider {
             );
           }
           break;
-        case _typeSpectrum:
-          _events.add(MediaSpectrumEvent(Uint8List.fromList(payload)));
+        case MusicFetcherProtocol.spectrumType:
+          _events.add(MediaSpectrumEvent(payload));
           break;
-        case _typeHeartbeat:
+        case MusicFetcherProtocol.heartbeatType:
           _events.add(const MediaHeartbeatEvent());
+          break;
+        case MusicFetcherProtocol.artworkType:
+          final MusicFetcherArtwork? artwork =
+              MusicFetcherProtocol.decodeArtwork(payload);
+          if (artwork != null) {
+            _events.add(MediaArtworkEvent(artwork.version, artwork.bytes));
+          }
           break;
       }
     } catch (_) {
@@ -134,41 +122,53 @@ final class MusicFetcherProvider implements MediaProvider {
     final Socket? socket = _socket;
     if (socket == null) return;
     final Uint8List payload = Uint8List.fromList(<int>[enabled ? 1 : 0]);
-    socket.add(_encodeFrame(_typeSetSpectrum, payload));
+    socket.add(
+      MusicFetcherProtocol.encodeFrame(
+        MusicFetcherProtocol.setSpectrumType,
+        payload,
+      ),
+    );
   }
 
-  Uint8List _encodeFrame(int type, Uint8List payload) {
-    final ByteData frame = ByteData(_headerSize + payload.length);
-    frame.setUint32(0, _magic, Endian.little);
-    frame.setUint8(4, _protocolVersion);
-    frame.setUint8(5, type);
-    frame.setUint16(6, 0, Endian.little);
-    frame.setUint32(8, payload.length, Endian.little);
-    frame.buffer.asUint8List().setRange(
-      _headerSize,
-      frame.lengthInBytes,
-      payload,
+  @override
+  bool sendCommand(MediaCommand command) {
+    final Socket? socket = _socket;
+    if (socket == null) return false;
+    socket.add(
+      MusicFetcherProtocol.encodeFrame(
+        MusicFetcherProtocol.commandType,
+        Uint8List.fromList(<int>[command.wireValue]),
+      ),
     );
-    return frame.buffer.asUint8List();
+    return true;
   }
 
   void _handleDisconnect(int serial, [Object? error]) {
     if (serial != _connectionSerial) return;
+    _connectionSerial++;
+    _heartbeatWatchdog?.cancel();
+    _lastFrame.stop();
+    unawaited(_socketSubscription?.cancel());
     _socketSubscription = null;
     _socket?.destroy();
     _socket = null;
-    _pending = Uint8List(0);
+    _decoder.reset();
     _events.add(MediaDisconnectedEvent(error));
   }
 
   @override
   Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
     _connectionSerial++;
+    _heartbeatWatchdog?.cancel();
+    _lastFrame.stop();
     final StreamSubscription<Uint8List>? subscription = _socketSubscription;
     _socketSubscription = null;
     if (subscription != null) await subscription.cancel();
-    await _socket?.close();
+    _socket?.destroy();
     _socket = null;
+    _decoder.reset();
     await _events.close();
   }
 }

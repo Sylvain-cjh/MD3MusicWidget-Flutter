@@ -8,6 +8,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 
 import 'media_provider.dart';
+import 'lyrics_coordinator.dart';
+import 'local_lrc_lyrics_provider.dart';
+import 'lrclib_lyrics_provider.dart';
+import 'qq_music_lyrics_provider.dart';
+import 'platform_provider.dart';
 
 
 
@@ -25,6 +30,8 @@ enum GlowMode { waterfall, wallpaper }
 
 enum SpectrumMode { off, bars, mirror, waveform }
 
+enum LyricsProviderChoice { lrclib, localLrc, qqMusic }
+
 enum MD3ProgressStyle { linear, pill, segmented }
 
 enum WidgetLayout { horizontal, vertical }
@@ -39,6 +46,35 @@ class AppState {
   static String trackVersion = "";
   static bool isPlaying = false;
   static int mediaCapabilities = MediaCapability.smtcDefault;
+  static String localLyricsDirectory = '';
+  static PlatformTrack? currentPlatformTrack;
+  static final LrclibLyricsProvider _lrclibLyrics = LrclibLyricsProvider();
+  static final PlatformProviderRegistry platformProviders =
+      PlatformProviderRegistry()
+        ..register(_lrclibLyrics)
+        ..register(LocalLrcLyricsProvider(() => localLyricsDirectory))
+        ..register(QqMusicLyricsProvider(fallback: _lrclibLyrics));
+  static final LyricsCoordinator lyrics = LyricsCoordinator(platformProviders);
+
+  static void refreshLyrics({bool force = false}) {
+    unawaited(
+      lyrics.setTrack(
+        showLyrics ? currentPlatformTrack : null,
+        providerId: lyricsProviderChoice.name,
+        force: force,
+      ),
+    );
+  }
+
+  static void setLocalLyricsDirectory(String path) {
+    localLyricsDirectory = path;
+    platformProviders.register(
+      LocalLrcLyricsProvider(() => localLyricsDirectory),
+    );
+    refreshLyrics();
+  }
+
+  static bool Function(MediaCommand command)? mediaCommandSender;
   static double playbackPositionMs = 0.0;
   static double playbackDurationMs = 0.0;
   static int playbackUpdatedAtMs = 0;
@@ -157,10 +193,14 @@ class AppState {
   static bool enableGlow = true;
   static GlowMode glowMode = GlowMode.waterfall;
   static SpectrumMode spectrumMode = SpectrumMode.off;
+  static bool showLyrics = false;
+  static LyricsProviderChoice lyricsProviderChoice =
+      LyricsProviderChoice.lrclib;
   static MD3ProgressStyle progressStyle = MD3ProgressStyle.linear;
   static bool enableProgressAutoContrast = true;
   static bool enableOledTheme = false;
   static bool enable3DCover = true;
+  static bool showPlaybackControls = true;
   static DynamicSchemeVariant themeVariant = DynamicSchemeVariant.tonalSpot;
 
   
@@ -230,12 +270,14 @@ class AppState {
   static const double cardMargin = 0.0;
   static double innerPlayerWidthOf(WidgetLayout l) =>
       l == WidgetLayout.vertical ? 340.0 : 480.0;
-  static double corePlayerHeightOf(WidgetLayout l) =>
-      l == WidgetLayout.vertical ? 520.0 : 176.0;
+  static double corePlayerHeightOf(WidgetLayout l) => l == WidgetLayout.vertical
+      ? (showPlaybackControls ? 520.0 : 448.0)
+      : (showPlaybackControls ? 176.0 : 140.0);
   static double spectrumPanelExtentOf(WidgetLayout l) =>
       spectrumMode == SpectrumMode.off ? 0.0 : 64.0;
+  static double lyricsPanelExtentOf(WidgetLayout l) => showLyrics ? 64.0 : 0.0;
   static double innerPlayerHeightOf(WidgetLayout l) =>
-      corePlayerHeightOf(l) + spectrumPanelExtentOf(l);
+      corePlayerHeightOf(l) + spectrumPanelExtentOf(l) + lyricsPanelExtentOf(l);
   static double unscaledBaseWindowWidthOf(WidgetLayout l) =>
       innerPlayerWidthOf(l) + cardMargin * 2;
   static double unscaledBaseWindowHeightOf(WidgetLayout l) =>
@@ -285,7 +327,7 @@ class AppState {
   
   
   static const double canvasWidth = 700.0;
-  static const double canvasHeight = 700.0;
+  static const double canvasHeight = 800.0;
   static double get menuWindowWidth =>
       baseWindowWidth + _menuExtraSpace * componentScale;
   static double get menuExtraSpace => _menuExtraSpace * componentScale;
@@ -358,13 +400,14 @@ class AppState {
     ..idleTimeout = const Duration(seconds: 2)
     ..maxConnectionsPerHost = 2;
 
-  static Future<void> sendCommand(String command) async {
+  static Future<void> sendCommand(MediaCommand command) async {
+    if (mediaCommandSender?.call(command) == true) return;
     HttpClientRequest? request;
     try {
       request = await _commandClient
           .getUrl(
             Uri.http('localhost:12580', '/command', <String, String>{
-              'cmd': command,
+              'cmd': command.httpValue,
             }),
           )
           .timeout(const Duration(milliseconds: 350));
@@ -527,6 +570,15 @@ class AppState {
           snapshot['spectrumMode'],
           SpectrumMode.off,
         );
+        showLyrics = snapshot['showLyrics'] == true;
+        lyricsProviderChoice = _enumFromName(
+          LyricsProviderChoice.values,
+          snapshot['lyricsProviderChoice'],
+          LyricsProviderChoice.lrclib,
+        );
+        localLyricsDirectory = snapshot['localLyricsDirectory'] is String
+            ? snapshot['localLyricsDirectory'] as String
+            : '';
         progressStyle = _enumFromName(
           MD3ProgressStyle.values,
           snapshot['progressStyle'],
@@ -539,6 +591,9 @@ class AppState {
         enableOledTheme = snapshot['enableOledTheme'] is bool
             ? snapshot['enableOledTheme'] as bool
             : false;
+        showPlaybackControls = snapshot['showPlaybackControls'] is bool
+            ? snapshot['showPlaybackControls'] as bool
+            : true;
         enable3DCover = snapshot['enable3DCover'] is bool
             ? snapshot['enable3DCover'] as bool
             : true;
@@ -617,6 +672,13 @@ class AppState {
       p.getInt('spectrumMode'),
       SpectrumMode.off,
     );
+    showLyrics = p.getBool('showLyrics') ?? false;
+    lyricsProviderChoice = _enumFromIndex(
+      LyricsProviderChoice.values,
+      p.getInt('lyricsProviderChoice'),
+      LyricsProviderChoice.lrclib,
+    );
+    localLyricsDirectory = p.getString('localLyricsDirectory') ?? '';
     progressStyle = _enumFromIndex(
       MD3ProgressStyle.values,
       p.getInt('progressStyle'),
@@ -626,6 +688,7 @@ class AppState {
         p.getBool('enableProgressAutoContrast') ?? true;
     enableOledTheme = p.getBool('enableOledTheme') ?? false;
     enable3DCover = p.getBool('enable3DCover') ?? true;
+    showPlaybackControls = p.getBool('showPlaybackControls') ?? true;
 
     currentFontFamily = p.getString('currentFontFamily') ?? 'System Default';
     titleWeightIndex = p.getInt('titleWeightIndex') ?? 6;
@@ -672,10 +735,14 @@ class AppState {
     'enableGlow': enableGlow,
     'glowMode': glowMode.name,
     'spectrumMode': spectrumMode.name,
+    'showLyrics': showLyrics,
+    'lyricsProviderChoice': lyricsProviderChoice.name,
+    'localLyricsDirectory': localLyricsDirectory,
     'progressStyle': progressStyle.name,
     'enableProgressAutoContrast': enableProgressAutoContrast,
     'enableOledTheme': enableOledTheme,
     'enable3DCover': enable3DCover,
+    'showPlaybackControls': showPlaybackControls,
     'currentFontFamily': currentFontFamily,
     'titleWeightIndex': titleWeightIndex,
     'artistWeightIndex': artistWeightIndex,
