@@ -35,6 +35,8 @@ enum SpectrumMode { off, bars, mirror, waveform }
 
 enum LyricsProviderChoice { lrclib, localLrc, qqMusic }
 
+enum LyricsTransitionStyle { fade, rise, descend, sideways, zoom, none }
+
 enum MD3ProgressStyle { linear, pill, segmented }
 
 enum WidgetLayout { horizontal, vertical }
@@ -106,7 +108,7 @@ class AppState {
     final remaining = playbackDurationMs - estimatedPlaybackPositionMs;
     final windowMs = (nextUpLeadSeconds * 1000.0).clamp(
       0.0,
-      playbackDurationMs * 0.25,
+      playbackDurationMs,
     );
     return remaining > 0 && remaining <= windowMs;
   }
@@ -150,8 +152,10 @@ class AppState {
   static final ValueNotifier<int> spectrumRevision = ValueNotifier<int>(0);
   static final ValueNotifier<int> fontsRevision = ValueNotifier<int>(0);
   static final ValueNotifier<int> typographyRevision = ValueNotifier<int>(0);
+  static final ValueNotifier<int> lyricsVisualRevision = ValueNotifier<int>(0);
 
   static void notifyTypographyChanged() => typographyRevision.value++;
+  static void notifyLyricsVisualChanged() => lyricsVisualRevision.value++;
 
   static void notifyTrackTransition() => trackTransitionRevision.value++;
 
@@ -247,11 +251,14 @@ class AppState {
   static bool showLyrics = false;
   static LyricsProviderChoice lyricsProviderChoice =
       LyricsProviderChoice.lrclib;
+  static LyricsTransitionStyle lyricsTransitionStyle =
+      LyricsTransitionStyle.fade;
   static bool lyricsUseThemeFont = true;
   static String lyricsFontFamily = 'System Default';
   static double lyricsWeightValue = 500.0;
   static double lyricsFontSize = 14.0;
   static MD3ProgressStyle progressStyle = MD3ProgressStyle.linear;
+  static MD3Shape settingsNavigationShape = MD3Shape.roundedLarge;
   static bool enableProgressAutoContrast = true;
   static bool enableOledTheme = false;
   static bool enable3DCover = true;
@@ -677,6 +684,11 @@ class AppState {
           snapshot['lyricsProviderChoice'],
           LyricsProviderChoice.lrclib,
         );
+        lyricsTransitionStyle = _enumFromName(
+          LyricsTransitionStyle.values,
+          snapshot['lyricsTransitionStyle'],
+          LyricsTransitionStyle.fade,
+        );
         localLyricsDirectory = snapshot['localLyricsDirectory'] is String
             ? snapshot['localLyricsDirectory'] as String
             : '';
@@ -684,6 +696,11 @@ class AppState {
           MD3ProgressStyle.values,
           snapshot['progressStyle'],
           MD3ProgressStyle.linear,
+        );
+        settingsNavigationShape = _enumFromName(
+          MD3Shape.values,
+          snapshot['settingsNavigationShape'],
+          MD3Shape.roundedLarge,
         );
         enableProgressAutoContrast =
             snapshot['enableProgressAutoContrast'] is bool
@@ -810,11 +827,21 @@ class AppState {
       p.getInt('lyricsProviderChoice'),
       LyricsProviderChoice.lrclib,
     );
+    lyricsTransitionStyle = _enumFromIndex(
+      LyricsTransitionStyle.values,
+      p.getInt('lyricsTransitionStyle'),
+      LyricsTransitionStyle.fade,
+    );
     localLyricsDirectory = p.getString('localLyricsDirectory') ?? '';
     progressStyle = _enumFromIndex(
       MD3ProgressStyle.values,
       p.getInt('progressStyle'),
       MD3ProgressStyle.linear,
+    );
+    settingsNavigationShape = _enumFromIndex(
+      MD3Shape.values,
+      p.getInt('settingsNavigationShape'),
+      MD3Shape.roundedLarge,
     );
     enableProgressAutoContrast =
         p.getBool('enableProgressAutoContrast') ?? true;
@@ -885,8 +912,10 @@ class AppState {
     'lyricsWeightValue': lyricsWeightValue,
     'lyricsFontSize': lyricsFontSize,
     'lyricsProviderChoice': lyricsProviderChoice.name,
+    'lyricsTransitionStyle': lyricsTransitionStyle.name,
     'localLyricsDirectory': localLyricsDirectory,
     'progressStyle': progressStyle.name,
+    'settingsNavigationShape': settingsNavigationShape.name,
     'enableProgressAutoContrast': enableProgressAutoContrast,
     'enableOledTheme': enableOledTheme,
     'enable3DCover': enable3DCover,

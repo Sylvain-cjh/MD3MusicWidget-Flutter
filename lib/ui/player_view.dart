@@ -1726,7 +1726,9 @@ class _PlayerViewState extends State<PlayerView>
                     opacity: nextUpVisible ? 1.0 : 0.0,
                     child: IgnorePointer(
                       ignoring: !nextUpVisible,
-                      child: const MusicNextUpPanel(),
+                      child: nextUpVisible
+                          ? const MusicNextUpPanel()
+                          : const SizedBox.shrink(),
                     ),
                   ),
                 ),

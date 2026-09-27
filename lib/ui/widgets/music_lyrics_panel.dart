@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_state.dart';
 import '../../core/lyrics_coordinator.dart';
+import '../animations/lyrics_content_transition.dart';
 
 class MusicLyricsPanel extends StatefulWidget {
   const MusicLyricsPanel({super.key});
@@ -25,6 +26,8 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     super.initState();
     AppState.lyrics.addListener(_onLyricsChanged);
     AppState.typographyRevision.addListener(_onLyricsChanged);
+    AppState.lyricsVisualRevision.addListener(_onLyricsChanged);
+    AppState.backgroundRevision.addListener(_onLyricsChanged);
     AppState.playbackRevision.addListener(_syncTimelineTimer);
     _syncTimelineTimer();
   }
@@ -50,6 +53,8 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     _timelineTimer?.cancel();
     AppState.lyrics.removeListener(_onLyricsChanged);
     AppState.typographyRevision.removeListener(_onLyricsChanged);
+    AppState.lyricsVisualRevision.removeListener(_onLyricsChanged);
+    AppState.backgroundRevision.removeListener(_onLyricsChanged);
     AppState.playbackRevision.removeListener(_syncTimelineTimer);
     super.dispose();
   }
@@ -123,12 +128,49 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     );
   }
 
+  Widget _loadingContent(ColorScheme scheme, bool reduceMotion) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox.square(
+          dimension: 16,
+          child: reduceMotion
+              ? Icon(
+                  Icons.hourglass_top_rounded,
+                  size: 16,
+                  color: scheme.primary,
+                )
+              : CircularProgressIndicator(
+                  strokeWidth: 2,
+                  strokeCap: StrokeCap.round,
+                  color: scheme.primary,
+                  backgroundColor: scheme.primaryContainer.withValues(
+                    alpha: 0.55,
+                  ),
+                  semanticsLabel: '歌词加载中',
+                ),
+        ),
+        const SizedBox(width: 9),
+        Flexible(
+          child: Text(
+            '正在匹配歌词…',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: AppState.lyricsTextStyle(scheme.onSurfaceVariant),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = AppState.currentScheme;
     final state = AppState.lyrics.state;
     final radius = BorderRadius.circular(24);
     final displayText = _displayText(state);
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final transitionStyle = AppState.lyricsTransitionStyle;
     return ClipRRect(
       borderRadius: radius,
       child: BackdropFilter(
@@ -169,20 +211,34 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 240),
+                    duration: LyricsContentTransition.durationFor(
+                      transitionStyle,
+                      reduceMotion: reduceMotion,
+                    ),
                     switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
+                    switchOutCurve: Curves.easeOutCubic,
+                    transitionBuilder: (child, animation) =>
+                        LyricsContentTransition(
+                          style: transitionStyle,
+                          animation: animation,
+                          reduceMotion: reduceMotion,
+                          child: child,
+                        ),
                     child: Align(
                       key: ValueKey(
                         '${state.providerId}:${state.status}:${state.lineIndex}:$displayText',
                       ),
                       alignment: Alignment.centerLeft,
-                      child: Text(
-                        displayText,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppState.lyricsTextStyle(scheme.onSurface),
-                      ),
+                      child:
+                          state.status == LyricsStatus.loading &&
+                              AppState.currentPlatformTrack != null
+                          ? _loadingContent(scheme, reduceMotion)
+                          : Text(
+                              displayText,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppState.lyricsTextStyle(scheme.onSurface),
+                            ),
                     ),
                   ),
                 ),

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>当前版本：0.11.0</strong>
+  <strong>当前版本：0.11.1</strong>
 </p>
 
 MD3 Music Widget 使用 Flutter 构建界面，通过独立的 MusicFetcher 读取 Windows 系统媒体会话和音频输出。它可以显示当前歌曲、封面、播放进度和真实音乐频谱，同时提供横版与竖版布局、动态取色、流光背景、毛玻璃和丰富的 MD3 个性化设置。
@@ -36,7 +36,7 @@ MD3 Music Widget 使用 Flutter 构建界面，通过独立的 MusicFetcher 读�
 
 ### 播放列表预告
 
-在「设置 → 播放 → 播放列表与下一首」粘贴 QQ 音乐公开歌单链接或 ID，或导入 UTF-8 M3U/M3U8、JSON 歌单。QQ 音乐歌曲优先匹配在线歌单，其他播放器使用本地歌单。组件按歌名和歌手匹配列表，在歌曲接近结束时显示预计下一首。JSON 可写为 `{"tracks":[{"title":"第一首","artist":"歌手 A"},{"title":"第二首","artist":"歌手 B"}]}`。
+在「设置 → 播放 → 下一首预告」粘贴 QQ 音乐公开歌单链接或 ID，或导入 UTF-8 M3U/M3U8、JSON 歌单。QQ 音乐歌曲优先匹配在线歌单，其他播放器使用本地歌单。组件按歌名和歌手匹配列表，只在歌曲接近结束时以非线性动画显示预计下一首。JSON 可写为 `{"tracks":[{"title":"第一首","artist":"歌手 A"},{"title":"第二首","artist":"歌手 B"}]}`。
 
 Windows 媒体会话没有第三方播放器的队列读取接口；QQ 音乐公开歌单不等于客户端临时队列，预告是按歌单顺序推算。随机播放、单曲循环或曲目匹配不唯一时不预告。在线读取只请求公开歌单，不使用账号 Cookie。
 
@@ -190,7 +190,7 @@ Flutter 与 MusicFetcher 只通过本机回环地址通信。媒体状态、封�
 
 ### 安装版
 
-运行 `MD3MusicWidget-Setup-0.11.0.exe`，按照安装向导完成安装。
+运行 `MD3MusicWidget-Setup-0.11.1.exe`，按照安装向导完成安装。
 
 ### 免安装版
 
@@ -217,7 +217,6 @@ MusicFetcher.exe
 - Flutter Windows 开发环境
 - Visual Studio 2022 的“使用 C++ 的桌面开发”工作负载
 - .NET 8 SDK
-- Inno Setup 6（仅构建安装包时需要）
 
 先构建 MusicFetcher：
 
@@ -234,11 +233,10 @@ flutter pub get
 flutter run -d windows
 ```
 
-构建 Windows Release 和 Inno Setup 安装包：
+构建 Windows Release：
 
 ```powershell
 flutter build windows --release
-powershell -ExecutionPolicy Bypass -File .\installer\build_installer.ps1
 ```
 
 ## 📁 项目结构
@@ -251,9 +249,8 @@ lib/
 
 MusicFetcher/            SMTC 媒体信息与 WASAPI 频谱采集
 windows/                 Windows Flutter 宿主
-installer/               Inno Setup 构建与签名脚本
-assets/                  应用图标和界面资源
-test/                    状态、布局与稳定性回归测试
+assets/                  当前应用图标、歌词来源图标及归属说明
+images/                  托盘图标
 ```
 
 ## 🔐 隐私说明

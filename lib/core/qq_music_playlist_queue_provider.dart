@@ -6,20 +6,92 @@ import 'platform_provider.dart';
 String? parseQqPlaylistId(String input) {
   final value = input.trim();
   if (RegExp(r'^\d{1,20}$').hasMatch(value)) return value;
-  final uri = Uri.tryParse(value);
+  final uri = _qqShareUri(value);
+  if (uri == null) return null;
+  final pathMatch = RegExp(
+    r'/playlist/(\d{1,20})(?:\.html)?/?$',
+    caseSensitive: false,
+  ).firstMatch(uri.path);
+  final isPlaylistPage = RegExp(
+    r'/(?:playlist|taoge(?:\.html)?)/*$',
+    caseSensitive: false,
+  ).hasMatch(uri.path);
+  final id =
+      pathMatch?.group(1) ??
+      (isPlaylistPage
+          ? uri.queryParameters['disstid'] ?? uri.queryParameters['id']
+          : null);
+  return id != null && RegExp(r'^\d{1,20}$').hasMatch(id) ? id : null;
+}
+
+Uri? _qqShareUri(String input) {
+  final match = RegExp(r'https://[^\s<>"\u3000]+').firstMatch(input);
+  final text = (match?.group(0) ?? input).replaceFirst(
+    RegExp(r'[),，。！？）]+$'),
+    '',
+  );
+  final uri = Uri.tryParse(text);
   if (uri == null ||
       uri.scheme != 'https' ||
       !(uri.host == 'y.qq.com' || uri.host.endsWith('.y.qq.com'))) {
     return null;
   }
-  final pathMatch = RegExp(
-    r'/playlist/(\d{1,20})(?:\.html)?/?$',
-  ).firstMatch(uri.path);
-  final id =
-      pathMatch?.group(1) ??
-      uri.queryParameters['disstid'] ??
-      uri.queryParameters['id'];
-  return id != null && RegExp(r'^\d{1,20}$').hasMatch(id) ? id : null;
+  return uri;
+}
+
+bool isQqPlaylistShortLink(String input) {
+  final uri = _qqShareUri(input);
+  if (uri == null ||
+      uri.host != 'c6.y.qq.com' ||
+      uri.path != '/base/fcgi-bin/u') {
+    return false;
+  }
+  final token = uri.queryParameters['__'];
+  return token != null && RegExp(r'^[A-Za-z0-9_-]{4,64}$').hasMatch(token);
+}
+
+Future<String?> resolveQqPlaylistId(
+  String input, {
+  HttpClient? client,
+  Future<Uri?> Function(Uri)? resolveRedirect,
+}) async {
+  final direct = parseQqPlaylistId(input);
+  if (direct != null) return direct;
+  if (!isQqPlaylistShortLink(input)) return null;
+
+  final ownClient = resolveRedirect == null && client == null;
+  final http = resolveRedirect == null ? (client ?? HttpClient()) : null;
+  try {
+    var current = _qqShareUri(input)!;
+    for (var redirect = 0; redirect < 4; redirect++) {
+      final next = resolveRedirect != null
+          ? await resolveRedirect(current)
+          : await _readTrustedRedirect(http!, current);
+      if (next == null || _qqShareUri(next.toString()) == null) return null;
+      final id = parseQqPlaylistId(next.toString());
+      if (id != null) return id;
+      if (!isQqPlaylistShortLink(next.toString())) return null;
+      current = next;
+    }
+    return null;
+  } finally {
+    if (ownClient) http?.close(force: true);
+  }
+}
+
+Future<Uri?> _readTrustedRedirect(HttpClient client, Uri uri) async {
+  final request = await client.getUrl(uri).timeout(const Duration(seconds: 8));
+  request.followRedirects = false;
+  request.headers.set(HttpHeaders.userAgentHeader, 'Mozilla/5.0');
+  final response = await request.close().timeout(const Duration(seconds: 8));
+  final location = response.headers.value(HttpHeaders.locationHeader);
+  await response.drain<void>().timeout(const Duration(seconds: 8));
+  if (response.statusCode < 300 ||
+      response.statusCode >= 400 ||
+      location == null) {
+    return null;
+  }
+  return uri.resolve(location);
 }
 
 List<PlatformQueueItem> parseQqPlaylistResponse(Object? decoded) {
@@ -63,6 +135,7 @@ final class QqMusicPlaylistQueueProvider implements QueuePlatformProvider {
   final HttpClient _client;
   final Uri _endpoint;
   final Future<Object?> Function(Uri)? fetchJson;
+  final Future<Uri?> Function(Uri)? resolveRedirect;
   String? _cachedId;
   List<PlatformQueueItem>? _cachedItems;
   DateTime? _cacheExpires;
@@ -72,6 +145,7 @@ final class QqMusicPlaylistQueueProvider implements QueuePlatformProvider {
     HttpClient? client,
     Uri? endpoint,
     this.fetchJson,
+    this.resolveRedirect,
   }) : _client = client ?? HttpClient(),
        _endpoint =
            endpoint ??
@@ -86,7 +160,8 @@ final class QqMusicPlaylistQueueProvider implements QueuePlatformProvider {
   @override
   bool accepts(PlatformTrack track) =>
       track.platform == MusicPlatform.qqMusic &&
-      parseQqPlaylistId(playlistInput()) != null;
+      (parseQqPlaylistId(playlistInput()) != null ||
+          isQqPlaylistShortLink(playlistInput()));
 
   void invalidate() {
     _cachedId = null;
@@ -96,8 +171,13 @@ final class QqMusicPlaylistQueueProvider implements QueuePlatformProvider {
 
   @override
   Future<PlatformQueue?> loadQueue(PlatformTrack track) async {
-    final id = parseQqPlaylistId(playlistInput());
-    if (id == null || !accepts(track)) return null;
+    if (!accepts(track)) return null;
+    final id = await resolveQqPlaylistId(
+      playlistInput(),
+      client: _client,
+      resolveRedirect: resolveRedirect,
+    );
+    if (id == null) throw const FormatException('无法识别 QQ 音乐歌单分享链接');
     final items =
         _cachedId == id &&
             _cachedItems != null &&
