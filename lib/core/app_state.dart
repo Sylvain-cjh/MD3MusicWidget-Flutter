@@ -13,6 +13,9 @@ import 'local_lrc_lyrics_provider.dart';
 import 'lrclib_lyrics_provider.dart';
 import 'qq_music_lyrics_provider.dart';
 import 'platform_provider.dart';
+import 'local_playlist_queue_provider.dart';
+import 'qq_music_playlist_queue_provider.dart';
+import 'queue_coordinator.dart';
 
 
 
@@ -46,15 +49,27 @@ class AppState {
   static String trackVersion = "";
   static bool isPlaying = false;
   static int mediaCapabilities = MediaCapability.smtcDefault;
+  static String selectedSourceAppId = '';
   static String localLyricsDirectory = '';
+  static String playlistFilePath = '';
+  static String qqPlaylistLink = '';
+  static bool showNextUp = false;
+  static int nextUpLeadSeconds = 20;
+  static bool? isShuffleActive;
+  static String autoRepeatMode = '';
   static PlatformTrack? currentPlatformTrack;
   static final LrclibLyricsProvider _lrclibLyrics = LrclibLyricsProvider();
+  static final QqMusicPlaylistQueueProvider _qqPlaylist =
+      QqMusicPlaylistQueueProvider(playlistInput: () => qqPlaylistLink);
   static final PlatformProviderRegistry platformProviders =
       PlatformProviderRegistry()
         ..register(_lrclibLyrics)
         ..register(LocalLrcLyricsProvider(() => localLyricsDirectory))
-        ..register(QqMusicLyricsProvider(fallback: _lrclibLyrics));
+        ..register(QqMusicLyricsProvider(fallback: _lrclibLyrics))
+        ..register(_qqPlaylist)
+        ..register(LocalPlaylistQueueProvider(() => playlistFilePath));
   static final LyricsCoordinator lyrics = LyricsCoordinator(platformProviders);
+  static final QueueCoordinator queue = QueueCoordinator(platformProviders);
 
   static void refreshLyrics({bool force = false}) {
     unawaited(
@@ -64,6 +79,36 @@ class AppState {
         force: force,
       ),
     );
+  }
+
+  static void refreshQueue({bool force = false}) {
+    if (force) _qqPlaylist.invalidate();
+    unawaited(
+      queue.setTrack(
+        showNextUp ? currentPlatformTrack : null,
+        enabled: showNextUp,
+        force: force,
+      ),
+    );
+  }
+
+  static PlatformQueueItem? get nextQueueItem {
+    if (!showNextUp || isShuffleActive == true || autoRepeatMode == 'track') {
+      return null;
+    }
+    return queue.queue?.nextItem(wrap: autoRepeatMode == 'list');
+  }
+
+  static bool get shouldPreviewNext {
+    if (!isPlaying || nextQueueItem == null || playbackDurationMs <= 0) {
+      return false;
+    }
+    final remaining = playbackDurationMs - estimatedPlaybackPositionMs;
+    final windowMs = (nextUpLeadSeconds * 1000.0).clamp(
+      0.0,
+      playbackDurationMs * 0.25,
+    );
+    return remaining > 0 && remaining <= windowMs;
   }
 
   static void setLocalLyricsDirectory(String path) {
@@ -88,6 +133,9 @@ class AppState {
   static ImageProvider? coverProvider;
   static ImageProvider? bgBlurProvider;
   static String currentCoverVersion = "";
+  static final ValueNotifier<bool> backgroundCacheHit = ValueNotifier<bool>(
+    false,
+  );
   static String currentRawBase64 = "";
 
   
@@ -101,6 +149,9 @@ class AppState {
   );
   static final ValueNotifier<int> spectrumRevision = ValueNotifier<int>(0);
   static final ValueNotifier<int> fontsRevision = ValueNotifier<int>(0);
+  static final ValueNotifier<int> typographyRevision = ValueNotifier<int>(0);
+
+  static void notifyTypographyChanged() => typographyRevision.value++;
 
   static void notifyTrackTransition() => trackTransitionRevision.value++;
 
@@ -196,6 +247,10 @@ class AppState {
   static bool showLyrics = false;
   static LyricsProviderChoice lyricsProviderChoice =
       LyricsProviderChoice.lrclib;
+  static bool lyricsUseThemeFont = true;
+  static String lyricsFontFamily = 'System Default';
+  static double lyricsWeightValue = 500.0;
+  static double lyricsFontSize = 14.0;
   static MD3ProgressStyle progressStyle = MD3ProgressStyle.linear;
   static bool enableProgressAutoContrast = true;
   static bool enableOledTheme = false;
@@ -234,11 +289,34 @@ class AppState {
     return (value * devicePixelRatio).round() / devicePixelRatio;
   }
 
-  static int titleWeightIndex = 6;
-  static int artistWeightIndex = 3;
+  static double titleWeightValue = 700.0;
+  static double artistWeightValue = 400.0;
 
-  static FontWeight get titleWeight => FontWeight.values[titleWeightIndex];
-  static FontWeight get artistWeight => FontWeight.values[artistWeightIndex];
+  static FontWeight weightFor(double value) =>
+      FontWeight.values[((value / 100).round() - 1).clamp(0, 8)];
+  static List<FontVariation> variationsFor(double value) => [
+    FontVariation('wght', value.clamp(100.0, 900.0)),
+  ];
+  static FontWeight get titleWeight => weightFor(titleWeightValue);
+  static FontWeight get artistWeight => weightFor(artistWeightValue);
+  static FontWeight get lyricsWeight => weightFor(lyricsWeightValue);
+  static double _safeWeight(double value, double fallback) =>
+      value.isFinite ? value.clamp(100.0, 900.0) : fallback;
+  static String? get effectiveLyricsFontFamily {
+    final family = lyricsUseThemeFont ? currentFontFamily : lyricsFontFamily;
+    if (family != 'System Default') return family;
+    return lyricsUseThemeFont ? null : 'Segoe UI Variable Text';
+  }
+
+  static TextStyle lyricsTextStyle(Color color) => TextStyle(
+    color: color,
+    fontSize: lyricsFontSize,
+    fontWeight: lyricsWeight,
+    fontVariations: variationsFor(lyricsWeightValue),
+    fontFamily: effectiveLyricsFontFamily,
+    fontFamilyFallback: textFontFallback,
+    height: 1.2,
+  );
 
   static MD3Shape prevButtonShape = MD3Shape.circle;
   static MD3Shape playButtonShape = MD3Shape.circle;
@@ -276,8 +354,15 @@ class AppState {
   static double spectrumPanelExtentOf(WidgetLayout l) =>
       spectrumMode == SpectrumMode.off ? 0.0 : 64.0;
   static double lyricsPanelExtentOf(WidgetLayout l) => showLyrics ? 64.0 : 0.0;
+  static double nextUpPanelExtentOf(WidgetLayout l) =>
+      showNextUp && (playlistFilePath.isNotEmpty || qqPlaylistLink.isNotEmpty)
+      ? 64.0
+      : 0.0;
   static double innerPlayerHeightOf(WidgetLayout l) =>
-      corePlayerHeightOf(l) + spectrumPanelExtentOf(l) + lyricsPanelExtentOf(l);
+      corePlayerHeightOf(l) +
+      spectrumPanelExtentOf(l) +
+      lyricsPanelExtentOf(l) +
+      nextUpPanelExtentOf(l);
   static double unscaledBaseWindowWidthOf(WidgetLayout l) =>
       innerPlayerWidthOf(l) + cardMargin * 2;
   static double unscaledBaseWindowHeightOf(WidgetLayout l) =>
@@ -468,7 +553,7 @@ class AppState {
     }
   }
 
-  static Future<bool> importCustomFont() async {
+  static Future<bool> importCustomFont({bool forLyrics = false}) async {
     try {
       
       FilePickerResult? result = await FilePicker.pickFiles(
@@ -497,7 +582,11 @@ class AppState {
           customFontPaths.add(path);
           await saveSettings();
         }
-        currentFontFamily = fontName;
+        if (forLyrics) {
+          lyricsFontFamily = fontName;
+        } else {
+          currentFontFamily = fontName;
+        }
         return true;
       }
     } catch (e) {
@@ -571,6 +660,18 @@ class AppState {
           SpectrumMode.off,
         );
         showLyrics = snapshot['showLyrics'] == true;
+        lyricsUseThemeFont = snapshot['lyricsUseThemeFont'] is bool
+            ? snapshot['lyricsUseThemeFont'] as bool
+            : true;
+        lyricsFontFamily = snapshot['lyricsFontFamily'] is String
+            ? snapshot['lyricsFontFamily'] as String
+            : 'System Default';
+        lyricsWeightValue = snapshot['lyricsWeightValue'] is num
+            ? (snapshot['lyricsWeightValue'] as num).toDouble()
+            : 500.0;
+        lyricsFontSize = snapshot['lyricsFontSize'] is num
+            ? (snapshot['lyricsFontSize'] as num).toDouble()
+            : 14.0;
         lyricsProviderChoice = _enumFromName(
           LyricsProviderChoice.values,
           snapshot['lyricsProviderChoice'],
@@ -594,18 +695,40 @@ class AppState {
         showPlaybackControls = snapshot['showPlaybackControls'] is bool
             ? snapshot['showPlaybackControls'] as bool
             : true;
+        selectedSourceAppId = snapshot['selectedSourceAppId'] is String
+            ? snapshot['selectedSourceAppId'] as String
+            : '';
+        playlistFilePath = snapshot['playlistFilePath'] is String
+            ? snapshot['playlistFilePath'] as String
+            : '';
+        qqPlaylistLink = snapshot['qqPlaylistLink'] is String
+            ? snapshot['qqPlaylistLink'] as String
+            : '';
+        showNextUp = snapshot['showNextUp'] == true;
+        nextUpLeadSeconds = switch (snapshot['nextUpLeadSeconds']) {
+          10 || 20 || 30 || 45 => snapshot['nextUpLeadSeconds'] as int,
+          _ => 20,
+        };
         enable3DCover = snapshot['enable3DCover'] is bool
             ? snapshot['enable3DCover'] as bool
             : true;
         currentFontFamily = snapshot['currentFontFamily'] is String
             ? snapshot['currentFontFamily'] as String
             : 'System Default';
-        titleWeightIndex = snapshot['titleWeightIndex'] is int
-            ? snapshot['titleWeightIndex'] as int
-            : 6;
-        artistWeightIndex = snapshot['artistWeightIndex'] is int
-            ? snapshot['artistWeightIndex'] as int
-            : 3;
+        titleWeightValue = snapshot['titleWeightValue'] is num
+            ? (snapshot['titleWeightValue'] as num).toDouble()
+            : ((snapshot['titleWeightIndex'] is int
+                          ? snapshot['titleWeightIndex'] as int
+                          : 6) +
+                      1) *
+                  100.0;
+        artistWeightValue = snapshot['artistWeightValue'] is num
+            ? (snapshot['artistWeightValue'] as num).toDouble()
+            : ((snapshot['artistWeightIndex'] is int
+                          ? snapshot['artistWeightIndex'] as int
+                          : 3) +
+                      1) *
+                  100.0;
         prevButtonShape = _enumFromName(
           MD3Shape.values,
           snapshot['prevButtonShape'],
@@ -644,13 +767,18 @@ class AppState {
         _loadLegacySettings(p);
       }
 
-      titleWeightIndex = titleWeightIndex.clamp(0, 8);
-      artistWeightIndex = artistWeightIndex.clamp(0, 8);
+      titleWeightValue = _safeWeight(titleWeightValue, 700.0);
+      artistWeightValue = _safeWeight(artistWeightValue, 400.0);
+      lyricsWeightValue = _safeWeight(lyricsWeightValue, 500.0);
+      lyricsFontSize = lyricsFontSize.isFinite
+          ? lyricsFontSize.clamp(12.0, 17.0)
+          : 14.0;
       customComponentScale = customComponentScale.clamp(
         minimumComponentScale,
         maximumComponentScale,
       );
       isMousePassthrough = false;
+      refreshQueue(force: true);
       await _restoreCustomFonts();
     } catch (_) {}
   }
@@ -673,6 +801,10 @@ class AppState {
       SpectrumMode.off,
     );
     showLyrics = p.getBool('showLyrics') ?? false;
+    lyricsUseThemeFont = p.getBool('lyricsUseThemeFont') ?? true;
+    lyricsFontFamily = p.getString('lyricsFontFamily') ?? 'System Default';
+    lyricsWeightValue = p.getDouble('lyricsWeightValue') ?? 500.0;
+    lyricsFontSize = p.getDouble('lyricsFontSize') ?? 14.0;
     lyricsProviderChoice = _enumFromIndex(
       LyricsProviderChoice.values,
       p.getInt('lyricsProviderChoice'),
@@ -689,10 +821,22 @@ class AppState {
     enableOledTheme = p.getBool('enableOledTheme') ?? false;
     enable3DCover = p.getBool('enable3DCover') ?? true;
     showPlaybackControls = p.getBool('showPlaybackControls') ?? true;
+    selectedSourceAppId = p.getString('selectedSourceAppId') ?? '';
+    playlistFilePath = p.getString('playlistFilePath') ?? '';
+    qqPlaylistLink = p.getString('qqPlaylistLink') ?? '';
+    showNextUp = p.getBool('showNextUp') ?? false;
+    nextUpLeadSeconds = switch (p.getInt('nextUpLeadSeconds')) {
+      10 || 20 || 30 || 45 => p.getInt('nextUpLeadSeconds')!,
+      _ => 20,
+    };
 
     currentFontFamily = p.getString('currentFontFamily') ?? 'System Default';
-    titleWeightIndex = p.getInt('titleWeightIndex') ?? 6;
-    artistWeightIndex = p.getInt('artistWeightIndex') ?? 3;
+    titleWeightValue =
+        p.getDouble('titleWeightValue') ??
+        ((p.getInt('titleWeightIndex') ?? 6) + 1) * 100.0;
+    artistWeightValue =
+        p.getDouble('artistWeightValue') ??
+        ((p.getInt('artistWeightIndex') ?? 3) + 1) * 100.0;
 
     prevButtonShape = _enumFromIndex(
       MD3Shape.values,
@@ -736,6 +880,10 @@ class AppState {
     'glowMode': glowMode.name,
     'spectrumMode': spectrumMode.name,
     'showLyrics': showLyrics,
+    'lyricsUseThemeFont': lyricsUseThemeFont,
+    'lyricsFontFamily': lyricsFontFamily,
+    'lyricsWeightValue': lyricsWeightValue,
+    'lyricsFontSize': lyricsFontSize,
     'lyricsProviderChoice': lyricsProviderChoice.name,
     'localLyricsDirectory': localLyricsDirectory,
     'progressStyle': progressStyle.name,
@@ -743,9 +891,14 @@ class AppState {
     'enableOledTheme': enableOledTheme,
     'enable3DCover': enable3DCover,
     'showPlaybackControls': showPlaybackControls,
+    'selectedSourceAppId': selectedSourceAppId,
+    'playlistFilePath': playlistFilePath,
+    'qqPlaylistLink': qqPlaylistLink,
+    'showNextUp': showNextUp,
+    'nextUpLeadSeconds': nextUpLeadSeconds,
     'currentFontFamily': currentFontFamily,
-    'titleWeightIndex': titleWeightIndex,
-    'artistWeightIndex': artistWeightIndex,
+    'titleWeightValue': titleWeightValue,
+    'artistWeightValue': artistWeightValue,
     'prevButtonShape': prevButtonShape.name,
     'playButtonShape': playButtonShape.name,
     'nextButtonShape': nextButtonShape.name,

@@ -13,11 +13,13 @@ import '../core/media_provider.dart';
 import '../core/music_fetcher_provider.dart';
 import '../core/platform_provider.dart';
 import '../core/spectrum_packet.dart';
+import '../core/music_source_service.dart';
 import 'animations/component_size_motion.dart';
 import 'widgets/dynamic_background.dart';
 import 'widgets/locked_aspect_resize_area.dart';
 import 'widgets/track_controls.dart';
 import 'widgets/music_lyrics_panel.dart';
+import 'widgets/music_next_up_panel.dart';
 import 'widgets/slide_menu.dart';
 import 'widgets/settings_panel.dart';
 
@@ -33,6 +35,7 @@ class _PlayerViewState extends State<PlayerView>
     with WindowListener, tm.TrayListener, TickerProviderStateMixin {
   Timer? _pollingTimer;
   Timer? _spectrumTimer;
+  Duration? _spectrumPollingInterval;
   Timer? _mediaReconnectTimer;
   MusicFetcherProvider? _mediaProvider;
   StreamSubscription<MediaProviderEvent>? _mediaProviderSubscription;
@@ -130,7 +133,9 @@ class _PlayerViewState extends State<PlayerView>
   @override
   void initState() {
     super.initState();
-    _artworkResources = ArtworkResources();
+    _artworkResources = ArtworkResources(
+      onPoolCleared: () => AppState.backgroundCacheHit.value = false,
+    );
     windowManager.addListener(this);
     tm.trayManager.addListener(this);
 
@@ -359,6 +364,7 @@ class _PlayerViewState extends State<PlayerView>
   Future<void> _clearCover() async {
     _coverFallbackTimer?.cancel();
     _latestCoverVersion = "";
+    AppState.backgroundCacheHit.value = false;
     if (AppState.coverProvider == null &&
         AppState.currentCoverVersion.isEmpty) {
       return;
@@ -375,7 +381,6 @@ class _PlayerViewState extends State<PlayerView>
         AppState.bgBlurProvider = null;
       });
       await _updateColorScheme();
-      _artworkResources.trimWhenIdle();
     }
   }
 
@@ -392,6 +397,7 @@ class _PlayerViewState extends State<PlayerView>
 
     _coverRequestInFlight = true;
     try {
+      if (await _restoreCachedArtwork(version)) return;
       final bytes = await _readLocalResponse(
         Uri.http('localhost:12580', '/cover'),
         timeout: const Duration(milliseconds: 700),
@@ -416,6 +422,41 @@ class _PlayerViewState extends State<PlayerView>
     }
   }
 
+  Future<bool> _restoreCachedArtwork(String version) async {
+    final entry = _artworkResources.findArtwork(version);
+    if (entry == null) return false;
+    if (!await _precacheArtwork(entry.cover) ||
+        !await _precacheArtwork(entry.background)) {
+      _artworkResources.forgetArtwork(version);
+      return false;
+    }
+    if (!mounted || version != _latestCoverVersion) return true;
+    if (version != AppState.currentCoverVersion) {
+      await _activateArtwork(version, entry, cacheHit: true);
+    }
+    return true;
+  }
+
+  Future<void> _activateArtwork(
+    String version,
+    CachedArtwork entry, {
+    required bool cacheHit,
+  }) async {
+    final previousCover = AppState.coverProvider;
+    final previousBackground = AppState.bgBlurProvider;
+    AppState.currentCoverVersion = version;
+    AppState.currentRawBase64 = "";
+    setState(() {
+      AppState.coverProvider = entry.cover;
+      AppState.bgBlurProvider = entry.background;
+    });
+    AppState.backgroundCacheHit.value = cacheHit;
+    AppState.notifyBackgroundChanged();
+    unawaited(_artworkResources.retire(previousCover));
+    unawaited(_artworkResources.retire(previousBackground));
+    await _updateColorScheme();
+  }
+
   Future<void> _applyCoverBytes(String version, Uint8List bytes) async {
     if (!mounted ||
         version.isEmpty ||
@@ -428,11 +469,14 @@ class _PlayerViewState extends State<PlayerView>
         AppState.coverProvider != null) {
       return;
     }
+    if (_artworkResources.findArtwork(version) != null) {
+      if (await _restoreCachedArtwork(version)) return;
+    }
 
-    final image = MemoryImage(bytes);
-    final coverReady = await _precacheArtwork(image);
+    final entry = CachedArtwork(bytes);
+    final coverReady = await _precacheArtwork(entry.cover);
     if (!mounted || version != _latestCoverVersion || !coverReady) {
-      unawaited(_artworkResources.retire(image));
+      unawaited(_artworkResources.retire(entry.cover));
       if (mounted &&
           version == _latestCoverVersion &&
           version != AppState.currentCoverVersion &&
@@ -441,11 +485,10 @@ class _PlayerViewState extends State<PlayerView>
       }
       return;
     }
-    final background = ResizeImage(image, width: 256);
-    final backgroundReady = await _precacheArtwork(background);
+    final backgroundReady = await _precacheArtwork(entry.background);
     if (!mounted || version != _latestCoverVersion || !backgroundReady) {
-      unawaited(_artworkResources.retire(image));
-      unawaited(_artworkResources.retire(background));
+      unawaited(_artworkResources.retire(entry.cover));
+      unawaited(_artworkResources.retire(entry.background));
       if (mounted &&
           version == _latestCoverVersion &&
           version != AppState.currentCoverVersion &&
@@ -454,16 +497,8 @@ class _PlayerViewState extends State<PlayerView>
       }
       return;
     }
-    unawaited(_artworkResources.retire(AppState.coverProvider));
-    unawaited(_artworkResources.retire(AppState.bgBlurProvider));
-    AppState.currentCoverVersion = version;
-    AppState.currentRawBase64 = "";
-    setState(() {
-      AppState.coverProvider = image;
-      AppState.bgBlurProvider = background;
-    });
-    AppState.notifyBackgroundChanged();
-    await _updateColorScheme();
+    _artworkResources.rememberPreparedArtwork(version, entry);
+    await _activateArtwork(version, entry, cacheHit: false);
   }
 
   Future<bool> _precacheArtwork(ImageProvider provider) async {
@@ -734,16 +769,30 @@ class _PlayerViewState extends State<PlayerView>
     var delay = 35;
     while (DateTime.now().isBefore(deadline)) {
       try {
-        await _readLocalResponse(
+        final infoBytes = await _readLocalResponse(
           Uri.parse('http://localhost:12580/info'),
           timeout: const Duration(milliseconds: 160),
         );
+        final info = jsonDecode(utf8.decode(infoBytes));
+        if (info is Map && info['processId'] is num) {
+          final pid = (info['processId'] as num).toInt();
+          if (pid > 0) AppState.fetcherPid = pid;
+        }
         return true;
       } catch (_) {}
       await Future<void>.delayed(Duration(milliseconds: delay));
       if (delay < 120) delay += 20;
     }
     return false;
+  }
+
+  Future<bool> _applySavedSource() async {
+    try {
+      await MusicSourceService.selectSource(AppState.selectedSourceAppId);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   void _recordFetcherFailure() {
@@ -788,6 +837,7 @@ class _PlayerViewState extends State<PlayerView>
     if (trackChanged && AppState.playbackDurationMs > 0) {
       AppState.notifyTrackTransition();
     }
+    if (trackChanged) AppState.backgroundCacheHit.value = false;
 
     if (trackChanged || playbackStateChanged || capabilitiesChanged) {
       setState(() {
@@ -800,6 +850,9 @@ class _PlayerViewState extends State<PlayerView>
       AppState.notifyBackgroundChanged();
     }
 
+    AppState.currentPlatformTrack = PlatformTrack.fromSnapshot(snapshot);
+    AppState.isShuffleActive = snapshot.isShuffleActive;
+    AppState.autoRepeatMode = snapshot.autoRepeatMode;
     AppState.updatePlaybackTimeline(
       positionMs: snapshot.positionMs,
       durationMs: snapshot.durationMs,
@@ -807,8 +860,9 @@ class _PlayerViewState extends State<PlayerView>
           ? snapshot.timelineUpdatedAtMs
           : DateTime.now().millisecondsSinceEpoch,
     );
-    AppState.currentPlatformTrack = PlatformTrack.fromSnapshot(snapshot);
+    if (playbackStateChanged) _syncSpectrumPolling();
     AppState.refreshLyrics();
+    AppState.refreshQueue();
     if (AppState.showLyrics) {
       AppState.lyrics.setPositionMs(AppState.estimatedPlaybackPositionMs);
     }
@@ -816,7 +870,18 @@ class _PlayerViewState extends State<PlayerView>
     _latestCoverVersion = snapshot.coverVersion;
     if (snapshot.coverVersion.isNotEmpty &&
         snapshot.coverVersion != AppState.currentCoverVersion) {
-      if (_mediaProvider?.isConnected == true) {
+      if (_artworkResources.findArtwork(snapshot.coverVersion) != null) {
+        unawaited(
+          _restoreCachedArtwork(snapshot.coverVersion).then((hit) {
+            if (!hit &&
+                mounted &&
+                snapshot.coverVersion == _latestCoverVersion &&
+                snapshot.coverVersion != AppState.currentCoverVersion) {
+              _scheduleCoverFallback(snapshot.coverVersion);
+            }
+          }),
+        );
+      } else if (_mediaProvider?.isConnected == true) {
         _scheduleCoverFallback(snapshot.coverVersion);
       } else {
         unawaited(_loadCover(snapshot.coverVersion));
@@ -897,6 +962,7 @@ class _PlayerViewState extends State<PlayerView>
       _spectrumBinaryFailureStreak = 0;
       _lastFetcherHeartbeatAtMs = 0;
       if (await _waitForFetcherReady()) {
+        await _applySavedSource();
         _fetcherRestartFailures = 0;
         _nextFetcherRestartAtMs = 0;
       } else {
@@ -963,6 +1029,7 @@ class _PlayerViewState extends State<PlayerView>
     if (provider?.isConnected == true) {
       _spectrumTimer?.cancel();
       _spectrumTimer = null;
+      _spectrumPollingInterval = null;
       provider!.setSpectrumEnabled(shouldPoll);
       if (!shouldPoll) AppState.clearSpectrum();
       return;
@@ -970,13 +1037,17 @@ class _PlayerViewState extends State<PlayerView>
     if (!shouldPoll) {
       _spectrumTimer?.cancel();
       _spectrumTimer = null;
+      _spectrumPollingInterval = null;
       AppState.clearSpectrum();
       return;
     }
-    _spectrumTimer ??= Timer.periodic(
-      const Duration(milliseconds: 64),
-      (_) => _pollSpectrum(),
-    );
+    final interval = AppState.isPlaying
+        ? const Duration(milliseconds: 64)
+        : const Duration(milliseconds: 250);
+    if (_spectrumTimer != null && _spectrumPollingInterval == interval) return;
+    _spectrumTimer?.cancel();
+    _spectrumPollingInterval = interval;
+    _spectrumTimer = Timer.periodic(interval, (_) => _pollSpectrum());
     unawaited(_pollSpectrum());
   }
 
@@ -985,7 +1056,8 @@ class _PlayerViewState extends State<PlayerView>
     if (!needsRefresh &&
         await _waitForFetcherReady(
           maxWait: const Duration(milliseconds: 220),
-        )) {
+        ) &&
+        await _applySavedSource()) {
       _startPollingTimers();
       return;
     }
@@ -1014,6 +1086,8 @@ class _PlayerViewState extends State<PlayerView>
     
     await _waitForFetcherReady();
     if (!mounted) return;
+
+    await _applySavedSource();
 
     _startPollingTimers();
   }
@@ -1269,7 +1343,6 @@ class _PlayerViewState extends State<PlayerView>
         _settingsSide = _menuSide;
       }
       await _animateToTargetLayout(serial);
-      if (!_isSettingsOpen) _artworkResources.trimWhenIdle();
     } finally {
       if (_isCurrentWindowTransition(serial)) {
         setState(() => _isTransitioning = false);
@@ -1465,6 +1538,10 @@ class _PlayerViewState extends State<PlayerView>
     double corePlayerH = AppState.corePlayerHeightOf(AppState.widgetLayout);
     bool spectrumVisible = AppState.spectrumMode != SpectrumMode.off;
     bool lyricsVisible = AppState.showLyrics;
+    bool nextUpVisible =
+        AppState.showNextUp &&
+        (AppState.playlistFilePath.isNotEmpty ||
+            AppState.qqPlaylistLink.isNotEmpty);
     double playerHorizontalPadding = isV ? 24.0 : 16.0;
 
     double innerSettingsW = isV
@@ -1629,6 +1706,27 @@ class _PlayerViewState extends State<PlayerView>
                     child: IgnorePointer(
                       ignoring: !lyricsVisible,
                       child: const MusicLyricsPanel(),
+                    ),
+                  ),
+                ),
+                AnimatedPositioned(
+                  duration: AppState.layoutSwitchDuration,
+                  curve: AppState.layoutSwitchCurve,
+                  left: playerHorizontalPadding,
+                  top:
+                      corePlayerH +
+                      AppState.spectrumPanelExtentOf(AppState.widgetLayout) +
+                      AppState.lyricsPanelExtentOf(AppState.widgetLayout) +
+                      8.0,
+                  width: innerPlayerW - playerHorizontalPadding * 2,
+                  height: nextUpVisible ? 48.0 : 0.0,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    opacity: nextUpVisible ? 1.0 : 0.0,
+                    child: IgnorePointer(
+                      ignoring: !nextUpVisible,
+                      child: const MusicNextUpPanel(),
                     ),
                   ),
                 ),

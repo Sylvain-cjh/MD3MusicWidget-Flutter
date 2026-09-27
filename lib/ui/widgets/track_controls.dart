@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
 import '../../core/media_provider.dart';
 import '../../widgets/parallax_button.dart';
+import 'cover_parallax.dart';
 
 int _globalSlideDirection = 1;
 String _lastMeasureKey = "";
@@ -32,6 +33,11 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     super.initState();
     _hasTimeline = AppState.playbackDurationMs > 0;
     AppState.playbackRevision.addListener(_handleTimelineAvailability);
+    AppState.typographyRevision.addListener(_handleTypographyChanged);
+  }
+
+  void _handleTypographyChanged() {
+    if (mounted) setState(() {});
   }
 
   void _handleTimelineAvailability() {
@@ -56,6 +62,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
   void dispose() {
     _timelineHideTimer?.cancel();
     AppState.playbackRevision.removeListener(_handleTimelineAvailability);
+    AppState.typographyRevision.removeListener(_handleTypographyChanged);
     super.dispose();
   }
 
@@ -74,13 +81,17 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     double artistFontSize,
   ) {
     final String key =
-        "${AppState.trackTitle}|${AppState.artistName}|$w|$titleFontSize|$artistFontSize|${AppState.titleWeightIndex}|${AppState.artistWeightIndex}|${AppState.currentFontFamily}";
+        "${AppState.trackTitle}|${AppState.artistName}|$w|$titleFontSize|$artistFontSize|${AppState.titleWeightValue}|${AppState.artistWeightValue}|${AppState.currentFontFamily}";
     if (key == _lastMeasureKey) return;
     _lastMeasureKey = key;
 
     final titleStyle = TextStyle(
       fontSize: titleFontSize,
       fontWeight: AppState.titleWeight,
+      fontVariations: AppState.variationsFor(AppState.titleWeightValue),
+      fontFamily: AppState.currentFontFamily == 'System Default'
+          ? null
+          : AppState.currentFontFamily,
       color: textColor,
       fontFamilyFallback: AppState.textFontFallback,
       letterSpacing: 0.0,
@@ -89,6 +100,10 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     final artistStyle = TextStyle(
       fontSize: artistFontSize,
       fontWeight: AppState.artistWeight,
+      fontVariations: AppState.variationsFor(AppState.artistWeightValue),
+      fontFamily: AppState.currentFontFamily == 'System Default'
+          ? null
+          : AppState.currentFontFamily,
       color: textColor.withValues(alpha: 0.7),
       fontFamilyFallback: AppState.textFontFallback,
       height: 1.2,
@@ -411,6 +426,9 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                     style: TextStyle(
                       fontSize: titleFontSize,
                       fontWeight: AppState.titleWeight,
+                      fontVariations: AppState.variationsFor(
+                        AppState.titleWeightValue,
+                      ),
                       color: textColor.withValues(alpha: uiOpacity),
                       shadows: artworkTextShadow,
                       fontFamilyFallback: AppState.textFontFallback,
@@ -465,6 +483,9 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                     style: TextStyle(
                       fontSize: artistFontSize,
                       fontWeight: AppState.artistWeight,
+                      fontVariations: AppState.variationsFor(
+                        AppState.artistWeightValue,
+                      ),
                       color: subTextColor.withValues(alpha: uiOpacity),
                       shadows: artworkTextShadow,
                       fontFamilyFallback: AppState.textFontFallback,
@@ -631,37 +652,16 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         key: ValueKey(_coverIdentity),
         ignoring: !AppState.isPlaying,
         child: RepaintBoundary(
-          child: WpfParallaxItem(
-            width: size,
-            height: size,
+          child: CoverParallax(
+            size: size,
             borderRadius: BorderRadius.circular(
               (size * 0.055).clamp(14.0, 20.0),
             ),
-            bgColor: AppState.currentScheme.surface,
-            bgImage: AppState.coverProvider,
-            showOverlay: false,
-            enableHover: true,
+            backgroundColor: AppState.currentScheme.surface,
+            accentColor: AppState.currentScheme.primary,
+            image: AppState.coverProvider,
+            isPlaying: AppState.isPlaying,
             enable3D: AppState.enable3DCover,
-            hoverScale: AppState.enable3DCover ? 1.06 : 1.04,
-            bgParallaxMultiplier: AppState.enable3DCover ? 5.0 : 3.0,
-            tiltMultiplier: AppState.enable3DCover ? 0.22 : 0.0,
-            customBgOverlay: AnimatedContainer(
-              duration: const Duration(milliseconds: 500),
-              curve: Curves.easeOutCubic,
-              color: Colors.black.withValues(
-                alpha: AppState.isPlaying ? 0.0 : 0.45,
-              ),
-            ),
-            foreground: AppState.coverProvider == null
-                ? Icon(
-                    Icons.music_note_rounded,
-                    size: (size * 0.25).clamp(42.0, 72.0),
-                    color: AppState.currentScheme.primary.withValues(
-                      alpha: 0.5,
-                    ),
-                  )
-                : null,
-            onTap: () {},
           ),
         ),
       ),
@@ -680,11 +680,30 @@ class _PlaybackProgress extends StatefulWidget {
   State<_PlaybackProgress> createState() => _PlaybackProgressState();
 }
 
+class _ProgressPaintState extends ChangeNotifier {
+  double progress = 0;
+  bool returning = false;
+  double minimumVisibleDelta = 0.00005;
+
+  void update(double nextProgress, bool nextReturning, {bool force = false}) {
+    if (!force &&
+        (progress - nextProgress).abs() < minimumVisibleDelta &&
+        returning == nextReturning) {
+      return;
+    }
+    progress = nextProgress;
+    returning = nextReturning;
+    notifyListeners();
+  }
+}
+
 class _PlaybackProgressState extends State<_PlaybackProgress>
     with SingleTickerProviderStateMixin {
   static const double _returnDurationMs = 720.0;
   static const double _catchUpDurationMs = 240.0;
   late final AnimationController _frameController;
+  Timer? _progressTimer;
+  final _ProgressPaintState _paintState = _ProgressPaintState();
   final Stopwatch _clock = Stopwatch()..start();
   String _trackVersion = '';
   String _trackTitle = '';
@@ -700,6 +719,7 @@ class _PlaybackProgressState extends State<_PlaybackProgress>
   bool _lastAutoContrast = true;
   bool _lastReturning = false;
   Color _lastSchemeColor = Colors.transparent;
+  bool _lastVisible = false;
 
   @override
   void initState() {
@@ -712,16 +732,20 @@ class _PlaybackProgressState extends State<_PlaybackProgress>
     _trackTitle = AppState.trackTitle;
     _trackArtist = AppState.artistName;
     _displayProgress = _currentTargetProgress;
+    _paintState.progress = _displayProgress;
+    _lastVisible = AppState.playbackDurationMs > 0 || _displayProgress > 0.001;
     AppState.playbackRevision.addListener(_handlePlaybackSignal);
     AppState.trackTransitionRevision.addListener(_handleTrackTransition);
-    if (AppState.isPlaying) _frameController.repeat();
+    _syncProgressClock();
   }
 
   @override
   void dispose() {
     AppState.playbackRevision.removeListener(_handlePlaybackSignal);
     AppState.trackTransitionRevision.removeListener(_handleTrackTransition);
+    _progressTimer?.cancel();
     _frameController.dispose();
+    _paintState.dispose();
     super.dispose();
   }
 
@@ -731,18 +755,31 @@ class _PlaybackProgressState extends State<_PlaybackProgress>
     return (AppState.estimatedPlaybackPositionMs / duration).clamp(0.0, 1.0);
   }
 
-  void _ensureFrameTicker() {
-    if (!_frameController.isAnimating) _frameController.repeat();
+  void _syncProgressClock() {
+    final bool animating =
+        _transitionStartedAtMs > 0 || _catchUpStartedAtMs > 0;
+    if (animating) {
+      _progressTimer?.cancel();
+      _progressTimer = null;
+      if (!_frameController.isAnimating) _frameController.repeat();
+    } else {
+      if (_frameController.isAnimating) _frameController.stop();
+      if (AppState.isPlaying && AppState.playbackDurationMs > 0) {
+        _progressTimer ??= Timer.periodic(
+          const Duration(milliseconds: 100),
+          (_) => _onFrame(),
+        );
+      } else {
+        _progressTimer?.cancel();
+        _progressTimer = null;
+      }
+    }
   }
 
   void _handlePlaybackSignal() {
     if (!mounted) return;
     _onFrame();
-    if (AppState.isPlaying ||
-        _transitionStartedAtMs > 0 ||
-        _catchUpStartedAtMs > 0) {
-      _ensureFrameTicker();
-    }
+    _syncProgressClock();
   }
 
   void _handleTrackTransition() {
@@ -753,8 +790,13 @@ class _PlaybackProgressState extends State<_PlaybackProgress>
       _transitionStartedAtMs = _clock.elapsedMilliseconds + 1;
       _catchUpStartedAtMs = 0;
     }
-    _ensureFrameTicker();
-    setState(() => _lastReturning = true);
+    _syncProgressClock();
+    _lastReturning = true;
+    _paintState.update(_displayProgress, true);
+    if (!_lastVisible) {
+      _lastVisible = true;
+      setState(() {});
+    }
   }
 
   void _onFrame() {
@@ -807,35 +849,34 @@ class _PlaybackProgressState extends State<_PlaybackProgress>
 
     final bool isReturning = _transitionStartedAtMs > 0;
 
+    final bool visible =
+        AppState.playbackDurationMs > 0 || isReturning || nextProgress > 0.001;
     final bool shouldRebuild =
-        (nextProgress - _displayProgress).abs() > 0.00005 ||
         _lastProgressStyle != AppState.progressStyle ||
         _lastPlaying != AppState.isPlaying ||
         _lastAutoContrast != AppState.enableProgressAutoContrast ||
         _lastReturning != isReturning ||
-        _lastSchemeColor != AppState.currentScheme.primary;
-    if (!shouldRebuild || !mounted) {
-      if (!AppState.isPlaying &&
-          _transitionStartedAtMs <= 0 &&
-          _catchUpStartedAtMs <= 0) {
-        _frameController.stop();
-      }
-      return;
-    }
+        _lastSchemeColor != AppState.currentScheme.primary ||
+        _lastVisible != visible;
+    if (!mounted) return;
 
-    setState(() {
-      _displayProgress = nextProgress;
-      _lastProgressStyle = AppState.progressStyle;
-      _lastPlaying = AppState.isPlaying;
-      _lastAutoContrast = AppState.enableProgressAutoContrast;
-      _lastReturning = isReturning;
-      _lastSchemeColor = AppState.currentScheme.primary;
-    });
-    if (!AppState.isPlaying &&
-        _transitionStartedAtMs <= 0 &&
-        _catchUpStartedAtMs <= 0) {
-      _frameController.stop();
+    _displayProgress = nextProgress;
+    _paintState.update(
+      nextProgress,
+      isReturning,
+      force: isReturning || _catchUpStartedAtMs > 0,
+    );
+    if (shouldRebuild) {
+      setState(() {
+        _lastProgressStyle = AppState.progressStyle;
+        _lastPlaying = AppState.isPlaying;
+        _lastAutoContrast = AppState.enableProgressAutoContrast;
+        _lastReturning = isReturning;
+        _lastSchemeColor = AppState.currentScheme.primary;
+        _lastVisible = visible;
+      });
     }
+    _syncProgressClock();
   }
 
   @override
@@ -849,15 +890,16 @@ class _PlaybackProgressState extends State<_PlaybackProgress>
     final Color primary = AppState.currentScheme.primary;
     final Color trackColor = AppState.currentScheme.surfaceContainerHighest;
     final bool autoContrast = AppState.enableProgressAutoContrast;
+    final double devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
     return SizedBox.expand(
       child: CustomPaint(
         painter: _ProgressBarPainter(
-          progress: _displayProgress,
+          paintState: _paintState,
           activeColor: primary,
           trackColor: trackColor,
           autoContrast: autoContrast,
           style: AppState.progressStyle,
-          returning: isReturning,
+          devicePixelRatio: devicePixelRatio,
         ),
       ),
     );
@@ -880,7 +922,10 @@ class MusicSpectrumPanel extends StatefulWidget {
 
 class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
     with SingleTickerProviderStateMixin {
-  static final ImageFilter _glassBlur = ImageFilter.blur(sigmaX: 13, sigmaY: 13);
+  static final ImageFilter _glassBlur = ImageFilter.blur(
+    sigmaX: 13,
+    sigmaY: 13,
+  );
   late final AnimationController _controller;
   final Float32List _displayLevels = Float32List(AppState.spectrumBandCount);
   final Float32List _startLevels = Float32List(AppState.spectrumBandCount);
@@ -1139,24 +1184,26 @@ class _SpectrumPainter extends CustomPainter {
 }
 
 class _ProgressBarPainter extends CustomPainter {
-  final double progress;
+  final _ProgressPaintState paintState;
   final Color activeColor;
   final Color trackColor;
   final bool autoContrast;
   final MD3ProgressStyle style;
-  final bool returning;
+  final double devicePixelRatio;
 
-  const _ProgressBarPainter({
-    required this.progress,
+  _ProgressBarPainter({
+    required this.paintState,
     required this.activeColor,
     required this.trackColor,
     required this.autoContrast,
     required this.style,
-    required this.returning,
-  });
+    required this.devicePixelRatio,
+  }) : super(repaint: paintState);
 
   @override
   void paint(Canvas canvas, Size size) {
+    paintState.minimumVisibleDelta =
+        0.5 / math.max(1.0, size.width * devicePixelRatio);
     final Radius radius = Radius.circular(size.height / 2.0);
     final Paint trackPaint = Paint()
       ..isAntiAlias = true
@@ -1169,7 +1216,7 @@ class _ProgressBarPainter extends CustomPainter {
       ..color = autoContrast ? Colors.white : activeColor
       ..blendMode = autoContrast ? BlendMode.difference : BlendMode.srcOver;
 
-    final double normalized = progress.clamp(0.0, 1.0);
+    final double normalized = paintState.progress.clamp(0.0, 1.0);
     if (style == MD3ProgressStyle.segmented) {
       final int segmentCount = (size.width / 12.0).round().clamp(12, 32);
       const double segmentGap = 2.0;
@@ -1206,7 +1253,7 @@ class _ProgressBarPainter extends CustomPainter {
         radius,
       );
       canvas.drawRRect(active, activePaint);
-      if (returning) {
+      if (paintState.returning) {
         final Paint returnHighlight = Paint()
           ..isAntiAlias = true
           ..color = (autoContrast ? Colors.white : activeColor).withValues(
@@ -1241,12 +1288,12 @@ class _ProgressBarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ProgressBarPainter oldDelegate) =>
-      oldDelegate.progress != progress ||
       oldDelegate.activeColor != activeColor ||
       oldDelegate.trackColor != trackColor ||
       oldDelegate.autoContrast != autoContrast ||
       oldDelegate.style != style ||
-      oldDelegate.returning != returning;
+      oldDelegate.devicePixelRatio != devicePixelRatio ||
+      oldDelegate.paintState != paintState;
 }
 
 class _TextInfoWidget extends StatelessWidget {

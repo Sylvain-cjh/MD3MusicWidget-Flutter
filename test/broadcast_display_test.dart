@@ -10,6 +10,130 @@ import 'package:music_widget_flutter/ui/widgets/track_controls.dart';
 import 'package:music_widget_flutter/ui/widgets/settings_panel.dart';
 
 void main() {
+  testWidgets('QQ playlist link can be saved from playback settings', (
+    tester,
+  ) async {
+    AppState.showNextUp = true;
+    AppState.qqPlaylistLink = '';
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 360,
+              height: 520,
+              child: SettingsPanel(
+                onThemeChanged: () {},
+                onVisualChanged: () {},
+                onBackgroundChanged: () {},
+                onLayoutChanged: () {},
+                onWindowBehaviorChanged: () {},
+                isMousePassthroughAvailable: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('settings_section_playback')));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('QQ 音乐公开歌单'),
+        160,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('连接'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField), '8081238754');
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(AppState.qqPlaylistLink, '8081238754');
+      expect(tester.takeException(), isNull);
+    } finally {
+      AppState.showNextUp = false;
+      AppState.qqPlaylistLink = '';
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
+  testWidgets('playlist settings fit a narrow 320px panel', (tester) async {
+    AppState.showNextUp = true;
+    AppState.playlistFilePath = r'C:\music\playlist.m3u8';
+    AppState.qqPlaylistLink = '8081238754';
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 320,
+              height: 460,
+              child: SettingsPanel(
+                onThemeChanged: () {},
+                onVisualChanged: () {},
+                onBackgroundChanged: () {},
+                onLayoutChanged: () {},
+                onWindowBehaviorChanged: () {},
+                isMousePassthroughAvailable: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('settings_section_playback')));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('导入播放列表'),
+        150,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('导入播放列表'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('QQ 音乐公开歌单'),
+        150,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('QQ 音乐公开歌单'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    } finally {
+      AppState.showNextUp = false;
+      AppState.playlistFilePath = '';
+      AppState.qqPlaylistLink = '';
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
+  testWidgets('settings sections fit a narrow 320px panel', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 320,
+            height: 460,
+            child: SettingsPanel(
+              onThemeChanged: () {},
+              onVisualChanged: () {},
+              onBackgroundChanged: () {},
+              onLayoutChanged: () {},
+              onWindowBehaviorChanged: () {},
+              isMousePassthroughAvailable: false,
+            ),
+          ),
+        ),
+      ),
+    );
+    for (final section in ['appearance', 'playback', 'lyrics', 'typography']) {
+      await tester.tap(find.byKey(ValueKey('settings_section_$section')));
+      await tester.pumpAndSettle();
+      if (section == 'playback') {
+        expect(find.text('采集程序'), findsOneWidget);
+      }
+      expect(tester.takeException(), isNull);
+    }
+    expect(find.text('采集程序'), findsNothing);
+  });
+
   testWidgets('Settings navigation shows only the selected section at 360px', (
     tester,
   ) async {
@@ -32,8 +156,16 @@ void main() {
       ),
     );
     expect(find.text('布局形态'), findsOneWidget);
+    final initialIndicator = tester.widget<AnimatedAlign>(
+      find.byKey(const ValueKey('settings_section_indicator')),
+    );
+    expect((initialIndicator.alignment as Alignment).x, -1);
     await tester.tap(find.byKey(const ValueKey('settings_section_lyrics')));
     await tester.pumpAndSettle();
+    final movedIndicator = tester.widget<AnimatedAlign>(
+      find.byKey(const ValueKey('settings_section_indicator')),
+    );
+    expect((movedIndicator.alignment as Alignment).x, 0.5);
     expect(find.text('布局形态'), findsNothing);
     expect(find.text('显示歌词'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -65,6 +197,56 @@ void main() {
       AppState.showLyrics = false;
       AppState.lyricsProviderChoice = LyricsProviderChoice.lrclib;
       AppState.localLyricsDirectory = '';
+    },
+  );
+
+  test(
+    'Continuous typography and independent lyrics font survive reload',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      await AppState.loadSettings();
+      AppState.lyricsUseThemeFont = false;
+      AppState.lyricsFontFamily = 'Microsoft YaHei UI';
+      AppState.lyricsWeightValue = 575.5;
+      AppState.lyricsFontSize = 16.2;
+      AppState.titleWeightValue = 642.0;
+      AppState.artistWeightValue = 378.0;
+      await AppState.saveSettings();
+      await AppState.flushSettings();
+      AppState.lyricsUseThemeFont = true;
+      AppState.lyricsFontFamily = 'System Default';
+      AppState.lyricsWeightValue = 500;
+      AppState.lyricsFontSize = 14;
+      AppState.titleWeightValue = 700;
+      AppState.artistWeightValue = 400;
+      await AppState.loadSettings();
+      expect(AppState.lyricsUseThemeFont, isFalse);
+      expect(AppState.effectiveLyricsFontFamily, 'Microsoft YaHei UI');
+      expect(AppState.lyricsWeightValue, 575.5);
+      expect(AppState.lyricsFontSize, 16.2);
+      expect(AppState.titleWeightValue, 642);
+      expect(AppState.artistWeightValue, 378);
+      AppState.lyricsUseThemeFont = true;
+      AppState.lyricsFontFamily = 'System Default';
+      AppState.lyricsWeightValue = 500;
+      AppState.lyricsFontSize = 14;
+      AppState.titleWeightValue = 700;
+      AppState.artistWeightValue = 400;
+    },
+  );
+
+  test(
+    'Legacy nine-step title and artist weights migrate to sliders',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'titleWeightIndex': 5,
+        'artistWeightIndex': 2,
+      });
+      await AppState.loadSettings();
+      expect(AppState.titleWeightValue, 600);
+      expect(AppState.artistWeightValue, 300);
+      AppState.titleWeightValue = 700;
+      AppState.artistWeightValue = 400;
     },
   );
 

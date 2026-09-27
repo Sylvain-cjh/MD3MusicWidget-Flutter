@@ -24,6 +24,8 @@ namespace MusicFetcher
             processId = ProcessId,
             sourceAppId = "",
             isPlaying = false,
+            isShuffleActive = (bool?)null,
+            autoRepeatMode = "",
             title = "暂无音乐播放",
             artist = "请打开播放软件",
             hasCover = false,
@@ -38,6 +40,7 @@ namespace MusicFetcher
         private static byte[] _currentCover = Array.Empty<byte>();
         private static string _currentCoverVersion = "";
         private static readonly object _stateLock = new();
+        private static string _selectedSourceAppId = "";
         private static readonly SpectrumAnalyzer _spectrumAnalyzer = new();
         private static GlobalSystemMediaTransportControlsSessionManager? _manager;
         private static GlobalSystemMediaTransportControlsSession? _observedSession;
@@ -199,9 +202,63 @@ namespace MusicFetcher
                 return (_currentCoverVersion, (byte[])_currentCover.Clone());
         }
 
+        private static GlobalSystemMediaTransportControlsSession? SelectSession()
+        {
+            var manager = _manager;
+            if (manager == null) return null;
+            string selectedSource;
+            lock (_stateLock) selectedSource = _selectedSourceAppId;
+            if (selectedSource.Length == 0) return manager.GetCurrentSession();
+
+            GlobalSystemMediaTransportControlsSession? pausedMatch = null;
+            foreach (var session in manager.GetSessions())
+            {
+                if (!string.Equals(session.SourceAppUserModelId, selectedSource,
+                    StringComparison.OrdinalIgnoreCase)) continue;
+                pausedMatch ??= session;
+                try
+                {
+                    if (session.GetPlaybackInfo().PlaybackStatus ==
+                        GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+                        return session;
+                }
+                catch { }
+            }
+            return pausedMatch;
+        }
+
+        private static byte[] GetSourcesJson()
+        {
+            string selectedSource;
+            lock (_stateLock) selectedSource = _selectedSourceAppId;
+            var sources = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            if (_manager != null)
+            {
+                foreach (var session in _manager.GetSessions())
+                {
+                    string id = session.SourceAppUserModelId ?? "";
+                    if (id.Length == 0) continue;
+                    bool playing = false;
+                    try
+                    {
+                        playing = session.GetPlaybackInfo().PlaybackStatus ==
+                            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+                    }
+                    catch { }
+                    sources[id] = sources.GetValueOrDefault(id) || playing;
+                }
+            }
+            return JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                selectedSourceAppId = selectedSource,
+                sources = sources.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(pair => new { sourceAppId = pair.Key, isPlaying = pair.Value })
+            });
+        }
+
         private static async Task ExecuteMediaCommandAsync(byte command)
         {
-            var session = _manager?.GetCurrentSession();
+            var session = SelectSession();
             if (session == null) return;
             if (command == TogglePlayPauseCommand)
                 await session.TryTogglePlayPauseAsync();
@@ -235,7 +292,7 @@ namespace MusicFetcher
                         await Task.Delay(400);
                         continue;
                     }
-                    var session = _manager?.GetCurrentSession();
+                    var session = SelectSession();
                     long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     if (session != null)
                     {
@@ -257,7 +314,10 @@ namespace MusicFetcher
                         string title = props.Title ?? "未知歌曲";
                         string artist = props.Artist ?? "未知歌手";
                         string sourceApp = session.SourceAppUserModelId ?? "";
-                        _spectrumAnalyzer.SetTargetApplication(sourceApp, isPlaying);
+                        string selectedSource;
+                        lock (_stateLock) selectedSource = _selectedSourceAppId;
+                        _spectrumAnalyzer.SetTargetApplication(sourceApp, isPlaying,
+                            selectedSource.Length > 0);
                         var timeline = session.GetTimelineProperties();
                         var capturedAt = DateTimeOffset.UtcNow;
                         double durationMs = Math.Max(0, (timeline.EndTime - timeline.StartTime).TotalMilliseconds);
@@ -343,6 +403,8 @@ namespace MusicFetcher
                                 processId = ProcessId,
                                 sourceAppId = sourceApp,
                                 isPlaying,
+                                isShuffleActive = playback.IsShuffleActive,
+                                autoRepeatMode = playback.AutoRepeatMode?.ToString().ToLowerInvariant() ?? "",
                                 title,
                                 artist,
                                 hasCover = coverVersion.Length > 0,
@@ -380,7 +442,7 @@ namespace MusicFetcher
                         ObserveSession(null);
                         cachedProperties = null;
                         cachedPropertiesRevision = -1;
-                        _spectrumAnalyzer.SetTargetApplication("", false);
+                        _spectrumAnalyzer.SetTargetApplication("", false, false);
                         nextPollDelayMs = 2500;
                         bool enteringNoMedia = lastTitle != "NO_MEDIA";
                         if (enteringNoMedia || now - lastPublishedAtMs >= 500)
@@ -391,6 +453,8 @@ namespace MusicFetcher
                                 processId = ProcessId,
                                 sourceAppId = "",
                                 isPlaying = false,
+                                isShuffleActive = (bool?)null,
+                                autoRepeatMode = "",
                                 title = "暂无音乐播放",
                                 artist = "请打开播放软件",
                                 hasCover = false,
@@ -454,6 +518,7 @@ namespace MusicFetcher
                         .WaitAsync(TimeSpan.FromSeconds(1));
                     if (string.IsNullOrWhiteSpace(requestLine)) return;
                     bool headersComplete = false;
+                    bool browserOrigin = false;
                     for (int headerCount = 0; headerCount < 64; headerCount++)
                     {
                         string? header = await reader.ReadLineAsync()
@@ -463,6 +528,8 @@ namespace MusicFetcher
                             headersComplete = true;
                             break;
                         }
+                        if (header.StartsWith("Origin:", StringComparison.OrdinalIgnoreCase))
+                            browserOrigin = true;
                     }
                     if (!headersComplete) return;
 
@@ -488,6 +555,38 @@ namespace MusicFetcher
                             "application/json; charset=utf-8",
                             infoBytes
                         );
+                    }
+                    else if (path == "/sources" && method == "GET")
+                    {
+                        if (browserOrigin)
+                        {
+                            await WriteHttpResponseAsync(stream, 403, null,
+                                Array.Empty<byte>(), allowCors: false);
+                            return;
+                        }
+                        await WriteHttpResponseAsync(stream, 200,
+                            "application/json; charset=utf-8", GetSourcesJson(),
+                            allowCors: false);
+                    }
+                    else if (path == "/source" && method == "POST")
+                    {
+                        if (browserOrigin)
+                        {
+                            await WriteHttpResponseAsync(stream, 403, null,
+                                Array.Empty<byte>(), allowCors: false);
+                            return;
+                        }
+                        string sourceId = QueryValue(uri, "appId") ?? "";
+                        if (sourceId.Length > 512)
+                        {
+                            await WriteHttpResponseAsync(stream, 400, null,
+                                Array.Empty<byte>(), allowCors: false);
+                            return;
+                        }
+                        lock (_stateLock) _selectedSourceAppId = sourceId;
+                        WakeSmtc(mediaPropertiesChanged: true);
+                        await WriteHttpResponseAsync(stream, 204, null,
+                            Array.Empty<byte>(), allowCors: false);
                     }
                     else if (path == "/spectrum.bin")
                     {
@@ -589,7 +688,8 @@ namespace MusicFetcher
             int statusCode,
             string? contentType,
             byte[] body,
-            string? etag = null
+            string? etag = null,
+            bool allowCors = true
         )
         {
             string reason = statusCode switch
@@ -597,15 +697,20 @@ namespace MusicFetcher
                 200 => "OK",
                 204 => "No Content",
                 304 => "Not Modified",
+                400 => "Bad Request",
+                403 => "Forbidden",
                 404 => "Not Found",
                 _ => "OK"
             };
             var header = new StringBuilder()
                 .Append($"HTTP/1.1 {statusCode} {reason}\r\n")
-                .Append("Access-Control-Allow-Origin: *\r\n")
-                .Append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n")
                 .Append("Connection: close\r\n")
                 .Append($"Content-Length: {body.Length}\r\n");
+            if (allowCors)
+            {
+                header.Append("Access-Control-Allow-Origin: *\r\n");
+                header.Append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
+            }
             if (!string.IsNullOrEmpty(contentType)) header.Append($"Content-Type: {contentType}\r\n");
             if (!string.IsNullOrEmpty(etag)) header.Append($"ETag: {etag}\r\n");
             header.Append("\r\n");

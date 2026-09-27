@@ -100,6 +100,14 @@ final class PlatformQueue {
 
   PlatformQueue({required List<PlatformQueueItem> items, this.currentIndex})
     : items = List.unmodifiable(items);
+
+  PlatformQueueItem? nextItem({bool wrap = false}) {
+    final index = currentIndex;
+    if (index == null || items.isEmpty) return null;
+    final next = index + 1;
+    if (next < items.length) return items[next];
+    return wrap ? items.first : null;
+  }
 }
 
 abstract interface class MusicPlatformProvider {

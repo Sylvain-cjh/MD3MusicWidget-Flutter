@@ -226,12 +226,9 @@ void main() {
         searchEndpoint: root.replace(path: '/qq/search'),
         lyricEndpoint: root.replace(path: '/qq/lyric'),
       );
-      expect(
-        (await provider.loadLyrics(
-          _track('QQMusic.exe', '1'),
-        ))?.lineAt(1500)?.text,
-        'QQ line',
-      );
+      final qqDocument = await provider.loadLyrics(_track('QQMusic.exe', '1'));
+      expect(qqDocument?.lineAt(1500)?.text, 'QQ line');
+      expect(qqDocument?.sourceProviderId, 'qqMusic');
       qqHasResult = false;
       final fallbackProvider = QqMusicLyricsProvider(
         fallback: LrclibLyricsProvider(
@@ -240,12 +237,11 @@ void main() {
         searchEndpoint: root.replace(path: '/qq/search'),
         lyricEndpoint: root.replace(path: '/qq/lyric'),
       );
-      expect(
-        (await fallbackProvider.loadLyrics(
-          _track('QQMusic.exe', '2'),
-        ))?.lineAt(1500)?.text,
-        'Fallback line',
+      final fallbackDocument = await fallbackProvider.loadLyrics(
+        _track('QQMusic.exe', '2'),
       );
+      expect(fallbackDocument?.lineAt(1500)?.text, 'Fallback line');
+      expect(fallbackDocument?.sourceProviderId, 'lrclib');
     },
   );
 
@@ -311,6 +307,77 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await AppState.lyrics.setTrack(null);
     AppState.platformProviders.unregister('test');
+    AppState.currentPlatformTrack = null;
+  });
+
+  testWidgets('Lyrics source badge follows the resolved fallback provider', (
+    tester,
+  ) async {
+    final track = _track('resolvedsourcetest', 'badge');
+    AppState.platformProviders.register(
+      _FakeLyricsProvider(
+        'resolvedsourcetest',
+        (_) async => LyricsDocument.parseLrc(
+          '[00:01.00]Fallback line',
+        ).withSourceProviderId('lrclib'),
+      ),
+    );
+    AppState.currentPlatformTrack = track;
+    await AppState.lyrics.setTrack(track, providerId: 'resolvedsourcetest');
+    AppState.lyrics.setPositionMs(1500);
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SizedBox(width: 400, height: 48, child: MusicLyricsPanel()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(AppState.lyrics.state.providerId, 'lrclib');
+    expect(find.byKey(const ValueKey('lyrics_source_lrclib')), findsOneWidget);
+    expect(
+      (tester.widget<Image>(find.byType(Image).first).image as AssetImage)
+          .assetName,
+      'assets/brand/lrclib.png',
+    );
+    expect(find.text('Fallback line'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await AppState.lyrics.setTrack(null);
+    AppState.platformProviders.unregister('resolvedsourcetest');
+    AppState.currentPlatformTrack = null;
+  });
+
+  testWidgets('QQ lyrics source badge uses the real app icon asset', (
+    tester,
+  ) async {
+    final track = _track('qqiconfixture', 'badge');
+    AppState.platformProviders.register(
+      _FakeLyricsProvider(
+        'qqiconfixture',
+        (_) async => LyricsDocument.parseLrc(
+          '[00:01.00]QQ line',
+        ).withSourceProviderId('qqMusic'),
+      ),
+    );
+    AppState.currentPlatformTrack = track;
+    await AppState.lyrics.setTrack(track, providerId: 'qqiconfixture');
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SizedBox(width: 400, height: 48, child: MusicLyricsPanel()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('lyrics_source_qqMusic')), findsOneWidget);
+    expect(
+      (tester.widget<Image>(find.byType(Image).first).image as AssetImage)
+          .assetName,
+      'assets/brand/qq_music.png',
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await AppState.lyrics.setTrack(null);
+    AppState.platformProviders.unregister('qqiconfixture');
     AppState.currentPlatformTrack = null;
   });
 

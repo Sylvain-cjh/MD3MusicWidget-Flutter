@@ -17,13 +17,16 @@ class SlideMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final offsetBegin = menuSide == "left" ? const Offset(0.2, 0) : const Offset(-0.2, 0);
+    final offsetBegin = menuSide == "left"
+        ? const Offset(0.2, 0)
+        : const Offset(-0.2, 0);
 
     return FadeTransition(
       opacity: animation,
       child: SlideTransition(
-        position: Tween<Offset>(begin: offsetBegin, end: Offset.zero)
-            .animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+        position: Tween<Offset>(begin: offsetBegin, end: Offset.zero).animate(
+          CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+        ),
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 4),
           child: IntrinsicWidth(
@@ -32,16 +35,29 @@ class SlideMenu extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppState.currentScheme.surfaceContainerHigh,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppState.currentScheme.outlineVariant.withValues(alpha: 0.5)),
+                border: Border.all(
+                  color: AppState.currentScheme.outlineVariant.withValues(
+                    alpha: 0.5,
+                  ),
+                ),
                 
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildMenuItem(Icons.settings_rounded, "偏好设置中心", onSettingsTap),
+                  _buildMenuItem(
+                    Icons.settings_rounded,
+                    "偏好设置中心",
+                    onSettingsTap,
+                  ),
                   const SizedBox(height: 2),
-                  _buildMenuItem(Icons.power_settings_new_rounded, "完全退出组件", onExitTap, isError: true),
+                  _buildMenuItem(
+                    Icons.power_settings_new_rounded,
+                    "完全退出组件",
+                    onExitTap,
+                    isError: true,
+                  ),
                 ],
               ),
             ),
@@ -51,8 +67,15 @@ class SlideMenu extends StatelessWidget {
     );
   }
 
-  Widget _buildMenuItem(IconData icon, String label, VoidCallback onClick, {bool isError = false}) {
-    final color = isError ? AppState.currentScheme.error : AppState.currentScheme.onSurface;
+  Widget _buildMenuItem(
+    IconData icon,
+    String label,
+    VoidCallback onClick, {
+    bool isError = false,
+  }) {
+    final color = isError
+        ? AppState.currentScheme.error
+        : AppState.currentScheme.onSurface;
     return InkWell(
       onTap: onClick,
       borderRadius: BorderRadius.circular(14),
@@ -63,7 +86,14 @@ class SlideMenu extends StatelessWidget {
           children: [
             Icon(icon, color: color, size: 18),
             const SizedBox(width: 12),
-            Text(label, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w600)),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
         ),
       ),

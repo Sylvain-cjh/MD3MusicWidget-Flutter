@@ -24,6 +24,8 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
   void initState() {
     super.initState();
     AppState.lyrics.addListener(_onLyricsChanged);
+    AppState.typographyRevision.addListener(_onLyricsChanged);
+    AppState.playbackRevision.addListener(_syncTimelineTimer);
     _syncTimelineTimer();
   }
 
@@ -33,11 +35,9 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
   }
 
   void _syncTimelineTimer() {
-    if (AppState.lyrics.state.document?.isTimed == true) {
+    if (AppState.isPlaying && AppState.lyrics.state.document?.isTimed == true) {
       _timelineTimer ??= Timer.periodic(const Duration(milliseconds: 100), (_) {
-        if (AppState.isPlaying) {
-          AppState.lyrics.setPositionMs(AppState.estimatedPlaybackPositionMs);
-        }
+        AppState.lyrics.setPositionMs(AppState.estimatedPlaybackPositionMs);
       });
     } else {
       _timelineTimer?.cancel();
@@ -49,6 +49,8 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
   void dispose() {
     _timelineTimer?.cancel();
     AppState.lyrics.removeListener(_onLyricsChanged);
+    AppState.typographyRevision.removeListener(_onLyricsChanged);
+    AppState.playbackRevision.removeListener(_syncTimelineTimer);
     super.dispose();
   }
 
@@ -78,6 +80,47 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
             ? state.currentLine!.text
             : '♪';
     }
+  }
+
+  Widget _sourceIcon(LyricsState state, ColorScheme scheme) {
+    final source = state.providerId.isNotEmpty
+        ? state.providerId
+        : AppState.lyricsProviderChoice.name;
+    final (label, asset) = switch (source) {
+      'qqMusic' => ('QQ 音乐', 'assets/brand/qq_music.png'),
+      'lrclib' => ('LRCLIB', 'assets/brand/lrclib.png'),
+      'localLrc' => ('本地 LRC', null),
+      _ => ('歌词', null),
+    };
+    return Tooltip(
+      message: '歌词来源：$label',
+      child: Semantics(
+        label: '歌词来源：$label',
+        child: SizedBox(
+          key: ValueKey('lyrics_source_$source'),
+          width: 27,
+          height: 27,
+          child: asset != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(7),
+                  child: Image.asset(asset, width: 27, height: 27),
+                )
+              : DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.tertiaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    source == 'localLrc'
+                        ? Icons.folder_rounded
+                        : Icons.lyrics_rounded,
+                    size: 17,
+                    color: scheme.onTertiaryContainer,
+                  ),
+                ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -110,12 +153,20 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
             child: Row(
               children: [
-                Icon(
-                  Icons.lyrics_rounded,
-                  size: 20,
-                  color: scheme.onSurfaceVariant,
+                AnimatedSwitcher(
+                  duration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 180),
+                  child: KeyedSubtree(
+                    key: ValueKey(
+                      state.providerId.isNotEmpty
+                          ? state.providerId
+                          : AppState.lyricsProviderChoice.name,
+                    ),
+                    child: _sourceIcon(state, scheme),
+                  ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 240),
@@ -130,12 +181,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                         displayText,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurface,
-                          fontWeight: FontWeight.w500,
-                          fontFamilyFallback: AppState.textFontFallback,
-                          height: 1.2,
-                        ),
+                        style: AppState.lyricsTextStyle(scheme.onSurface),
                       ),
                     ),
                   ),

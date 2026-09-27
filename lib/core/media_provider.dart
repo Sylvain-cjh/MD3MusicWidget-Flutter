@@ -51,6 +51,8 @@ final class MediaSnapshot {
   final int timelineUpdatedAtMs;
   final int fetcherUpdatedAtMs;
   final int capabilities;
+  final bool? isShuffleActive;
+  final String autoRepeatMode;
 
   const MediaSnapshot({
     required this.processId,
@@ -66,6 +68,8 @@ final class MediaSnapshot {
     required this.timelineUpdatedAtMs,
     required this.fetcherUpdatedAtMs,
     required this.capabilities,
+    this.isShuffleActive,
+    this.autoRepeatMode = '',
   });
 
   factory MediaSnapshot.fromJson(Map<String, dynamic> data) => MediaSnapshot(
@@ -83,6 +87,10 @@ final class MediaSnapshot {
     fetcherUpdatedAtMs: (data['fetcherUpdatedAtMs'] as num?)?.toInt() ?? 0,
     capabilities:
         (data['capabilities'] as num?)?.toInt() ?? MediaCapability.smtcDefault,
+    isShuffleActive: data['isShuffleActive'] is bool
+        ? data['isShuffleActive'] as bool
+        : null,
+    autoRepeatMode: data['autoRepeatMode']?.toString().toLowerCase() ?? '',
   );
 }
 

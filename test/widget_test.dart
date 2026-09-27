@@ -17,16 +17,51 @@ import 'package:music_widget_flutter/core/spectrum_packet.dart';
 import 'package:music_widget_flutter/ui/animations/component_size_motion.dart';
 import 'package:music_widget_flutter/ui/widgets/locked_aspect_resize_area.dart';
 import 'package:music_widget_flutter/ui/widgets/md3_anchored_select.dart';
+import 'package:music_widget_flutter/ui/widgets/dynamic_background.dart';
 
 void main() {
-  testWidgets('封面缓存使用预算并支持空闲清理', (tester) async {
+  testWidgets('封面图片缓存使用固定预算', (tester) async {
     final resources = ArtworkResources();
     final cache = PaintingBinding.instance.imageCache;
     expect(cache.maximumSize, 24);
     expect(cache.maximumSizeBytes, 48 * 1024 * 1024);
-    resources.trimWhenIdle();
-    await tester.pump(const Duration(seconds: 3));
     resources.dispose();
+  });
+
+  testWidgets('背景封面缓存优先复用最近曲目并限制容量', (tester) async {
+    final resources = ArtworkResources();
+    final first = resources.rememberArtwork('first', Uint8List(64))!;
+    for (final key in ['second', 'third', 'fourth']) {
+      resources.rememberArtwork(key, Uint8List(64));
+    }
+    expect(resources.findArtwork('first'), same(first));
+    resources.rememberArtwork('fifth', Uint8List(64));
+    expect(resources.findArtwork('second'), isNull);
+    expect(resources.findArtwork('first'), same(first));
+    expect(resources.retains(first.background), isTrue);
+    expect(resources.artworkCount, 4);
+    expect(resources.encodedBytes, 256);
+
+    resources.didHaveMemoryPressure();
+    expect(resources.artworkCount, 0);
+    expect(resources.encodedBytes, 0);
+    resources.dispose();
+  });
+
+  testWidgets('只有背景缓存命中时才显示提示', (tester) async {
+    AppState.backgroundCacheHit.value = false;
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SizedBox(width: 480, height: 300, child: DynamicBackground()),
+      ),
+    );
+    expect(find.text('背景缓存命中'), findsNothing);
+    AppState.backgroundCacheHit.value = true;
+    await tester.pump();
+    expect(find.text('背景缓存命中'), findsOneWidget);
+    AppState.backgroundCacheHit.value = false;
+    await tester.pump();
+    expect(find.text('背景缓存命中'), findsNothing);
   });
 
   testWidgets('MD3 选择菜单围绕当前项展开并返回新选择', (tester) async {
@@ -119,6 +154,77 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('大'));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('菜单选中项保持锚点，邻近选项先于远端选项显现', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Md3AnchoredSelect<int>(
+              value: 2,
+              entries: const [
+                DropdownMenuEntry(value: 0, label: '零'),
+                DropdownMenuEntry(value: 1, label: '一'),
+                DropdownMenuEntry(value: 2, label: '二'),
+                DropdownMenuEntry(value: 3, label: '三'),
+                DropdownMenuEntry(value: 4, label: '四'),
+              ],
+              onSelected: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    final anchorCenter = tester.getCenter(find.byType(Md3AnchoredSelect<int>));
+    await tester.tap(find.byType(Md3AnchoredSelect<int>));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    final selectedCenter = tester.getCenter(find.text('二').last);
+    expect(selectedCenter.dy, closeTo(anchorCenter.dy, 1));
+    final near = tester.widget<FadeTransition>(
+      find.byKey(const ValueKey('md3-select-option-1')),
+    );
+    final far = tester.widget<FadeTransition>(
+      find.byKey(const ValueKey('md3-select-option-0')),
+    );
+    expect(near.opacity.value, greaterThan(far.opacity.value));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('菜单在屏幕边缘缩短视口但不移动选中项', (tester) async {
+    for (final nearTop in [true, false]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: nearTop ? Alignment.topCenter : Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Md3AnchoredSelect<int>(
+                  value: nearTop ? 4 : 0,
+                  entries: const [
+                    DropdownMenuEntry(value: 0, label: '零'),
+                    DropdownMenuEntry(value: 1, label: '一'),
+                    DropdownMenuEntry(value: 2, label: '二'),
+                    DropdownMenuEntry(value: 3, label: '三'),
+                    DropdownMenuEntry(value: 4, label: '四'),
+                  ],
+                  onSelected: (_) {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      final center = tester.getCenter(find.byType(Md3AnchoredSelect<int>));
+      await tester.tap(find.byType(Md3AnchoredSelect<int>));
+      await tester.pumpAndSettle();
+      final selected = tester.getCenter(find.text(nearTop ? '四' : '零').last);
+      expect(selected.dy, closeTo(center.dy, 1));
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+    }
   });
 
   test('getShapeRadius 为每种形状返回正确的圆角', () {

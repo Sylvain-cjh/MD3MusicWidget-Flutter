@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../core/app_state.dart';
 import '../../core/media_provider.dart';
+import '../../core/music_source_service.dart';
+import '../../core/qq_music_playlist_queue_provider.dart';
 import 'md3_anchored_select.dart';
 
 enum _SettingsSection { window, appearance, playback, lyrics, typography }
@@ -50,6 +54,27 @@ class _SettingsPanelState extends State<SettingsPanel> {
   late bool _hasTimeline;
   _SettingsSection _selectedSection = _SettingsSection.window;
   int _sectionDirection = 1;
+  List<MusicSource> _sources = const [];
+  bool _sourcesLoading = false;
+  String? _sourceError;
+  int _sourceRequestSerial = 0;
+  Timer? _typographySaveTimer;
+
+  void _updateTypography(VoidCallback change) {
+    setState(change);
+    AppState.notifyTypographyChanged();
+    _typographySaveTimer?.cancel();
+    _typographySaveTimer = Timer(
+      const Duration(milliseconds: 450),
+      () => unawaited(AppState.saveSettings()),
+    );
+  }
+
+  void _finishTypographyChange() {
+    _typographySaveTimer?.cancel();
+    _typographySaveTimer = null;
+    unawaited(AppState.saveSettings());
+  }
 
   @override
   void initState() {
@@ -69,11 +94,251 @@ class _SettingsPanelState extends State<SettingsPanel> {
     setState(() => _hasTimeline = nextHasTimeline);
   }
 
+  Future<void> _refreshSources() async {
+    if (_sourcesLoading) return;
+    final int request = ++_sourceRequestSerial;
+    setState(() {
+      _sourcesLoading = true;
+      _sourceError = null;
+    });
+    try {
+      final snapshot = await MusicSourceService.fetchSources();
+      if (!mounted || request != _sourceRequestSerial) return;
+      setState(() {
+        _sources = snapshot.sources;
+        _sourcesLoading = false;
+      });
+    } catch (_) {
+      if (!mounted || request != _sourceRequestSerial) return;
+      setState(() {
+        _sourcesLoading = false;
+        _sourceError = '无法读取播放程序，请检查 MusicFetcher';
+      });
+    }
+  }
+
+  Future<void> _selectSource(String id) async {
+    try {
+      await MusicSourceService.selectSource(id);
+      if (!mounted) return;
+      setState(() {
+        AppState.selectedSourceAppId = id;
+        _sourceError = null;
+      });
+      AppState.clearSpectrum();
+      unawaited(AppState.saveSettings());
+      unawaited(_refreshSources());
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _sourceError = '切换失败；请检查 MusicFetcher 后重试');
+    }
+  }
+
+  Future<void> _choosePlaylistFile() async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['m3u', 'm3u8', 'json'],
+      );
+      final path = result?.files.single.path;
+      if (!mounted || path == null || path.isEmpty) return;
+      setState(() {
+        AppState.playlistFilePath = path;
+        AppState.showNextUp = true;
+      });
+      AppState.refreshQueue(force: true);
+      widget.onLayoutChanged();
+    } catch (_) {}
+  }
+
+  Future<void> _editQqPlaylist() async {
+    String input = AppState.qqPlaylistLink;
+    String? error;
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, updateDialog) => AlertDialog(
+          title: const Text('QQ 音乐歌单'),
+          content: SizedBox(
+            width: 340,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('粘贴公开歌单链接或数字 ID。预告依据歌单顺序，不代表客户端临时播放队列。'),
+                const SizedBox(height: 16),
+                TextFormField(
+                  initialValue: input,
+                  autofocus: true,
+                  keyboardType: TextInputType.url,
+                  decoration: InputDecoration(
+                    labelText: '歌单链接或 ID',
+                    hintText: 'https://y.qq.com/n/ryqq/playlist/…',
+                    errorText: error,
+                    border: const OutlineInputBorder(),
+                  ),
+                  onChanged: (value) {
+                    input = value;
+                    if (error != null) updateDialog(() => error = null);
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final trimmed = input.trim();
+                if (parseQqPlaylistId(trimmed) == null) {
+                  updateDialog(() => error = '请输入有效的 QQ 音乐公开歌单链接或数字 ID');
+                  return;
+                }
+                Navigator.pop(context, trimmed);
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      AppState.qqPlaylistLink = selected;
+      AppState.showNextUp = true;
+    });
+    AppState.refreshQueue(force: true);
+    widget.onLayoutChanged();
+  }
+
+  List<DropdownMenuEntry<String>> _sourceEntries() {
+    final selected = AppState.selectedSourceAppId;
+    return [
+      const DropdownMenuEntry(value: '', label: '自动 · 系统当前播放器'),
+      if (selected.isNotEmpty &&
+          !_sources.any(
+            (source) => source.id.toLowerCase() == selected.toLowerCase(),
+          ))
+        DropdownMenuEntry(value: selected, label: '未运行 · $selected'),
+      for (final source in _sources)
+        DropdownMenuEntry(
+          value: source.id,
+          label: source.isPlaying ? '${source.label} · 播放中' : source.label,
+        ),
+    ];
+  }
+
   @override
   void dispose() {
+    _sourceRequestSerial++;
+    if (_typographySaveTimer?.isActive == true) _finishTypographyChange();
     AppState.playbackRevision.removeListener(_handleTimelineAvailability);
     AppState.fontsRevision.removeListener(_handleFontsChanged);
     super.dispose();
+  }
+
+  void _selectSection(_SettingsSection section) {
+    if (_selectedSection == section) return;
+    setState(() {
+      _sectionDirection = section.index > _selectedSection.index ? 1 : -1;
+      _selectedSection = section;
+    });
+    if (section == _SettingsSection.playback) unawaited(_refreshSources());
+  }
+
+  Widget _buildSectionNavigation() {
+    final scheme = Theme.of(context).colorScheme;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final sections = _SettingsSection.values;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 450;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Material(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.72),
+            child: SizedBox(
+              height: compact ? 56 : 48,
+              child: Stack(
+                children: [
+                  AnimatedAlign(
+                    key: const ValueKey('settings_section_indicator'),
+                    alignment: Alignment(
+                      -1 + 2 * _selectedSection.index / (sections.length - 1),
+                      0,
+                    ),
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 250),
+                    curve: Curves.easeInOutCubicEmphasized,
+                    child: FractionallySizedBox(
+                      widthFactor: 1 / sections.length,
+                      child: Padding(
+                        padding: const EdgeInsets.all(3),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: scheme.secondaryContainer,
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          child: const SizedBox.expand(),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      for (final section in sections)
+                        Expanded(
+                          child: Semantics(
+                            button: true,
+                            selected: _selectedSection == section,
+                            child: InkWell(
+                              key: ValueKey('settings_section_${section.name}'),
+                              onTap: () => _selectSection(section),
+                              child: compact
+                                  ? Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(section.icon, size: 17),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          section.label,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.labelSmall,
+                                        ),
+                                      ],
+                                    )
+                                  : Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(section.icon, size: 17),
+                                        const SizedBox(width: 5),
+                                        Text(
+                                          section.label,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.labelMedium,
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -128,29 +393,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
             ),
           ),
           const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 2,
-            children: [
-              for (final section in _SettingsSection.values)
-                ChoiceChip(
-                  key: ValueKey('settings_section_${section.name}'),
-                  avatar: Icon(section.icon, size: 16),
-                  label: Text(section.label),
-                  selected: _selectedSection == section,
-                  showCheckmark: false,
-                  onSelected: (_) {
-                    if (_selectedSection == section) return;
-                    setState(() {
-                      _sectionDirection = section.index > _selectedSection.index
-                          ? 1
-                          : -1;
-                      _selectedSection = section;
-                    });
-                  },
-                ),
-            ],
-          ),
+          _buildSectionNavigation(),
           const SizedBox(height: 12),
           Expanded(
             child: AnimatedSwitcher(
@@ -416,6 +659,32 @@ class _SettingsPanelState extends State<SettingsPanel> {
                         title: "播放显示与控件",
                         icon: Icons.widgets_rounded,
                         children: [
+                          _buildDropdownRow<String>(
+                            '采集程序',
+                            _sourceError ??
+                                (AppState.selectedSourceAppId.isEmpty
+                                    ? '自动跟随系统当前播放器'
+                                    : '仅显示所选程序；独立音频不可用时不混入系统声音'),
+                            AppState.selectedSourceAppId,
+                            (id) => unawaited(_selectSource(id)),
+                            _sourceEntries(),
+                            fullWidth: true,
+                            actionButton: IconButton(
+                              tooltip: '刷新播放程序列表',
+                              onPressed: _sourcesLoading
+                                  ? null
+                                  : _refreshSources,
+                              icon: _sourcesLoading
+                                  ? const SizedBox.square(
+                                      dimension: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.refresh_rounded),
+                            ),
+                          ),
+                          _buildDivider(),
                           _buildSwitchRow(
                             "显示播放控制",
                             "关闭后隐藏三个播放按钮，适合直播歌曲展示",
@@ -495,6 +764,53 @@ class _SettingsPanelState extends State<SettingsPanel> {
                         ],
                       ),
 
+                    if (_selectedSection == _SettingsSection.playback)
+                      _buildCategoryCard(
+                        title: '播放列表与下一首',
+                        icon: Icons.queue_music_rounded,
+                        children: [
+                          _buildSwitchRow(
+                            '显示播放列表',
+                            '接近歌曲结束时显示预计下一首；默认关闭',
+                            AppState.showNextUp,
+                            (value) {
+                              setState(() => AppState.showNextUp = value);
+                              AppState.refreshQueue(force: true);
+                              widget.onLayoutChanged();
+                            },
+                          ),
+                          _buildOptionalSetting(
+                            visible: AppState.showNextUp,
+                            child: Column(
+                              children: [
+                                _buildDivider(),
+                                _buildPlaylistFileRow(),
+                                _buildDivider(),
+                                _buildQqPlaylistRow(),
+                                _buildDivider(),
+                                _buildDropdownRow<int>(
+                                  '预告提前量',
+                                  '仅在歌曲末尾的这段时间内切换为下一首信息',
+                                  AppState.nextUpLeadSeconds,
+                                  (value) {
+                                    setState(
+                                      () => AppState.nextUpLeadSeconds = value,
+                                    );
+                                    widget.onVisualChanged();
+                                  },
+                                  const [
+                                    DropdownMenuEntry(value: 10, label: '10 秒'),
+                                    DropdownMenuEntry(value: 20, label: '20 秒'),
+                                    DropdownMenuEntry(value: 30, label: '30 秒'),
+                                    DropdownMenuEntry(value: 45, label: '45 秒'),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+
                     if (_selectedSection == _SettingsSection.lyrics)
                       _buildCategoryCard(
                         title: '歌词',
@@ -560,6 +876,92 @@ class _SettingsPanelState extends State<SettingsPanel> {
                                     ],
                                   ),
                                 ),
+                                _buildDivider(),
+                                _buildSwitchRow(
+                                  '跟随主题字体',
+                                  '只同步字体家族；歌词字重和字号仍可单独调节',
+                                  AppState.lyricsUseThemeFont,
+                                  (value) {
+                                    _updateTypography(
+                                      () => AppState.lyricsUseThemeFont = value,
+                                    );
+                                  },
+                                ),
+                                _buildOptionalSetting(
+                                  visible: !AppState.lyricsUseThemeFont,
+                                  child: _buildDropdownRow<String>(
+                                    '歌词字体',
+                                    '与歌曲名、歌手名独立设置',
+                                    AppState.lyricsFontFamily,
+                                    (value) => _updateTypography(
+                                      () => AppState.lyricsFontFamily = value,
+                                    ),
+                                    AppState.loadedSystemFonts
+                                        .map(
+                                          (font) => DropdownMenuEntry<String>(
+                                            value: font,
+                                            label: font == 'System Default'
+                                                ? '系统默认'
+                                                : font,
+                                          ),
+                                        )
+                                        .toList(),
+                                    actionButton: IconButton(
+                                      tooltip: '导入歌词字体文件',
+                                      icon: const Icon(
+                                        Icons.add_circle_outline_rounded,
+                                      ),
+                                      onPressed: () async {
+                                        final success =
+                                            await AppState.importCustomFont(
+                                              forLyrics: true,
+                                            );
+                                        if (!mounted || !success) return;
+                                        setState(() {});
+                                        AppState.notifyTypographyChanged();
+                                        widget.onVisualChanged();
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                _buildDivider(),
+                                _buildContinuousSliderRow(
+                                  title: '歌词字重',
+                                  subtitle: 'W100–W900；可变字体支持更细腻的过渡',
+                                  value: AppState.lyricsWeightValue,
+                                  min: 100,
+                                  max: 900,
+                                  valueLabel: (value) => 'W${value.round()}',
+                                  sliderKey: const ValueKey(
+                                    'lyrics_weight_slider',
+                                  ),
+                                  onChanged: (value) => _updateTypography(
+                                    () => AppState.lyricsWeightValue = value,
+                                  ),
+                                ),
+                                _buildDivider(),
+                                _buildContinuousSliderRow(
+                                  title: '歌词字号',
+                                  subtitle: '调整歌词大小，保持组件内完整显示',
+                                  value: AppState.lyricsFontSize,
+                                  min: 12,
+                                  max: 17,
+                                  valueLabel: (value) =>
+                                      '${value.toStringAsFixed(1)} px',
+                                  sliderKey: const ValueKey(
+                                    'lyrics_size_slider',
+                                  ),
+                                  onChanged: (value) => _updateTypography(
+                                    () => AppState.lyricsFontSize = value,
+                                  ),
+                                ),
+                                _buildTypographyPreview(
+                                  title: '歌词实时预览',
+                                  sample: '此刻播放的音乐，值得被看见。',
+                                  style: AppState.lyricsTextStyle(
+                                    AppState.currentScheme.onSurface,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -604,38 +1006,56 @@ class _SettingsPanelState extends State<SettingsPanel> {
                             ),
                           ),
                           _buildDivider(),
-                          _buildDropdownRow<int>(
-                            "歌曲名字重",
-                            "调节主标题的视觉层级",
-                            AppState.titleWeightIndex,
-                            (val) {
-                              setState(() => AppState.titleWeightIndex = val);
-                              widget.onVisualChanged();
-                            },
-                            List.generate(
-                              9,
-                              (index) => DropdownMenuEntry(
-                                value: index,
-                                label:
-                                    'W${(index + 1) * 100} ${index == 3 ? "(常规)" : (index == 6 ? "(粗体)" : "")}',
-                              ),
+                          _buildContinuousSliderRow(
+                            title: '歌曲名字重',
+                            subtitle: '无级调节主标题的视觉层级',
+                            value: AppState.titleWeightValue,
+                            min: 100,
+                            max: 900,
+                            valueLabel: (value) => 'W${value.round()}',
+                            sliderKey: const ValueKey('title_weight_slider'),
+                            onChanged: (value) => _updateTypography(
+                              () => AppState.titleWeightValue = value,
                             ),
                           ),
                           _buildDivider(),
-                          _buildDropdownRow<int>(
-                            "歌手名字重",
-                            "调节副标题的视觉层级",
-                            AppState.artistWeightIndex,
-                            (val) {
-                              setState(() => AppState.artistWeightIndex = val);
-                              widget.onVisualChanged();
-                            },
-                            List.generate(
-                              9,
-                              (index) => DropdownMenuEntry(
-                                value: index,
-                                label:
-                                    'W${(index + 1) * 100} ${index == 3 ? "(常规)" : (index == 6 ? "(粗体)" : "")}',
+                          _buildContinuousSliderRow(
+                            title: '歌手名字重',
+                            subtitle: '无级调节副标题的视觉层级',
+                            value: AppState.artistWeightValue,
+                            min: 100,
+                            max: 900,
+                            valueLabel: (value) => 'W${value.round()}',
+                            sliderKey: const ValueKey('artist_weight_slider'),
+                            onChanged: (value) => _updateTypography(
+                              () => AppState.artistWeightValue = value,
+                            ),
+                          ),
+                          _buildTypographyPreview(
+                            title: '播放信息实时预览',
+                            sample: '歌曲名称',
+                            style: TextStyle(
+                              fontFamily:
+                                  AppState.currentFontFamily == 'System Default'
+                                  ? null
+                                  : AppState.currentFontFamily,
+                              fontFamilyFallback: AppState.textFontFallback,
+                              color: AppState.currentScheme.onSurface,
+                              fontWeight: AppState.titleWeight,
+                              fontVariations: AppState.variationsFor(
+                                AppState.titleWeightValue,
+                              ),
+                            ),
+                            secondaryStyle: TextStyle(
+                              fontFamily:
+                                  AppState.currentFontFamily == 'System Default'
+                                  ? null
+                                  : AppState.currentFontFamily,
+                              fontFamilyFallback: AppState.textFontFallback,
+                              color: AppState.currentScheme.onSurfaceVariant,
+                              fontWeight: AppState.artistWeight,
+                              fontVariations: AppState.variationsFor(
+                                AppState.artistWeightValue,
                               ),
                             ),
                           ),
@@ -726,6 +1146,87 @@ class _SettingsPanelState extends State<SettingsPanel> {
 
   Widget _buildDivider() => const SizedBox(height: 2);
 
+  Widget _buildContinuousSliderRow({
+    required String title,
+    required String subtitle,
+    required double value,
+    required double min,
+    required double max,
+    required String Function(double) valueLabel,
+    required ValueChanged<double> onChanged,
+    required Key sliderKey,
+  }) {
+    final displayedValue = value.clamp(min, max);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(title, style: _settingTitleStyle())),
+              Text(
+                valueLabel(displayedValue),
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: AppState.currentScheme.primary,
+                ),
+              ),
+            ],
+          ),
+          Text(subtitle, style: _settingSubtitleStyle()),
+          Slider(
+            key: sliderKey,
+            value: displayedValue,
+            min: min,
+            max: max,
+            label: valueLabel(displayedValue),
+            semanticFormatterCallback: valueLabel,
+            onChanged: onChanged,
+            onChangeEnd: (_) => _finishTypographyChange(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTypographyPreview({
+    required String title,
+    required String sample,
+    required TextStyle style,
+    TextStyle? secondaryStyle,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 16),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppState.currentScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: _settingSubtitleStyle()),
+              const SizedBox(height: 8),
+              Text(
+                sample,
+                key: ValueKey('preview_$title'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+              if (secondaryStyle != null) ...[
+                const SizedBox(height: 2),
+                Text('歌手名称', style: secondaryStyle),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   List<DropdownMenuEntry<MD3Shape>> _shapeEntries() => const [
     DropdownMenuEntry(value: MD3Shape.circle, label: '圆形'),
     DropdownMenuEntry(value: MD3Shape.stadium, label: '胶囊形'),
@@ -775,6 +1276,101 @@ class _SettingsPanelState extends State<SettingsPanel> {
               } catch (_) {}
             },
             child: const Text('选择'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlaylistFileRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('导入播放列表', style: _settingTitleStyle()),
+                Text(
+                  AppState.playlistFilePath.isEmpty
+                      ? '支持 M3U / M3U8 / JSON；按歌名和歌手匹配当前歌曲'
+                      : AppState.playlistFilePath,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: _settingSubtitleStyle(),
+                ),
+              ],
+            ),
+          ),
+          if (AppState.playlistFilePath.isNotEmpty)
+            IconButton(
+              tooltip: '重新读取播放列表',
+              onPressed: () => AppState.refreshQueue(force: true),
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          if (AppState.playlistFilePath.isNotEmpty)
+            IconButton(
+              tooltip: '移除播放列表',
+              onPressed: () {
+                setState(() {
+                  AppState.playlistFilePath = '';
+                  AppState.showNextUp = false;
+                });
+                AppState.refreshQueue(force: true);
+                widget.onLayoutChanged();
+              },
+              icon: const Icon(Icons.close_rounded),
+            ),
+          FilledButton.tonal(
+            onPressed: _choosePlaylistFile,
+            child: const Text('选择'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQqPlaylistRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('QQ 音乐公开歌单', style: _settingTitleStyle()),
+                Text(
+                  AppState.qqPlaylistLink.isEmpty
+                      ? '粘贴歌单链接或 ID；优先用于 QQ 音乐'
+                      : '已连接歌单 ${parseQqPlaylistId(AppState.qqPlaylistLink) ?? ''} · 按顺序估算',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: _settingSubtitleStyle(),
+                ),
+              ],
+            ),
+          ),
+          if (AppState.qqPlaylistLink.isNotEmpty)
+            IconButton(
+              tooltip: '重新读取 QQ 音乐歌单',
+              onPressed: () => AppState.refreshQueue(force: true),
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          if (AppState.qqPlaylistLink.isNotEmpty)
+            IconButton(
+              tooltip: '移除 QQ 音乐歌单',
+              onPressed: () {
+                setState(() => AppState.qqPlaylistLink = '');
+                AppState.refreshQueue(force: true);
+                widget.onLayoutChanged();
+              },
+              icon: const Icon(Icons.close_rounded),
+            ),
+          FilledButton.tonal(
+            onPressed: _editQqPlaylist,
+            child: Text(AppState.qqPlaylistLink.isEmpty ? '连接' : '修改'),
           ),
         ],
       ),
@@ -847,6 +1443,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
     ValueChanged<T> onChanged,
     List<DropdownMenuEntry<T>> items, {
     Widget? actionButton,
+    bool fullWidth = false,
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -854,9 +1451,14 @@ class _SettingsPanelState extends State<SettingsPanel> {
           0.0,
           double.infinity,
         );
-        final double controlWidth = AppState.isVertical
-            ? (availableWidth * 0.52).clamp(148.0, 176.0)
-            : (availableWidth * 0.38).clamp(148.0, 168.0);
+        final bool stacked =
+            fullWidth || AppState.isVertical || constraints.maxWidth < 520;
+        final double controlWidth = stacked
+            ? (availableWidth - (actionButton == null ? 0 : 48)).clamp(
+                0.0,
+                double.infinity,
+              )
+            : (availableWidth * 0.44).clamp(180.0, 300.0);
         final Widget titleBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -872,7 +1474,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
           onSelected: onChanged,
         );
 
-        if (AppState.isVertical) {
+        if (stacked) {
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             child: Column(
@@ -881,8 +1483,15 @@ class _SettingsPanelState extends State<SettingsPanel> {
                 titleBlock,
                 const SizedBox(height: 8),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [?actionButton, control],
+                  children: [
+                    ?actionButton,
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: control,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -996,28 +1605,38 @@ class _SettingsPanelState extends State<SettingsPanel> {
       ),
     );
 
-    if (AppState.isVertical) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            titleBlock,
-            const SizedBox(height: 8),
-            Align(alignment: Alignment.centerRight, child: control),
-          ],
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(child: titleBlock),
-          control,
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (AppState.isVertical || constraints.maxWidth < 520) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                titleBlock,
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: control,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(child: titleBlock),
+              control,
+            ],
+          ),
+        );
+      },
     );
   }
 }
