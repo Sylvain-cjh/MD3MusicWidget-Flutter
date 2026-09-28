@@ -126,6 +126,8 @@ class _PlayerViewState extends State<PlayerView>
   bool _isTransitioning = false;
   double _leftPadding = 0.0;
   int _windowTransitionSerial = 0;
+  bool _nextUpResizePending = false;
+  bool _nextUpResizeInFlight = false;
 
   static const String _dotnetRuntimeDownloadUrl =
       'https://aka.ms/dotnet/8.0/dotnet-runtime-win-x64.exe';
@@ -138,6 +140,7 @@ class _PlayerViewState extends State<PlayerView>
     );
     windowManager.addListener(this);
     tm.trayManager.addListener(this);
+    AppState.nextUpPreviewVisible.addListener(_onNextUpVisibilityChanged);
 
     _menuAnimController = AnimationController(
       duration: const Duration(milliseconds: 250),
@@ -173,6 +176,7 @@ class _PlayerViewState extends State<PlayerView>
     _artworkResources.dispose();
     windowManager.removeListener(this);
     tm.trayManager.removeListener(this);
+    AppState.nextUpPreviewVisible.removeListener(_onNextUpVisibilityChanged);
     _httpBaseClient.close(force: true);
     _menuAnimController.dispose();
     _frameScaleController.dispose();
@@ -1178,6 +1182,52 @@ class _PlayerViewState extends State<PlayerView>
         (first.height - second.height).abs() <= tolerance;
   }
 
+  void _onNextUpVisibilityChanged() {
+    if (!mounted) return;
+    _nextUpResizePending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_resizeWindowForNextUp());
+    });
+  }
+
+  Future<void> _resizeWindowForNextUp() async {
+    if (!mounted ||
+        !_nextUpResizePending ||
+        _nextUpResizeInFlight ||
+        _isTransitioning) {
+      return;
+    }
+    _nextUpResizePending = false;
+    _nextUpResizeInFlight = true;
+    try {
+      final bounds = await windowManager.getBounds();
+      if (!mounted) return;
+      if (_isTransitioning) {
+        _nextUpResizePending = true;
+        return;
+      }
+      final targetHeight =
+          (_isSettingsOpen
+              ? AppState.expandedWindowHeight
+              : AppState.baseWindowHeight) *
+          _frameScale;
+      if ((bounds.height - targetHeight).abs() > 0.5) {
+        await windowManager.setBounds(
+          Rect.fromLTWH(bounds.left, bounds.top, bounds.width, targetHeight),
+          animate: false,
+        );
+      }
+      if (mounted) setState(() {});
+    } catch (error) {
+      debugPrint('下一首预告窗口尺寸同步失败: $error');
+    } finally {
+      _nextUpResizeInFlight = false;
+      if (mounted && _nextUpResizePending && !_isTransitioning) {
+        _onNextUpVisibilityChanged();
+      }
+    }
+  }
+
   Future<void> _applyComponentSizeToTarget(int serial) async {
     final bool disableAnimations =
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
@@ -1346,6 +1396,7 @@ class _PlayerViewState extends State<PlayerView>
     } finally {
       if (_isCurrentWindowTransition(serial)) {
         setState(() => _isTransitioning = false);
+        if (_nextUpResizePending) _onNextUpVisibilityChanged();
       }
     }
   }
@@ -1369,6 +1420,7 @@ class _PlayerViewState extends State<PlayerView>
     } finally {
       if (_isCurrentWindowTransition(serial)) {
         setState(() => _isTransitioning = false);
+        if (_nextUpResizePending) _onNextUpVisibilityChanged();
       }
     }
   }
@@ -1538,10 +1590,12 @@ class _PlayerViewState extends State<PlayerView>
     double corePlayerH = AppState.corePlayerHeightOf(AppState.widgetLayout);
     bool spectrumVisible = AppState.spectrumMode != SpectrumMode.off;
     bool lyricsVisible = AppState.showLyrics;
-    bool nextUpVisible =
+    bool nextUpConfigured =
         AppState.showNextUp &&
         (AppState.playlistFilePath.isNotEmpty ||
             AppState.qqPlaylistLink.isNotEmpty);
+    bool nextUpVisible =
+        nextUpConfigured && AppState.nextUpPreviewVisible.value;
     double playerHorizontalPadding = isV ? 24.0 : 16.0;
 
     double innerSettingsW = isV
@@ -1619,15 +1673,17 @@ class _PlayerViewState extends State<PlayerView>
     final double frameWidth = containerW * stageScale;
     final double frameHeight = containerH * stageScale;
     final Duration frameAnimationDuration =
-        _isComponentSizeTransitioning || isLiveCustomResize
-        ? Duration.zero
-        : AppState.layoutSwitchDuration;
+        _isTransitioning &&
+            !_isComponentSizeTransitioning &&
+            !isLiveCustomResize
+        ? AppState.layoutSwitchDuration
+        : Duration.zero;
 
     const Widget playerBackground = RepaintBoundary(child: DynamicBackground());
     Widget playerContent = Stack(
       children: [
         AnimatedPositioned(
-          duration: AppState.layoutSwitchDuration,
+          duration: frameAnimationDuration,
           curve: AppState.layoutSwitchCurve,
           left: sLeft,
           top: sTop,
@@ -1646,7 +1702,7 @@ class _PlayerViewState extends State<PlayerView>
           ),
         ),
         AnimatedPositioned(
-          duration: AppState.layoutSwitchDuration,
+          duration: frameAnimationDuration,
           curve: AppState.layoutSwitchCurve,
           left: pLeft,
           top: pTop,
@@ -1670,7 +1726,7 @@ class _PlayerViewState extends State<PlayerView>
                   child: ContinuousTrackControls(isVertical: isV),
                 ),
                 AnimatedPositioned(
-                  duration: AppState.layoutSwitchDuration,
+                  duration: frameAnimationDuration,
                   curve: AppState.layoutSwitchCurve,
                   left: playerHorizontalPadding,
                   top: corePlayerH + 8.0,
@@ -1690,7 +1746,7 @@ class _PlayerViewState extends State<PlayerView>
                   ),
                 ),
                 AnimatedPositioned(
-                  duration: AppState.layoutSwitchDuration,
+                  duration: frameAnimationDuration,
                   curve: AppState.layoutSwitchCurve,
                   left: playerHorizontalPadding,
                   top:
@@ -1710,7 +1766,7 @@ class _PlayerViewState extends State<PlayerView>
                   ),
                 ),
                 AnimatedPositioned(
-                  duration: AppState.layoutSwitchDuration,
+                  duration: frameAnimationDuration,
                   curve: AppState.layoutSwitchCurve,
                   left: playerHorizontalPadding,
                   top:
@@ -1726,7 +1782,7 @@ class _PlayerViewState extends State<PlayerView>
                     opacity: nextUpVisible ? 1.0 : 0.0,
                     child: IgnorePointer(
                       ignoring: !nextUpVisible,
-                      child: nextUpVisible
+                      child: nextUpConfigured
                           ? const MusicNextUpPanel()
                           : const SizedBox.shrink(),
                     ),

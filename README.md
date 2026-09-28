@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>当前版本：0.11.1</strong>
+  <strong>当前版本：0.11.2</strong>
 </p>
 
 MD3 Music Widget 使用 Flutter 构建界面，通过独立的 MusicFetcher 读取 Windows 系统媒体会话和音频输出。它可以显示当前歌曲、封面、播放进度和真实音乐频谱，同时提供横版与竖版布局、动态取色、流光背景、毛玻璃和丰富的 MD3 个性化设置。
@@ -190,7 +190,7 @@ Flutter 与 MusicFetcher 只通过本机回环地址通信。媒体状态、封�
 
 ### 安装版
 
-运行 `MD3MusicWidget-Setup-0.11.1.exe`，按照安装向导完成安装。
+运行 `MD3MusicWidget-Setup-0.11.2.exe`，按照安装向导完成安装。
 
 ### 免安装版
 

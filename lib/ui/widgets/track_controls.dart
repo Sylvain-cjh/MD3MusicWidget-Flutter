@@ -988,51 +988,54 @@ class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
     final ColorScheme scheme = AppState.currentScheme;
 
     final BorderRadius radius = BorderRadius.circular(24);
-    return ClipRRect(
-      borderRadius: radius,
-      child: BackdropFilter(
-        filter: _glassBlur,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                scheme.surfaceContainerHigh.withValues(alpha: 0.58),
-                scheme.primaryContainer.withValues(alpha: 0.22),
-                scheme.surface.withValues(alpha: 0.48),
-              ],
+    return ClipRect(
+      child: ClipRRect(
+        borderRadius: radius,
+        clipBehavior: Clip.antiAliasWithSaveLayer,
+        child: BackdropFilter(
+          filter: _glassBlur,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  scheme.surfaceContainerHigh.withValues(alpha: 0.58),
+                  scheme.primaryContainer.withValues(alpha: 0.22),
+                  scheme.surface.withValues(alpha: 0.48),
+                ],
+              ),
+              borderRadius: radius,
+              border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: 0.42),
+              ),
             ),
-            borderRadius: radius,
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.42),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.graphic_eq_rounded,
-                  size: 20,
-                  color: scheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      painter: _SpectrumPainter(
-                        mode: widget.mode,
-                        levels: _displayLevels,
-                        color: scheme.primary,
-                        autoContrast: AppState.enableProgressAutoContrast,
-                        repaint: _controller,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.graphic_eq_rounded,
+                    size: 20,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        painter: _SpectrumPainter(
+                          mode: widget.mode,
+                          levels: _displayLevels,
+                          color: scheme.primary,
+                          autoContrast: AppState.enableProgressAutoContrast,
+                          repaint: _controller,
+                        ),
+                        child: const SizedBox.expand(),
                       ),
-                      child: const SizedBox.expand(),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

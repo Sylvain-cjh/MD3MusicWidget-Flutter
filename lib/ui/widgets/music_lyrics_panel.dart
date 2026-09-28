@@ -20,6 +20,17 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     sigmaY: 13,
   );
   Timer? _timelineTimer;
+  late final AnimatedSwitcherTransitionBuilder _lineTransitionBuilder =
+      _buildLineTransition;
+
+  Widget _buildLineTransition(Widget child, Animation<double> animation) =>
+      LyricsContentTransition(
+        style: AppState.lyricsTransitionStyle,
+        exitStyleResolver: () => AppState.effectiveLyricsExitTransitionStyle,
+        animation: animation,
+        reduceMotion: MediaQuery.disableAnimationsOf(context),
+        child: child,
+      );
 
   @override
   void initState() {
@@ -171,6 +182,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     final displayText = _displayText(state);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final transitionStyle = AppState.lyricsTransitionStyle;
+    final exitTransitionStyle = AppState.effectiveLyricsExitTransitionStyle;
     return ClipRRect(
       borderRadius: radius,
       child: BackdropFilter(
@@ -215,15 +227,18 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                       transitionStyle,
                       reduceMotion: reduceMotion,
                     ),
+                    reverseDuration: LyricsContentTransition.durationFor(
+                      exitTransitionStyle,
+                      reduceMotion: reduceMotion,
+                    ),
                     switchInCurve: Curves.easeOutCubic,
                     switchOutCurve: Curves.easeOutCubic,
-                    transitionBuilder: (child, animation) =>
-                        LyricsContentTransition(
-                          style: transitionStyle,
-                          animation: animation,
-                          reduceMotion: reduceMotion,
-                          child: child,
-                        ),
+                    layoutBuilder: (currentChild, previousChildren) => Stack(
+                      alignment: Alignment.centerLeft,
+                      clipBehavior: Clip.hardEdge,
+                      children: [?currentChild, ...previousChildren],
+                    ),
+                    transitionBuilder: _lineTransitionBuilder,
                     child: Align(
                       key: ValueKey(
                         '${state.providerId}:${state.status}:${state.lineIndex}:$displayText',

@@ -59,6 +59,7 @@ class _SettingsPanelState extends State<SettingsPanel>
   late bool _hasTimeline;
   _SettingsSection _selectedSection = _SettingsSection.window;
   int _sectionEntryDirection = 1;
+  double _sectionEntryTravel = 50;
   late final AnimationController _sectionEntryController;
   int _entrySlot = 0;
   List<MusicSource> _sources = const [];
@@ -280,7 +281,9 @@ class _SettingsPanelState extends State<SettingsPanel>
   void _selectSection(_SettingsSection section) {
     if (_selectedSection == section) return;
     setState(() {
-      _sectionEntryDirection = section.index > _selectedSection.index ? 1 : -1;
+      final delta = section.index - _selectedSection.index;
+      _sectionEntryDirection = delta.isNegative ? -1 : 1;
+      _sectionEntryTravel = (38.0 + delta.abs() * 10).clamp(48.0, 78.0);
       _selectedSection = section;
     });
     if (MediaQuery.disableAnimationsOf(context)) {
@@ -307,7 +310,7 @@ class _SettingsPanelState extends State<SettingsPanel>
   Widget _buildStaggeredEntry(Widget child) {
     final slot = _entrySlot++;
     if (MediaQuery.disableAnimationsOf(context)) return child;
-    final start = (slot * 0.065).clamp(0.0, 0.42);
+    final start = (slot * 0.10).clamp(0.0, 0.50);
     final curve = Interval(start, 1, curve: Curves.easeOutCubic);
     return AnimatedBuilder(
       animation: _sectionEntryController,
@@ -319,7 +322,12 @@ class _SettingsPanelState extends State<SettingsPanel>
           opacity: progress,
           child: Transform.translate(
             key: ValueKey('settings_entry_motion_$slot'),
-            offset: Offset(16 * _sectionEntryDirection * (1 - progress), 0),
+            offset: Offset(
+              (_sectionEntryTravel + slot.clamp(0, 6) * 2) *
+                  _sectionEntryDirection *
+                  (1 - progress),
+              0,
+            ),
             child: child,
           ),
         );
@@ -879,44 +887,61 @@ class _SettingsPanelState extends State<SettingsPanel>
                                 ),
                               ),
                               _buildDivider(),
-                              _buildDropdownRow<LyricsTransitionStyle>(
-                                '歌词切换动画',
-                                SettingsDescriptions.lyricsTransition,
-                                AppState.lyricsTransitionStyle,
+                              _buildSwitchRow(
+                                '进出动画使用同一预设',
+                                SettingsDescriptions.lyricsLinkAnimations,
+                                AppState.lyricsAnimationsLinked,
                                 (value) {
                                   setState(
                                     () =>
-                                        AppState.lyricsTransitionStyle = value,
+                                        AppState.lyricsAnimationsLinked = value,
                                   );
                                   AppState.notifyLyricsVisualChanged();
                                   widget.onVisualChanged();
                                 },
-                                const [
-                                  DropdownMenuEntry(
-                                    value: LyricsTransitionStyle.fade,
-                                    label: '柔和淡入',
-                                  ),
-                                  DropdownMenuEntry(
-                                    value: LyricsTransitionStyle.rise,
-                                    label: '轻轻上浮',
-                                  ),
-                                  DropdownMenuEntry(
-                                    value: LyricsTransitionStyle.descend,
-                                    label: '轻轻落下',
-                                  ),
-                                  DropdownMenuEntry(
-                                    value: LyricsTransitionStyle.sideways,
-                                    label: '侧向滑入',
-                                  ),
-                                  DropdownMenuEntry(
-                                    value: LyricsTransitionStyle.zoom,
-                                    label: '微微放大',
-                                  ),
-                                  DropdownMenuEntry(
-                                    value: LyricsTransitionStyle.none,
-                                    label: '关闭动画',
-                                  ),
-                                ],
+                              ),
+                              _buildDivider(),
+                              _buildDropdownRow<LyricsTransitionStyle>(
+                                AppState.lyricsAnimationsLinked
+                                    ? '歌词切换动画'
+                                    : '歌词进入动画',
+                                SettingsDescriptions.lyricsTransition,
+                                AppState.lyricsTransitionStyle,
+                                (value) {
+                                  setState(() {
+                                    AppState.lyricsTransitionStyle = value;
+                                    if (AppState.lyricsAnimationsLinked) {
+                                      AppState.lyricsExitTransitionStyle =
+                                          value;
+                                    }
+                                  });
+                                  AppState.notifyLyricsVisualChanged();
+                                  widget.onVisualChanged();
+                                },
+                                _lyricsTransitionEntries(),
+                              ),
+                              _buildOptionalSetting(
+                                visible: !AppState.lyricsAnimationsLinked,
+                                child: Column(
+                                  children: [
+                                    _buildDivider(),
+                                    _buildDropdownRow<LyricsTransitionStyle>(
+                                      '上一句退出动画',
+                                      SettingsDescriptions.lyricsExitTransition,
+                                      AppState.lyricsExitTransitionStyle,
+                                      (value) {
+                                        setState(
+                                          () =>
+                                              AppState.lyricsExitTransitionStyle =
+                                                  value,
+                                        );
+                                        AppState.notifyLyricsVisualChanged();
+                                        widget.onVisualChanged();
+                                      },
+                                      _lyricsTransitionEntries(exiting: true),
+                                    ),
+                                  ],
+                                ),
                               ),
                               _buildDivider(),
                               _buildSwitchRow(
@@ -928,6 +953,15 @@ class _SettingsPanelState extends State<SettingsPanel>
                                     () => AppState.lyricsUseThemeFont = value,
                                   );
                                 },
+                                onReset: AppState.lyricsUseThemeFont
+                                    ? null
+                                    : () {
+                                        _updateTypography(
+                                          () => AppState.lyricsUseThemeFont =
+                                              true,
+                                        );
+                                        _finishTypographyChange();
+                                      },
                               ),
                               _buildOptionalSetting(
                                 visible: !AppState.lyricsUseThemeFont,
@@ -964,6 +998,17 @@ class _SettingsPanelState extends State<SettingsPanel>
                                       widget.onVisualChanged();
                                     },
                                   ),
+                                  onReset:
+                                      AppState.lyricsFontFamily ==
+                                          AppState.defaultFontFamily
+                                      ? null
+                                      : () {
+                                          _updateTypography(
+                                            () => AppState.lyricsFontFamily =
+                                                AppState.defaultFontFamily,
+                                          );
+                                          _finishTypographyChange();
+                                        },
                                 ),
                               ),
                               _buildDivider(),
@@ -977,6 +1022,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                                 sliderKey: const ValueKey(
                                   'lyrics_weight_slider',
                                 ),
+                                resetValue: AppState.defaultLyricsWeightValue,
                                 onChanged: (value) => _updateTypography(
                                   () => AppState.lyricsWeightValue = value,
                                 ),
@@ -991,6 +1037,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                                 valueLabel: (value) =>
                                     '${value.toStringAsFixed(1)} px',
                                 sliderKey: const ValueKey('lyrics_size_slider'),
+                                resetValue: AppState.defaultLyricsFontSize,
                                 onChanged: (value) => _updateTypography(
                                   () => AppState.lyricsFontSize = value,
                                 ),
@@ -1044,6 +1091,18 @@ class _SettingsPanelState extends State<SettingsPanel>
                               }
                             },
                           ),
+                          onReset:
+                              AppState.currentFontFamily ==
+                                  AppState.defaultFontFamily
+                              ? null
+                              : () {
+                                  _updateTypography(
+                                    () => AppState.currentFontFamily =
+                                        AppState.defaultFontFamily,
+                                  );
+                                  _finishTypographyChange();
+                                  widget.onVisualChanged();
+                                },
                         ),
                         _buildDivider(),
                         _buildContinuousSliderRow(
@@ -1054,6 +1113,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                           max: 900,
                           valueLabel: (value) => 'W${value.round()}',
                           sliderKey: const ValueKey('title_weight_slider'),
+                          resetValue: AppState.defaultTitleWeightValue,
                           onChanged: (value) => _updateTypography(
                             () => AppState.titleWeightValue = value,
                           ),
@@ -1067,6 +1127,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                           max: 900,
                           valueLabel: (value) => 'W${value.round()}',
                           sliderKey: const ValueKey('artist_weight_slider'),
+                          resetValue: AppState.defaultArtistWeightValue,
                           onChanged: (value) => _updateTypography(
                             () => AppState.artistWeightValue = value,
                           ),
@@ -1202,6 +1263,7 @@ class _SettingsPanelState extends State<SettingsPanel>
     required String Function(double) valueLabel,
     required ValueChanged<double> onChanged,
     required Key sliderKey,
+    required double resetValue,
   }) {
     final displayedValue = value.clamp(min, max);
     return Padding(
@@ -1218,6 +1280,17 @@ class _SettingsPanelState extends State<SettingsPanel>
                   color: AppState.currentScheme.primary,
                 ),
               ),
+              if ((value - resetValue).abs() > 0.001)
+                IconButton(
+                  key: ValueKey('reset_${title}_slider'),
+                  tooltip: '重置$title',
+                  icon: const Icon(Icons.restart_alt_rounded),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () {
+                    onChanged(resetValue);
+                    _finishTypographyChange();
+                  },
+                ),
             ],
           ),
           Text(subtitle, style: _settingSubtitleStyle()),
@@ -1432,6 +1505,38 @@ class _SettingsPanelState extends State<SettingsPanel>
     DropdownMenuEntry(value: MD3ProgressStyle.segmented, label: '动态分段'),
   ];
 
+  List<DropdownMenuEntry<LyricsTransitionStyle>> _lyricsTransitionEntries({
+    bool exiting = false,
+  }) => exiting
+      ? const [
+          DropdownMenuEntry(value: LyricsTransitionStyle.fade, label: '柔和淡出'),
+          DropdownMenuEntry(value: LyricsTransitionStyle.rise, label: '向上飞出'),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.descend,
+            label: '向下飞出',
+          ),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.sideways,
+            label: '向左滑出',
+          ),
+          DropdownMenuEntry(value: LyricsTransitionStyle.zoom, label: '放大离开'),
+          DropdownMenuEntry(value: LyricsTransitionStyle.none, label: '直接切换'),
+        ]
+      : const [
+          DropdownMenuEntry(value: LyricsTransitionStyle.fade, label: '柔和淡入'),
+          DropdownMenuEntry(value: LyricsTransitionStyle.rise, label: '轻轻上浮'),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.descend,
+            label: '轻轻落下',
+          ),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.sideways,
+            label: '侧向滑入',
+          ),
+          DropdownMenuEntry(value: LyricsTransitionStyle.zoom, label: '微微放大'),
+          DropdownMenuEntry(value: LyricsTransitionStyle.none, label: '关闭动画'),
+        ];
+
   List<DropdownMenuEntry<ComponentSizeMode>> _componentSizeEntries() => const [
     DropdownMenuEntry(value: ComponentSizeMode.small, label: '小 · 82%'),
     DropdownMenuEntry(value: ComponentSizeMode.standard, label: '标准 · 100%'),
@@ -1492,6 +1597,7 @@ class _SettingsPanelState extends State<SettingsPanel>
     ValueChanged<T> onChanged,
     List<DropdownMenuEntry<T>> items, {
     Widget? actionButton,
+    VoidCallback? onReset,
     bool fullWidth = false,
   }) {
     return LayoutBuilder(
@@ -1502,11 +1608,18 @@ class _SettingsPanelState extends State<SettingsPanel>
         );
         final bool stacked =
             fullWidth || AppState.isVertical || constraints.maxWidth < 520;
+        final Widget? resetButton = onReset == null
+            ? null
+            : IconButton(
+                key: ValueKey('reset_${title}_font'),
+                tooltip: '重置$title',
+                icon: const Icon(Icons.restart_alt_rounded),
+                onPressed: onReset,
+              );
+        final double actionWidth =
+            (actionButton == null ? 0 : 48) + (resetButton == null ? 0 : 48);
         final double controlWidth = stacked
-            ? (availableWidth - (actionButton == null ? 0 : 48)).clamp(
-                0.0,
-                double.infinity,
-              )
+            ? (availableWidth - actionWidth).clamp(0.0, double.infinity)
             : (availableWidth * 0.44).clamp(180.0, 300.0);
         final Widget titleBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1535,6 +1648,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                 Row(
                   children: [
                     ?actionButton,
+                    ?resetButton,
                     Expanded(
                       child: Align(
                         alignment: Alignment.centerRight,
@@ -1554,6 +1668,7 @@ class _SettingsPanelState extends State<SettingsPanel>
             children: [
               Expanded(child: titleBlock),
               ?actionButton,
+              ?resetButton,
               const SizedBox(width: 8),
               control,
             ],
@@ -1569,6 +1684,7 @@ class _SettingsPanelState extends State<SettingsPanel>
     bool value,
     ValueChanged<bool> onChanged, {
     bool disabled = false,
+    VoidCallback? onReset,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
@@ -1588,6 +1704,13 @@ class _SettingsPanelState extends State<SettingsPanel>
               ],
             ),
           ),
+          if (onReset != null)
+            IconButton(
+              key: ValueKey('reset_${title}_switch'),
+              tooltip: '重置$title',
+              icon: const Icon(Icons.restart_alt_rounded),
+              onPressed: onReset,
+            ),
           Switch(
             value: value,
             onChanged: disabled ? null : onChanged,

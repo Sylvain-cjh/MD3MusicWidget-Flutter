@@ -34,7 +34,9 @@ final class SettingsDescriptions {
 
   
   static const showLyrics = '想跟着唱时打开，歌词会出现在播放器下方。';
-  static const lyricsTransition = '挑一种看着舒服的换行方式；不想动也可以关掉。';
+  static const lyricsTransition = '新的一句会这样来到眼前。';
+  static const lyricsLinkAnimations = '打开时，上一句离开和下一句进入会使用同一种风格。';
+  static const lyricsExitTransition = '上一句离开时，也可以有自己的节奏。';
   static const lyricsProviderLrclib = '会用歌名、歌手和时长，在线找一找歌词。';
   static const lyricsProviderLocal = '只在你选的文件夹里找，不用在线查询。';
   static const lyricsProviderQqMusic = '先试试 QQ 音乐；找不到时会回到 LRCLIB。';

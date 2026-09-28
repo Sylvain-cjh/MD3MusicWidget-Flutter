@@ -146,6 +146,9 @@ class AppState {
   static final ValueNotifier<int> backgroundRevision = ValueNotifier<int>(0);
   static void notifyBackgroundChanged() => backgroundRevision.value++;
   static final ValueNotifier<int> playbackRevision = ValueNotifier<int>(0);
+  static final ValueNotifier<bool> nextUpPreviewVisible = ValueNotifier<bool>(
+    false,
+  );
   static final ValueNotifier<int> trackTransitionRevision = ValueNotifier<int>(
     0,
   );
@@ -249,14 +252,26 @@ class AppState {
   static GlowMode glowMode = GlowMode.waterfall;
   static SpectrumMode spectrumMode = SpectrumMode.off;
   static bool showLyrics = false;
+  static const String defaultFontFamily = 'System Default';
+  static const double defaultTitleWeightValue = 700.0;
+  static const double defaultArtistWeightValue = 400.0;
+  static const double defaultLyricsWeightValue = 500.0;
+  static const double defaultLyricsFontSize = 14.0;
   static LyricsProviderChoice lyricsProviderChoice =
       LyricsProviderChoice.lrclib;
   static LyricsTransitionStyle lyricsTransitionStyle =
       LyricsTransitionStyle.fade;
+  static bool lyricsAnimationsLinked = true;
+  static LyricsTransitionStyle lyricsExitTransitionStyle =
+      LyricsTransitionStyle.fade;
+  static LyricsTransitionStyle get effectiveLyricsExitTransitionStyle =>
+      lyricsAnimationsLinked
+      ? lyricsTransitionStyle
+      : lyricsExitTransitionStyle;
   static bool lyricsUseThemeFont = true;
-  static String lyricsFontFamily = 'System Default';
-  static double lyricsWeightValue = 500.0;
-  static double lyricsFontSize = 14.0;
+  static String lyricsFontFamily = defaultFontFamily;
+  static double lyricsWeightValue = defaultLyricsWeightValue;
+  static double lyricsFontSize = defaultLyricsFontSize;
   static MD3ProgressStyle progressStyle = MD3ProgressStyle.linear;
   static MD3Shape settingsNavigationShape = MD3Shape.roundedLarge;
   static bool enableProgressAutoContrast = true;
@@ -266,7 +281,7 @@ class AppState {
   static DynamicSchemeVariant themeVariant = DynamicSchemeVariant.tonalSpot;
 
   
-  static String currentFontFamily = 'System Default';
+  static String currentFontFamily = defaultFontFamily;
   static List<String> loadedSystemFonts = ['System Default'];
   static List<String> customFontPaths = [];
 
@@ -296,8 +311,8 @@ class AppState {
     return (value * devicePixelRatio).round() / devicePixelRatio;
   }
 
-  static double titleWeightValue = 700.0;
-  static double artistWeightValue = 400.0;
+  static double titleWeightValue = defaultTitleWeightValue;
+  static double artistWeightValue = defaultArtistWeightValue;
 
   static FontWeight weightFor(double value) =>
       FontWeight.values[((value / 100).round() - 1).clamp(0, 8)];
@@ -362,7 +377,9 @@ class AppState {
       spectrumMode == SpectrumMode.off ? 0.0 : 64.0;
   static double lyricsPanelExtentOf(WidgetLayout l) => showLyrics ? 64.0 : 0.0;
   static double nextUpPanelExtentOf(WidgetLayout l) =>
-      showNextUp && (playlistFilePath.isNotEmpty || qqPlaylistLink.isNotEmpty)
+      showNextUp &&
+          nextUpPreviewVisible.value &&
+          (playlistFilePath.isNotEmpty || qqPlaylistLink.isNotEmpty)
       ? 64.0
       : 0.0;
   static double innerPlayerHeightOf(WidgetLayout l) =>
@@ -689,6 +706,14 @@ class AppState {
           snapshot['lyricsTransitionStyle'],
           LyricsTransitionStyle.fade,
         );
+        lyricsAnimationsLinked = snapshot['lyricsAnimationsLinked'] is bool
+            ? snapshot['lyricsAnimationsLinked'] as bool
+            : true;
+        lyricsExitTransitionStyle = _enumFromName(
+          LyricsTransitionStyle.values,
+          snapshot['lyricsExitTransitionStyle'],
+          lyricsTransitionStyle,
+        );
         localLyricsDirectory = snapshot['localLyricsDirectory'] is String
             ? snapshot['localLyricsDirectory'] as String
             : '';
@@ -832,6 +857,12 @@ class AppState {
       p.getInt('lyricsTransitionStyle'),
       LyricsTransitionStyle.fade,
     );
+    lyricsAnimationsLinked = p.getBool('lyricsAnimationsLinked') ?? true;
+    lyricsExitTransitionStyle = _enumFromIndex(
+      LyricsTransitionStyle.values,
+      p.getInt('lyricsExitTransitionStyle'),
+      lyricsTransitionStyle,
+    );
     localLyricsDirectory = p.getString('localLyricsDirectory') ?? '';
     progressStyle = _enumFromIndex(
       MD3ProgressStyle.values,
@@ -913,6 +944,8 @@ class AppState {
     'lyricsFontSize': lyricsFontSize,
     'lyricsProviderChoice': lyricsProviderChoice.name,
     'lyricsTransitionStyle': lyricsTransitionStyle.name,
+    'lyricsAnimationsLinked': lyricsAnimationsLinked,
+    'lyricsExitTransitionStyle': lyricsExitTransitionStyle.name,
     'localLyricsDirectory': localLyricsDirectory,
     'progressStyle': progressStyle.name,
     'settingsNavigationShape': settingsNavigationShape.name,
