@@ -278,6 +278,7 @@ class AppState {
   static bool enableOledTheme = false;
   static bool enable3DCover = true;
   static bool showPlaybackControls = true;
+  static bool showPerformanceMonitor = false;
   static DynamicSchemeVariant themeVariant = DynamicSchemeVariant.tonalSpot;
 
   
@@ -374,7 +375,7 @@ class AppState {
       ? (showPlaybackControls ? 520.0 : 448.0)
       : (showPlaybackControls ? 176.0 : 140.0);
   static double spectrumPanelExtentOf(WidgetLayout l) =>
-      spectrumMode == SpectrumMode.off ? 0.0 : 64.0;
+      spectrumMode == SpectrumMode.off && !showPerformanceMonitor ? 0.0 : 64.0;
   static double lyricsPanelExtentOf(WidgetLayout l) => showLyrics ? 64.0 : 0.0;
   static double nextUpPanelExtentOf(WidgetLayout l) =>
       showNextUp &&
@@ -737,6 +738,7 @@ class AppState {
         showPlaybackControls = snapshot['showPlaybackControls'] is bool
             ? snapshot['showPlaybackControls'] as bool
             : true;
+        showPerformanceMonitor = snapshot['showPerformanceMonitor'] == true;
         selectedSourceAppId = snapshot['selectedSourceAppId'] is String
             ? snapshot['selectedSourceAppId'] as String
             : '';
@@ -879,6 +881,7 @@ class AppState {
     enableOledTheme = p.getBool('enableOledTheme') ?? false;
     enable3DCover = p.getBool('enable3DCover') ?? true;
     showPlaybackControls = p.getBool('showPlaybackControls') ?? true;
+    showPerformanceMonitor = p.getBool('showPerformanceMonitor') ?? false;
     selectedSourceAppId = p.getString('selectedSourceAppId') ?? '';
     playlistFilePath = p.getString('playlistFilePath') ?? '';
     qqPlaylistLink = p.getString('qqPlaylistLink') ?? '';
@@ -953,6 +956,7 @@ class AppState {
     'enableOledTheme': enableOledTheme,
     'enable3DCover': enable3DCover,
     'showPlaybackControls': showPlaybackControls,
+    'showPerformanceMonitor': showPerformanceMonitor,
     'selectedSourceAppId': selectedSourceAppId,
     'playlistFilePath': playlistFilePath,
     'qqPlaylistLink': qqPlaylistLink,

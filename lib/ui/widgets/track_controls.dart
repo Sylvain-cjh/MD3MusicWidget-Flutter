@@ -1,12 +1,13 @@
 import 'dart:math' as math; 
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:ui' show ImageFilter, PointMode;
+import 'dart:ui' show PointMode;
 import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
 import '../../core/media_provider.dart';
 import '../../widgets/parallax_button.dart';
 import 'cover_parallax.dart';
+import 'spectrum_glass_surface.dart';
 
 int _globalSlideDirection = 1;
 String _lastMeasureKey = "";
@@ -922,10 +923,6 @@ class MusicSpectrumPanel extends StatefulWidget {
 
 class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
     with SingleTickerProviderStateMixin {
-  static final ImageFilter _glassBlur = ImageFilter.blur(
-    sigmaX: 13,
-    sigmaY: 13,
-  );
   late final AnimationController _controller;
   final Float32List _displayLevels = Float32List(AppState.spectrumBandCount);
   final Float32List _startLevels = Float32List(AppState.spectrumBandCount);
@@ -986,58 +983,32 @@ class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = AppState.currentScheme;
-
-    final BorderRadius radius = BorderRadius.circular(24);
-    return ClipRect(
-      child: ClipRRect(
-        borderRadius: radius,
-        clipBehavior: Clip.antiAliasWithSaveLayer,
-        child: BackdropFilter(
-          filter: _glassBlur,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  scheme.surfaceContainerHigh.withValues(alpha: 0.58),
-                  scheme.primaryContainer.withValues(alpha: 0.22),
-                  scheme.surface.withValues(alpha: 0.48),
-                ],
-              ),
-              borderRadius: radius,
-              border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.42),
+    return SpectrumGlassSurface(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        child: Row(
+          children: [
+            Icon(
+              Icons.graphic_eq_rounded,
+              size: 20,
+              color: scheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: _SpectrumPainter(
+                    mode: widget.mode,
+                    levels: _displayLevels,
+                    color: scheme.primary,
+                    autoContrast: AppState.enableProgressAutoContrast,
+                    repaint: _controller,
+                  ),
+                  child: const SizedBox.expand(),
+                ),
               ),
             ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.graphic_eq_rounded,
-                    size: 20,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: RepaintBoundary(
-                      child: CustomPaint(
-                        painter: _SpectrumPainter(
-                          mode: widget.mode,
-                          levels: _displayLevels,
-                          color: scheme.primary,
-                          autoContrast: AppState.enableProgressAutoContrast,
-                          repaint: _controller,
-                        ),
-                        child: const SizedBox.expand(),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          ],
         ),
       ),
     );

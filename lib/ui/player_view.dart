@@ -20,6 +20,7 @@ import 'widgets/locked_aspect_resize_area.dart';
 import 'widgets/track_controls.dart';
 import 'widgets/music_lyrics_panel.dart';
 import 'widgets/music_next_up_panel.dart';
+import 'widgets/spectrum_performance_row.dart';
 import 'widgets/slide_menu.dart';
 import 'widgets/settings_panel.dart';
 
@@ -1589,6 +1590,8 @@ class _PlayerViewState extends State<PlayerView>
     double innerPlayerH = AppState.innerPlayerHeightOf(AppState.widgetLayout);
     double corePlayerH = AppState.corePlayerHeightOf(AppState.widgetLayout);
     bool spectrumVisible = AppState.spectrumMode != SpectrumMode.off;
+    bool performanceVisible = AppState.showPerformanceMonitor;
+    bool spectrumRowVisible = spectrumVisible || performanceVisible;
     bool lyricsVisible = AppState.showLyrics;
     bool nextUpConfigured =
         AppState.showNextUp &&
@@ -1672,10 +1675,12 @@ class _PlayerViewState extends State<PlayerView>
         : renderFrameScale;
     final double frameWidth = containerW * stageScale;
     final double frameHeight = containerH * stageScale;
+    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
     final Duration frameAnimationDuration =
         _isTransitioning &&
             !_isComponentSizeTransitioning &&
-            !isLiveCustomResize
+            !isLiveCustomResize &&
+            !reduceMotion
         ? AppState.layoutSwitchDuration
         : Duration.zero;
 
@@ -1731,16 +1736,19 @@ class _PlayerViewState extends State<PlayerView>
                   left: playerHorizontalPadding,
                   top: corePlayerH + 8.0,
                   width: innerPlayerW - playerHorizontalPadding * 2,
-                  height: spectrumVisible ? 48.0 : 0.0,
+                  height: spectrumRowVisible ? 48.0 : 0.0,
                   child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 220),
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 220),
                     curve: Curves.easeOutCubic,
-                    opacity: spectrumVisible ? 1.0 : 0.0,
+                    opacity: spectrumRowVisible ? 1.0 : 0.0,
                     child: IgnorePointer(
-                      ignoring: !spectrumVisible,
-                      child: MusicSpectrumPanel(
-                        mode: AppState.spectrumMode,
+                      ignoring: !spectrumRowVisible,
+                      child: SpectrumPerformanceRow(
+                        spectrumMode: AppState.spectrumMode,
                         isPlaying: AppState.isPlaying,
+                        showPerformance: performanceVisible,
                       ),
                     ),
                   ),

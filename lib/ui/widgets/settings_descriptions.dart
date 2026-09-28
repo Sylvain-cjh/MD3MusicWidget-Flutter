@@ -20,6 +20,7 @@ final class SettingsDescriptions {
   static const coverParallax = '鼠标靠近时，封面会轻轻跟着动。';
   static const progressAutoContrast = '背景忽明忽暗时，进度和频谱也能看得清。';
   static const spectrum = '打开后会留在组件下方，跟着音乐起伏。';
+  static const performanceMonitor = 'CPU、内存读 Windows 系统计数；桌面帧率读 DWM，不代表单个游戏。';
 
   
   static const sourceAutomatic = '会跟着正在播放的程序走。';

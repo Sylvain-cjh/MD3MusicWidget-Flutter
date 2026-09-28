@@ -668,6 +668,29 @@ class _SettingsPanelState extends State<SettingsPanel>
                       ],
                     ),
 
+                  if (_selectedSection == _SettingsSection.appearance)
+                    _buildCategoryCard(
+                      title: "性能与诊断",
+                      icon: Icons.speed_rounded,
+                      children: [
+                        _buildSwitchRow(
+                          "显示性能监视器",
+                          SettingsDescriptions.performanceMonitor,
+                          AppState.showPerformanceMonitor,
+                          (value) {
+                            setState(
+                              () => AppState.showPerformanceMonitor = value,
+                            );
+                            if (AppState.spectrumMode == SpectrumMode.off) {
+                              widget.onLayoutChanged();
+                            } else {
+                              widget.onVisualChanged();
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+
                   if (_selectedSection == _SettingsSection.playback)
                     _buildCategoryCard(
                       title: "播放显示与控件",
