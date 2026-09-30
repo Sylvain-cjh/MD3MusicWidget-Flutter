@@ -151,9 +151,6 @@ class AppState {
   static ImageProvider? coverProvider;
   static ImageProvider? bgBlurProvider;
   static String currentCoverVersion = "";
-  static final ValueNotifier<bool> backgroundCacheHit = ValueNotifier<bool>(
-    false,
-  );
   static String currentRawBase64 = "";
 
   

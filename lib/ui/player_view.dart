@@ -147,9 +147,7 @@ class _PlayerViewState extends State<PlayerView>
   @override
   void initState() {
     super.initState();
-    _artworkResources = ArtworkResources(
-      onPoolCleared: () => AppState.backgroundCacheHit.value = false,
-    );
+    _artworkResources = ArtworkResources();
     windowManager.addListener(this);
     tm.trayManager.addListener(this);
     _nextUpMotion = NextUpPresenceMotion(
@@ -394,7 +392,6 @@ class _PlayerViewState extends State<PlayerView>
     _missingCoverTimer?.cancel();
     _missingCoverIdentity = null;
     _latestCoverVersion = "";
-    AppState.backgroundCacheHit.value = false;
     if (AppState.coverProvider == null &&
         AppState.currentCoverVersion.isEmpty) {
       return;
@@ -464,16 +461,12 @@ class _PlayerViewState extends State<PlayerView>
     }
     if (!mounted || version != _latestCoverVersion) return true;
     if (version != AppState.currentCoverVersion) {
-      await _activateArtwork(version, entry, cacheHit: true);
+      await _activateArtwork(version, entry);
     }
     return true;
   }
 
-  Future<void> _activateArtwork(
-    String version,
-    CachedArtwork entry, {
-    required bool cacheHit,
-  }) async {
+  Future<void> _activateArtwork(String version, CachedArtwork entry) async {
     final previousCover = AppState.coverProvider;
     final previousBackground = AppState.bgBlurProvider;
     AppState.currentCoverVersion = version;
@@ -482,7 +475,6 @@ class _PlayerViewState extends State<PlayerView>
       AppState.coverProvider = entry.cover;
       AppState.bgBlurProvider = entry.background;
     });
-    AppState.backgroundCacheHit.value = cacheHit;
     AppState.notifyBackgroundChanged();
     unawaited(_artworkResources.retire(previousCover));
     unawaited(_artworkResources.retire(previousBackground));
@@ -530,7 +522,7 @@ class _PlayerViewState extends State<PlayerView>
       return;
     }
     _artworkResources.rememberPreparedArtwork(version, entry);
-    await _activateArtwork(version, entry, cacheHit: false);
+    await _activateArtwork(version, entry);
   }
 
   Future<bool> _precacheArtwork(ImageProvider provider) async {
@@ -903,7 +895,6 @@ class _PlayerViewState extends State<PlayerView>
         AppState.playbackDurationMs > 0) {
       AppState.notifyTrackTransition();
     }
-    if (metadataChanged) AppState.backgroundCacheHit.value = false;
 
     if (trackChanged || playbackStateChanged || capabilitiesChanged) {
       setState(() {

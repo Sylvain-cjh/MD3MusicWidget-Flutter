@@ -618,51 +618,6 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                   ),
                 ),
               ),
-            Positioned(
-              right: 12,
-              bottom: 8,
-              child: ValueListenableBuilder<bool>(
-                valueListenable: AppState.backgroundCacheHit,
-                builder: (context, hit, _) {
-                  if (!hit) return const SizedBox.shrink();
-                  final scheme = AppState.currentScheme;
-                  return IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHigh.withValues(
-                          alpha: 0.82,
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.cached_rounded,
-                              size: 12,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '背景缓存命中',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
           ],
         );
       },

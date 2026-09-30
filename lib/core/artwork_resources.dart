@@ -28,10 +28,9 @@ final class ArtworkResources with WidgetsBindingObserver {
   final LinkedHashMap<String, CachedArtwork> _artworkPool = LinkedHashMap();
   int _poolBytes = 0;
   final Map<Object, Timer> _retired = {};
-  final VoidCallback? onPoolCleared;
   bool _disposed = false;
 
-  ArtworkResources({this.onPoolCleared}) {
+  ArtworkResources() {
     PaintingBinding.instance.imageCache
       ..maximumSize = 24
       ..maximumSizeBytes = 48 * 1024 * 1024;
@@ -105,7 +104,6 @@ final class ArtworkResources with WidgetsBindingObserver {
   void didHaveMemoryPressure() {
     _artworkPool.clear();
     _poolBytes = 0;
-    onPoolCleared?.call();
     
     PaintingBinding.instance.imageCache.clear();
   }
