@@ -75,6 +75,165 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     return Duration(milliseconds: milliseconds);
   }
 
+  static bool _hasTrackText(String title) {
+    final value = title.trim();
+    return value.isNotEmpty &&
+        value != '未在播放' &&
+        value != '暂无音乐播放' &&
+        value != '未知歌曲';
+  }
+
+  Duration _effectiveTextTransitionDuration(
+    double measuredWidth, {
+    required bool hasTrack,
+    required bool reduceMotion,
+  }) {
+    if (!AppState.trackTextAnimationsEnabled || !hasTrack) {
+      return Duration.zero;
+    }
+    if (reduceMotion) return const Duration(milliseconds: 160);
+    if (AppState.trackTextTransitionStyle ==
+        TrackTextTransitionStyle.particles) {
+      return _textTransitionDuration(measuredWidth);
+    }
+    return const Duration(milliseconds: 240);
+  }
+
+  Widget _buildTextTransition(
+    Widget child,
+    Animation<double> animation, {
+    required bool isIncoming,
+    required bool reduceMotion,
+  }) {
+    final info = child as _TextInfoWidget;
+    if (!AppState.trackTextAnimationsEnabled ||
+        reduceMotion ||
+        info.isPlaceholder) {
+      return FadeTransition(opacity: animation, child: child);
+    }
+    if (!isIncoming) {
+      return _buildTextExitTransition(child, animation);
+    }
+    switch (AppState.trackTextTransitionStyle) {
+      case TrackTextTransitionStyle.particles:
+        return _PixelDissolveTransition(
+          animation: animation,
+          isIncoming: true,
+          direction: _globalSlideDirection,
+          text: info.text,
+          targetWidth: info.measuredWidth,
+          targetHeight: info.measuredHeight,
+          child: child,
+        );
+      case TrackTextTransitionStyle.fade:
+        return FadeTransition(opacity: animation, child: child);
+      case TrackTextTransitionStyle.rise:
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.24),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
+        );
+      case TrackTextTransitionStyle.sideways:
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: Offset(_globalSlideDirection * 0.08, 0),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
+        );
+      case TrackTextTransitionStyle.zoom:
+        return FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.96, end: 1).animate(animation),
+            child: child,
+          ),
+        );
+      case TrackTextTransitionStyle.descend:
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, -0.20),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
+        );
+      case TrackTextTransitionStyle.settle:
+        return FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 1.04, end: 1).animate(animation),
+            child: child,
+          ),
+        );
+      case TrackTextTransitionStyle.sweep:
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: Offset(_globalSlideDirection * 0.16, 0),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
+        );
+    }
+  }
+
+  Widget _buildTextExitTransition(Widget child, Animation<double> animation) {
+    final style = AppState.trackTextAnimationsLinked
+        ? switch (AppState.trackTextTransitionStyle) {
+            TrackTextTransitionStyle.particles ||
+            TrackTextTransitionStyle.fade => TrackTextExitStyle.fade,
+            TrackTextTransitionStyle.rise => TrackTextExitStyle.rise,
+            TrackTextTransitionStyle.descend => TrackTextExitStyle.descend,
+            TrackTextTransitionStyle.sideways ||
+            TrackTextTransitionStyle.sweep => TrackTextExitStyle.sideways,
+            TrackTextTransitionStyle.zoom ||
+            TrackTextTransitionStyle.settle => TrackTextExitStyle.shrink,
+          }
+        : AppState.trackTextExitStyle;
+    final Widget outgoing = switch (style) {
+      TrackTextExitStyle.fade => child,
+      TrackTextExitStyle.rise => SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, -0.16),
+          end: Offset.zero,
+        ).animate(animation),
+        child: child,
+      ),
+      TrackTextExitStyle.descend => SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.16),
+          end: Offset.zero,
+        ).animate(animation),
+        child: child,
+      ),
+      TrackTextExitStyle.sideways => SlideTransition(
+        position: Tween<Offset>(
+          begin: Offset(-_globalSlideDirection * 0.10, 0),
+          end: Offset.zero,
+        ).animate(animation),
+        child: child,
+      ),
+      TrackTextExitStyle.shrink => ScaleTransition(
+        scale: Tween<double>(begin: 0.96, end: 1).animate(animation),
+        child: child,
+      ),
+    };
+    return FadeTransition(opacity: animation, child: outgoing);
+  }
+
   void _measureTexts(
     double w,
     Color textColor,
@@ -361,12 +520,20 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         );
 
         _measureTexts(snappedInfoW, textColor, titleFontSize, artistFontSize);
-        final Duration titleTransitionDuration = _textTransitionDuration(
-          _cachedTitleTargetWidth,
-        );
-        final Duration artistTransitionDuration = _textTransitionDuration(
-          _cachedArtistTargetWidth,
-        );
+        final bool hasTrackText = _hasTrackText(AppState.trackTitle);
+        final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
+        final Duration titleTransitionDuration =
+            _effectiveTextTransitionDuration(
+              _cachedTitleTargetWidth,
+              hasTrack: hasTrackText,
+              reduceMotion: reduceMotion,
+            );
+        final Duration artistTransitionDuration =
+            _effectiveTextTransitionDuration(
+              _cachedArtistTargetWidth,
+              hasTrack: hasTrackText,
+              reduceMotion: reduceMotion,
+            );
         final Duration coverTransitionDuration = _textTransitionDuration(
           math.max(_cachedTitleTargetWidth, _cachedArtistTargetWidth),
         );
@@ -393,35 +560,33 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               height: snappedTitleH,
               child: RepaintBoundary(
                 child: AnimatedSwitcher(
+                  key: ValueKey(
+                    'title_${AppState.trackTextAnimationsEnabled}_${AppState.trackTextTransitionStyle}_$reduceMotion',
+                  ),
                   duration: titleTransitionDuration,
+                  reverseDuration: titleTransitionDuration == Duration.zero
+                      ? Duration.zero
+                      : Duration(milliseconds: reduceMotion ? 160 : 220),
                   switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeInCubic,
+                  switchOutCurve: Curves.easeOutCubic,
                   layoutBuilder: (currentChild, previousChildren) => Stack(
                     alignment: Alignment.centerLeft,
                     clipBehavior: Clip.none,
                     children: <Widget>[...previousChildren, ?currentChild],
                   ),
                   transitionBuilder: (child, anim) {
-                    final info = child as _TextInfoWidget;
-                    return _PixelDissolveTransition(
-                      animation: anim,
+                    return _buildTextTransition(
+                      child,
+                      anim,
                       isIncoming:
-                          child.key ==
-                          ValueKey(
-                            "${AppState.trackTitle}|${AppState.trackVersion}_title",
-                          ),
-                      direction: _globalSlideDirection,
-                      text: info.text,
-                      targetWidth: info.measuredWidth,
-                      targetHeight: info.measuredHeight,
-                      child: child,
+                          child.key == ValueKey('title|${AppState.trackTitle}'),
+                      reduceMotion: reduceMotion,
                     );
                   },
                   child: _TextInfoWidget(
-                    key: ValueKey(
-                      "${AppState.trackTitle}|${AppState.trackVersion}_title",
-                    ),
+                    key: ValueKey('title|${AppState.trackTitle}'),
                     text: AppState.trackTitle,
+                    isPlaceholder: !hasTrackText,
                     measuredWidth: _cachedTitleTargetWidth,
                     measuredHeight: _cachedTitleTargetHeight,
                     style: TextStyle(
@@ -432,6 +597,9 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                       ),
                       color: textColor.withValues(alpha: uiOpacity),
                       shadows: artworkTextShadow,
+                      fontFamily: AppState.currentFontFamily == 'System Default'
+                          ? null
+                          : AppState.currentFontFamily,
                       fontFamilyFallback: AppState.textFontFallback,
                       letterSpacing: 0.0,
                       height: 1.2,
@@ -450,35 +618,34 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               height: snappedArtistH,
               child: RepaintBoundary(
                 child: AnimatedSwitcher(
+                  key: ValueKey(
+                    'artist_${AppState.trackTextAnimationsEnabled}_${AppState.trackTextTransitionStyle}_$reduceMotion',
+                  ),
                   duration: artistTransitionDuration,
+                  reverseDuration: artistTransitionDuration == Duration.zero
+                      ? Duration.zero
+                      : Duration(milliseconds: reduceMotion ? 160 : 220),
                   switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeInCubic,
+                  switchOutCurve: Curves.easeOutCubic,
                   layoutBuilder: (currentChild, previousChildren) => Stack(
                     alignment: Alignment.centerLeft,
                     clipBehavior: Clip.none,
                     children: <Widget>[...previousChildren, ?currentChild],
                   ),
                   transitionBuilder: (child, anim) {
-                    final info = child as _TextInfoWidget;
-                    return _PixelDissolveTransition(
-                      animation: anim,
+                    return _buildTextTransition(
+                      child,
+                      anim,
                       isIncoming:
                           child.key ==
-                          ValueKey(
-                            "${AppState.artistName}|${AppState.trackVersion}_artist",
-                          ),
-                      direction: _globalSlideDirection,
-                      text: info.text,
-                      targetWidth: info.measuredWidth,
-                      targetHeight: info.measuredHeight,
-                      child: child,
+                          ValueKey('artist|${AppState.artistName}'),
+                      reduceMotion: reduceMotion,
                     );
                   },
                   child: _TextInfoWidget(
-                    key: ValueKey(
-                      "${AppState.artistName}|${AppState.trackVersion}_artist",
-                    ),
+                    key: ValueKey('artist|${AppState.artistName}'),
                     text: AppState.artistName,
+                    isPlaceholder: !hasTrackText,
                     measuredWidth: _cachedArtistTargetWidth,
                     measuredHeight: _cachedArtistTargetHeight,
                     style: TextStyle(
@@ -489,6 +656,9 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                       ),
                       color: subTextColor.withValues(alpha: uiOpacity),
                       shadows: artworkTextShadow,
+                      fontFamily: AppState.currentFontFamily == 'System Default'
+                          ? null
+                          : AppState.currentFontFamily,
                       fontFamilyFallback: AppState.textFontFallback,
                       letterSpacing: 0.0,
                       height: 1.2,
@@ -1272,12 +1442,14 @@ class _ProgressBarPainter extends CustomPainter {
 
 class _TextInfoWidget extends StatelessWidget {
   final String text;
+  final bool isPlaceholder;
   final TextStyle style;
   final double measuredWidth;
   final double measuredHeight;
   const _TextInfoWidget({
     required super.key,
     required this.text,
+    required this.isPlaceholder,
     required this.style,
     required this.measuredWidth,
     required this.measuredHeight,

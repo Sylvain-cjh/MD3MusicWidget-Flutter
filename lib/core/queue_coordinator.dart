@@ -24,7 +24,7 @@ final class QueueCoordinator extends ChangeNotifier {
     bool force = false,
   }) async {
     final provider = enabled && track != null ? registry.queueFor(track) : null;
-    final identity = provider == null ? null : track!.identity;
+    final identity = provider == null ? null : track!.queueIdentity;
     if (!force && identity == _trackIdentity && provider?.id == _providerId) {
       return;
     }

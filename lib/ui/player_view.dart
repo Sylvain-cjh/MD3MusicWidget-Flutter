@@ -15,6 +15,7 @@ import '../core/platform_provider.dart';
 import '../core/spectrum_packet.dart';
 import '../core/music_source_service.dart';
 import 'animations/component_size_motion.dart';
+import 'animations/next_up_presence_motion.dart';
 import 'widgets/dynamic_background.dart';
 import 'widgets/locked_aspect_resize_area.dart';
 import 'widgets/track_controls.dart';
@@ -26,8 +27,14 @@ import 'widgets/settings_panel.dart';
 
 class PlayerView extends StatefulWidget {
   final Future<void>? windowReady;
+  
+  final bool startPlatformServices;
 
-  const PlayerView({super.key, this.windowReady});
+  const PlayerView({
+    super.key,
+    this.windowReady,
+    this.startPlatformServices = true,
+  });
   @override
   State<PlayerView> createState() => _PlayerViewState();
 }
@@ -54,6 +61,8 @@ class _PlayerViewState extends State<PlayerView>
   String _latestCoverVersion = "";
   bool _coverRequestInFlight = false;
   Timer? _coverFallbackTimer;
+  Timer? _missingCoverTimer;
+  String? _missingCoverIdentity;
   int _colorSchemeRequestSerial = 0;
   String _legacyCoverFingerprint = "";
   bool _fetcherRestartInFlight = false;
@@ -129,6 +138,8 @@ class _PlayerViewState extends State<PlayerView>
   int _windowTransitionSerial = 0;
   bool _nextUpResizePending = false;
   bool _nextUpResizeInFlight = false;
+  bool _nextUpSyncScheduled = false;
+  late final NextUpPresenceMotion _nextUpMotion;
 
   static const String _dotnetRuntimeDownloadUrl =
       'https://aka.ms/dotnet/8.0/dotnet-runtime-win-x64.exe';
@@ -141,7 +152,13 @@ class _PlayerViewState extends State<PlayerView>
     );
     windowManager.addListener(this);
     tm.trayManager.addListener(this);
+    _nextUpMotion = NextUpPresenceMotion(
+      vsync: this,
+      reserveSpace: _reserveNextUpSpace,
+    );
     AppState.nextUpPreviewVisible.addListener(_onNextUpVisibilityChanged);
+    AppState.nextUpPreviewController.refresh();
+    if (AppState.nextUpPreviewVisible.value) _onNextUpVisibilityChanged();
 
     _menuAnimController = AnimationController(
       duration: const Duration(milliseconds: 250),
@@ -160,8 +177,10 @@ class _PlayerViewState extends State<PlayerView>
       _frameScaleController,
       _contentScaleController,
     ]);
-    unawaited(_initSystemTray());
-    unawaited(_bootEngineAndListen());
+    if (widget.startPlatformServices) {
+      unawaited(_initSystemTray());
+      unawaited(_bootEngineAndListen());
+    }
   }
 
   @override
@@ -170,6 +189,8 @@ class _PlayerViewState extends State<PlayerView>
     _spectrumTimer?.cancel();
     _mediaReconnectTimer?.cancel();
     _coverFallbackTimer?.cancel();
+    _missingCoverTimer?.cancel();
+    _missingCoverIdentity = null;
     AppState.mediaCommandSender = null;
     unawaited(_mediaProviderSubscription?.cancel());
     unawaited(_mediaProvider?.close());
@@ -178,6 +199,8 @@ class _PlayerViewState extends State<PlayerView>
     windowManager.removeListener(this);
     tm.trayManager.removeListener(this);
     AppState.nextUpPreviewVisible.removeListener(_onNextUpVisibilityChanged);
+    _nextUpMotion.dispose();
+    AppState.nextUpPanelOccupied = false;
     _httpBaseClient.close(force: true);
     _menuAnimController.dispose();
     _frameScaleController.dispose();
@@ -368,6 +391,8 @@ class _PlayerViewState extends State<PlayerView>
 
   Future<void> _clearCover() async {
     _coverFallbackTimer?.cancel();
+    _missingCoverTimer?.cancel();
+    _missingCoverIdentity = null;
     _latestCoverVersion = "";
     AppState.backgroundCacheHit.value = false;
     if (AppState.coverProvider == null &&
@@ -391,6 +416,8 @@ class _PlayerViewState extends State<PlayerView>
 
   Future<void> _loadCover(String version) async {
     _coverFallbackTimer?.cancel();
+    _missingCoverTimer?.cancel();
+    _missingCoverIdentity = null;
     _latestCoverVersion = version;
     if (version.isEmpty) {
       await _clearCover();
@@ -531,6 +558,31 @@ class _PlayerViewState extends State<PlayerView>
         unawaited(_loadCover(version));
       }
     });
+  }
+
+  void _deferMissingCoverClear() {
+    if (AppState.coverProvider == null && AppState.bgBlurProvider == null) {
+      return;
+    }
+    final identity = AppState.currentPlatformTrack?.queueIdentity;
+    if (_missingCoverTimer?.isActive == true &&
+        _missingCoverIdentity == identity) {
+      return;
+    }
+    _missingCoverTimer?.cancel();
+    _missingCoverIdentity = identity;
+    _missingCoverTimer = Timer(
+      Duration(milliseconds: identity == null ? 600 : 1800),
+      () {
+        _missingCoverTimer = null;
+        _missingCoverIdentity = null;
+        if (mounted &&
+            _latestCoverVersion.isEmpty &&
+            AppState.currentPlatformTrack?.queueIdentity == identity) {
+          unawaited(_clearCover());
+        }
+      },
+    );
   }
 
   
@@ -832,17 +884,26 @@ class _PlayerViewState extends State<PlayerView>
     if (snapshot.processId > 0) AppState.fetcherPid = snapshot.processId;
     if (!mounted) return;
 
-    final bool trackChanged =
+    final bool metadataChanged =
         AppState.trackTitle != snapshot.title ||
         AppState.artistName != snapshot.artist ||
-        AppState.trackVersion != snapshot.trackVersion;
+        (AppState.currentPlatformTrack?.sourceAppId ?? '') !=
+            snapshot.sourceAppId;
+    final bool versionChanged = AppState.trackVersion != snapshot.trackVersion;
+    final bool trackChanged = metadataChanged || versionChanged;
     final bool playbackStateChanged = AppState.isPlaying != snapshot.isPlaying;
     final bool capabilitiesChanged =
         AppState.mediaCapabilities != snapshot.capabilities;
-    if (trackChanged && AppState.playbackDurationMs > 0) {
+    final bool sameTrackRestarted =
+        versionChanged &&
+        !metadataChanged &&
+        snapshot.positionMs < 5000 &&
+        AppState.estimatedPlaybackPositionMs > 5000;
+    if ((metadataChanged || sameTrackRestarted) &&
+        AppState.playbackDurationMs > 0) {
       AppState.notifyTrackTransition();
     }
-    if (trackChanged) AppState.backgroundCacheHit.value = false;
+    if (metadataChanged) AppState.backgroundCacheHit.value = false;
 
     if (trackChanged || playbackStateChanged || capabilitiesChanged) {
       setState(() {
@@ -852,12 +913,13 @@ class _PlayerViewState extends State<PlayerView>
         AppState.isPlaying = snapshot.isPlaying;
         AppState.mediaCapabilities = snapshot.capabilities;
       });
-      AppState.notifyBackgroundChanged();
+      if (playbackStateChanged) AppState.notifyBackgroundChanged();
     }
 
     AppState.currentPlatformTrack = PlatformTrack.fromSnapshot(snapshot);
     AppState.isShuffleActive = snapshot.isShuffleActive;
     AppState.autoRepeatMode = snapshot.autoRepeatMode;
+    AppState.refreshQueue();
     AppState.updatePlaybackTimeline(
       positionMs: snapshot.positionMs,
       durationMs: snapshot.durationMs,
@@ -867,12 +929,17 @@ class _PlayerViewState extends State<PlayerView>
     );
     if (playbackStateChanged) _syncSpectrumPolling();
     AppState.refreshLyrics();
-    AppState.refreshQueue();
     if (AppState.showLyrics) {
       AppState.lyrics.setPositionMs(AppState.estimatedPlaybackPositionMs);
     }
 
     _latestCoverVersion = snapshot.coverVersion;
+    if (snapshot.coverVersion.isNotEmpty ||
+        snapshot.legacyCoverBase64.isNotEmpty) {
+      _missingCoverTimer?.cancel();
+      _missingCoverTimer = null;
+      _missingCoverIdentity = null;
+    }
     if (snapshot.coverVersion.isNotEmpty &&
         snapshot.coverVersion != AppState.currentCoverVersion) {
       if (_artworkResources.findArtwork(snapshot.coverVersion) != null) {
@@ -896,7 +963,7 @@ class _PlayerViewState extends State<PlayerView>
       unawaited(_loadLegacyCover(snapshot.legacyCoverBase64));
     } else if (snapshot.coverVersion.isEmpty &&
         snapshot.legacyCoverBase64.isEmpty) {
-      unawaited(_clearCover());
+      _deferMissingCoverClear();
     }
   }
 
@@ -1149,6 +1216,10 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   int _beginWindowTransition() {
+    if (_nextUpResizeInFlight) {
+      _nextUpResizePending = true;
+      _nextUpMotion.cancel();
+    }
     _windowTransitionSerial++;
     _frameScaleVelocity = _frameScaleController.isAnimating
         ? _frameScaleController.velocity
@@ -1186,9 +1257,48 @@ class _PlayerViewState extends State<PlayerView>
   void _onNextUpVisibilityChanged() {
     if (!mounted) return;
     _nextUpResizePending = true;
+    _nextUpMotion.cancel();
+    if (_nextUpSyncScheduled) return;
+    _nextUpSyncScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_resizeWindowForNextUp());
+      _nextUpSyncScheduled = false;
+      if (!mounted) return;
+      unawaited(_resizeWindowForNextUp());
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  Future<void> _reserveNextUpSpace(bool occupied) async {
+    if (!mounted) return;
+    AppState.nextUpPanelOccupied = occupied;
+    setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    if (_isTransitioning) {
+      _nextUpResizePending = true;
+      return;
+    }
+    final bounds = await windowManager.getBounds();
+    if (!mounted) return;
+    if (_isTransitioning) {
+      _nextUpResizePending = true;
+      return;
+    }
+    final targetHeight =
+        _designWindowSize(
+          layout: AppState.widgetLayout,
+          settingsOpen: _isSettingsOpen,
+        ).height *
+        _frameScale;
+    if ((bounds.height - targetHeight).abs() > 0.5) {
+      await windowManager.setBounds(
+        Rect.fromLTWH(bounds.left, bounds.top, bounds.width, targetHeight),
+        animate: false,
+      );
+    }
+    if (!mounted) return;
+    setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
   }
 
   Future<void> _resizeWindowForNextUp() async {
@@ -1201,28 +1311,15 @@ class _PlayerViewState extends State<PlayerView>
     _nextUpResizePending = false;
     _nextUpResizeInFlight = true;
     try {
-      final bounds = await windowManager.getBounds();
-      if (!mounted) return;
-      if (_isTransitioning) {
-        _nextUpResizePending = true;
-        return;
-      }
-      final targetHeight =
-          (_isSettingsOpen
-              ? AppState.expandedWindowHeight
-              : AppState.baseWindowHeight) *
-          _frameScale;
-      if ((bounds.height - targetHeight).abs() > 0.5) {
-        await windowManager.setBounds(
-          Rect.fromLTWH(bounds.left, bounds.top, bounds.width, targetHeight),
-          animate: false,
-        );
-      }
-      if (mounted) setState(() {});
+      await _nextUpMotion.setVisible(
+        AppState.nextUpPreviewVisible.value,
+        reduceMotion: MediaQuery.maybeOf(context)?.disableAnimations ?? false,
+      );
     } catch (error) {
       debugPrint('下一首预告窗口尺寸同步失败: $error');
     } finally {
       _nextUpResizeInFlight = false;
+      if (mounted) setState(() {});
       if (mounted && _nextUpResizePending && !_isTransitioning) {
         _onNextUpVisibilityChanged();
       }
@@ -1434,7 +1531,12 @@ class _PlayerViewState extends State<PlayerView>
       _customScaleCommitScheduled = false;
       final double? pending = _pendingCustomScale;
       _pendingCustomScale = null;
-      if (!mounted || pending == null || !AppState.isCustomComponentSize) {
+      if (!mounted ||
+          pending == null ||
+          !AppState.isCustomComponentSize ||
+          _nextUpResizePending ||
+          _nextUpResizeInFlight ||
+          _isTransitioning) {
         return;
       }
       AppState.customComponentScale = pending;
@@ -1445,7 +1547,9 @@ class _PlayerViewState extends State<PlayerView>
 
   @override
   void onWindowResized() {
-    if (AppState.isCustomComponentSize) {
+    if (AppState.isCustomComponentSize &&
+        !_nextUpResizePending &&
+        !_nextUpResizeInFlight) {
       _resizeSaveTimer?.cancel();
       _resizeSaveTimer = Timer(const Duration(milliseconds: 180), () {
         unawaited(AppState.saveSettings());
@@ -1599,6 +1703,7 @@ class _PlayerViewState extends State<PlayerView>
             AppState.qqPlaylistLink.isNotEmpty);
     bool nextUpVisible =
         nextUpConfigured && AppState.nextUpPreviewVisible.value;
+    bool nextUpOccupied = nextUpVisible || AppState.nextUpPanelOccupied;
     double playerHorizontalPadding = isV ? 24.0 : 16.0;
 
     double innerSettingsW = isV
@@ -1653,7 +1758,11 @@ class _PlayerViewState extends State<PlayerView>
     double renderFrameScale = _frameScale;
     double renderContentScale = _contentScale;
     final bool isLiveCustomResize =
-        AppState.isCustomComponentSize && !_isTransitioning && !_isMenuOpen;
+        AppState.isCustomComponentSize &&
+        !_isTransitioning &&
+        !_isMenuOpen &&
+        !_nextUpResizePending &&
+        !_nextUpResizeInFlight;
     if (isLiveCustomResize) {
       final double viewportScale = ComponentSizeMotion.fitScale(
         viewport: MediaQuery.sizeOf(context),
@@ -1749,6 +1858,7 @@ class _PlayerViewState extends State<PlayerView>
                         spectrumMode: AppState.spectrumMode,
                         isPlaying: AppState.isPlaying,
                         showPerformance: performanceVisible,
+                        isVertical: isV,
                       ),
                     ),
                   ),
@@ -1783,17 +1893,14 @@ class _PlayerViewState extends State<PlayerView>
                       AppState.lyricsPanelExtentOf(AppState.widgetLayout) +
                       8.0,
                   width: innerPlayerW - playerHorizontalPadding * 2,
-                  height: nextUpVisible ? 48.0 : 0.0,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    opacity: nextUpVisible ? 1.0 : 0.0,
-                    child: IgnorePointer(
-                      ignoring: !nextUpVisible,
-                      child: nextUpConfigured
-                          ? const MusicNextUpPanel()
-                          : const SizedBox.shrink(),
-                    ),
+                  height: nextUpOccupied ? 48.0 : 0.0,
+                  child: IgnorePointer(
+                    ignoring: !nextUpVisible,
+                    child: nextUpConfigured || nextUpOccupied
+                        ? MusicNextUpPanel(
+                            presenceAnimation: _nextUpMotion.animation,
+                          )
+                        : const SizedBox.shrink(),
                   ),
                 ),
               ],

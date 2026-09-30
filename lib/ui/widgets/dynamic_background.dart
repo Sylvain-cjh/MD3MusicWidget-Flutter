@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
+import 'right_artwork_surface.dart';
 
 class CircularRevealClipper extends CustomClipper<Path> {
   final double fraction;
@@ -143,6 +145,26 @@ class _DynamicBackgroundState extends State<DynamicBackground>
   late AnimationController _revealController;
   late CurvedAnimation _revealAnimation;
   late bool _glowLayerVisible;
+  ImageProvider? _heldBackgroundProvider;
+  ImageProvider? _heldCoverProvider;
+  String _heldCoverKey = 'fallback';
+  Timer? _heldArtworkReleaseTimer;
+
+  void _releaseHeldArtwork() {
+    if (!mounted ||
+        AppState.coverProvider != null ||
+        AppState.bgBlurProvider != null) {
+      return;
+    }
+    _heldArtworkReleaseTimer?.cancel();
+    _heldArtworkReleaseTimer = null;
+    if (_heldBackgroundProvider == null && _heldCoverProvider == null) return;
+    setState(() {
+      _heldBackgroundProvider = null;
+      _heldCoverProvider = null;
+      _heldCoverKey = 'fallback';
+    });
+  }
 
   @override
   void initState() {
@@ -173,6 +195,13 @@ class _DynamicBackgroundState extends State<DynamicBackground>
 
   void _handleBackgroundChanged() {
     if (!mounted) return;
+    _heldArtworkReleaseTimer?.cancel();
+    if (AppState.coverProvider == null && AppState.bgBlurProvider == null) {
+      _heldArtworkReleaseTimer = Timer(
+        const Duration(milliseconds: 500),
+        _releaseHeldArtwork,
+      );
+    }
     if (AppState.enableGlow) {
       _glowLayerVisible = true;
       _revealController.forward();
@@ -198,6 +227,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
 
   @override
   void dispose() {
+    _heldArtworkReleaseTimer?.cancel();
     AppState.backgroundRevision.removeListener(_handleBackgroundChanged);
     _revealAnimation.dispose();
     _revealController.dispose();
@@ -318,39 +348,30 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     final Color overlayColor = isDark ? Colors.black : Colors.white;
 
     
-    final bgProvider = AppState.bgBlurProvider ?? AppState.coverProvider;
-    final coverKey = AppState.currentCoverVersion.isEmpty
-        ? 'fallback'
-        : AppState.currentCoverVersion;
+    final activeBackground = AppState.bgBlurProvider ?? AppState.coverProvider;
+    if (activeBackground != null) {
+      _heldBackgroundProvider = activeBackground;
+      _heldCoverKey = AppState.currentCoverVersion.isEmpty
+          ? 'fallback'
+          : AppState.currentCoverVersion;
+    }
+    if (AppState.coverProvider != null) {
+      _heldCoverProvider = AppState.coverProvider;
+    }
+    final bgProvider = activeBackground ?? _heldBackgroundProvider;
+    final coverKey = _heldCoverKey;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(28),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: OverflowBox(
-              minWidth: canvasW,
-              maxWidth: canvasW,
-              minHeight: canvasH,
-              maxHeight: canvasH,
-              alignment: Alignment.center,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 800),
-                curve: Curves.easeOutQuart,
-                color: isDark
-                    ? (AppState.enableGlow
-                          ? AppState.currentScheme.surfaceContainerLow
-                          : (AppState.enableOledTheme
-                                ? Colors.black
-                                : AppState.currentScheme.surfaceContainerHigh))
-                    : (AppState.enableGlow
-                          ? AppState.currentScheme.surface
-                          : AppState.currentScheme.surfaceContainerHighest),
-              ),
-            ),
-          ),
-
-          if (bgProvider != null && _glowLayerVisible)
+    
+    
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final headerScale =
+            constraints.maxWidth /
+            AppState.innerPlayerWidthOf(WidgetLayout.horizontal);
+        final rightCoverHeight =
+            AppState.corePlayerHeightOf(WidgetLayout.horizontal) * headerScale;
+        return Stack(
+          children: [
             Positioned.fill(
               child: OverflowBox(
                 minWidth: canvasW,
@@ -358,282 +379,293 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                 minHeight: canvasH,
                 maxHeight: canvasH,
                 alignment: Alignment.center,
-                child: AnimatedBuilder(
-                  animation: _revealAnimation,
-                  builder: (context, child) {
-                    return ClipPath(
-                      clipper: CircularRevealClipper(
-                        fraction: _revealAnimation.value,
-                        center: AppState.revealCenter,
-                      ),
-                      child: child,
-                    );
-                  },
-                  child: RepaintBoundary(
-                    child: Transform.scale(
-                      scale: 1.25,
-                      child: ImageFiltered(
-                        imageFilter: _glowBlur,
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 600),
-                          switchInCurve: Curves.easeInOutCubic,
-                          switchOutCurve: Curves.easeInOutCubic,
-                          layoutBuilder: (currentChild, previousChildren) =>
-                              Stack(
-                                fit: StackFit.expand,
-                                children: [...previousChildren, ?currentChild],
-                              ),
-                          child: AppState.glowMode == GlowMode.waterfall
-                              ? _buildWaterfallGlow(
-                                  bgProvider,
-                                  coverKey,
-                                  canvasW,
-                                  canvasH,
-                                  headerH,
-                                )
-                              : _buildWallpaperGlow(bgProvider, coverKey),
-                           
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                        ),
-                      ),
-                    ),
-                  ),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 800),
+                  curve: Curves.easeOutQuart,
+                  color: isDark
+                      ? (AppState.enableGlow
+                            ? AppState.currentScheme.surfaceContainerLow
+                            : (AppState.enableOledTheme
+                                  ? Colors.black
+                                  : AppState
+                                        .currentScheme
+                                        .surfaceContainerHigh))
+                      : (AppState.enableGlow
+                            ? AppState.currentScheme.surface
+                            : AppState.currentScheme.surfaceContainerHighest),
                 ),
               ),
             ),
 
-          Positioned.fill(
-            child: OverflowBox(
-              minWidth: canvasW,
-              maxWidth: canvasW,
-              minHeight: canvasH,
-              maxHeight: canvasH,
-              alignment: Alignment.center,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 600),
-                    color: overlayColor.withValues(alpha: universalDimOpacity),
-                  ),
-                  FadeTransition(
-                    opacity: _revealAnimation,
-                    child: RepaintBoundary(
-                      child: CustomPaint(
-                        painter: DitherNoisePainter(AppState.themeBrightness),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+            if (bgProvider != null && _glowLayerVisible)
+              Positioned.fill(
+                child: AnimatedOpacity(
+                  duration: AppState.layoutSwitchDuration,
+                  curve: Curves.easeOutCubic,
+                  opacity: activeBackground == null ? 0.0 : 1.0,
+                  onEnd: _releaseHeldArtwork,
+                  child: OverflowBox(
+                    minWidth: canvasW,
+                    maxWidth: canvasW,
+                    minHeight: canvasH,
+                    maxHeight: canvasH,
+                    alignment: Alignment.center,
+                    child: AnimatedBuilder(
+                      animation: _revealAnimation,
+                      builder: (context, child) {
+                        return ClipPath(
+                          clipper: CircularRevealClipper(
+                            fraction: _revealAnimation.value,
+                            center: AppState.revealCenter,
+                          ),
+                          child: child,
+                        );
+                      },
+                      child: RepaintBoundary(
+                        child: Transform.scale(
+                          scale: 1.25,
+                          child: ImageFiltered(
+                            imageFilter: _glowBlur,
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 600),
+                              switchInCurve: Curves.easeInOutCubic,
+                              switchOutCurve: Curves.easeInOutCubic,
+                              layoutBuilder: (currentChild, previousChildren) =>
+                                  Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      ...previousChildren,
+                                      ?currentChild,
+                                    ],
+                                  ),
+                              child: AppState.glowMode == GlowMode.waterfall
+                                  ? _buildWaterfallGlow(
+                                      bgProvider,
+                                      coverKey,
+                                      canvasW,
+                                      canvasH,
+                                      headerH,
+                                    )
+                                  : _buildWallpaperGlow(bgProvider, coverKey),
+                               
 
-          if (AppState.coverProvider != null)
-            Positioned(
-              top: 0,
-              right: 0,
-              height: 160,
-              child: AnimatedOpacity(
-                opacity: AppState.isVertical ? 0.0 : 1.0,
-                duration: AppState.layoutSwitchDuration,
-                curve: AppState.layoutSwitchCurve,
-                child: AspectRatio(
-                  aspectRatio: 1.0,
-                  child: ShaderMask(
-                    blendMode: BlendMode.dstIn,
-                    shaderCallback: (bounds) => const LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.white, Colors.white, Colors.transparent],
-                      stops: [0.0, 0.7, 1.0],
-                    ).createShader(bounds),
-                    child: ShaderMask(
-                      blendMode: BlendMode.dstIn,
-                      shaderCallback: (bounds) => const LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                        colors: [Colors.transparent, Colors.white],
-                        stops: [0.05, 0.85],
-                      ).createShader(bounds),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 500),
-                        foregroundDecoration: BoxDecoration(
-                          color: Colors.black.withValues(
-                            alpha: AppState.isPlaying ? 0.0 : 0.80,
-                          ),
-                        ),
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 800),
-                          
-                          child: Image(
-                            key: ValueKey('${coverKey}_clear'),
-                            image: AppState.coverProvider!,
-                            fit: BoxFit.cover,
-                            gaplessPlayback: true,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          Positioned(
-            right: 12,
-            bottom: 8,
-            child: ValueListenableBuilder<bool>(
-              valueListenable: AppState.backgroundCacheHit,
-              builder: (context, hit, _) {
-                if (!hit) return const SizedBox.shrink();
-                final scheme = AppState.currentScheme;
-                return IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHigh.withValues(
-                        alpha: 0.82,
-                      ),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.cached_rounded,
-                            size: 12,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '背景缓存命中',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: scheme.onSurfaceVariant,
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                             ),
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
-                );
-              },
+                ),
+              ),
+
+            Positioned.fill(
+              child: OverflowBox(
+                minWidth: canvasW,
+                maxWidth: canvasW,
+                minHeight: canvasH,
+                maxHeight: canvasH,
+                alignment: Alignment.center,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 600),
+                      color: overlayColor.withValues(
+                        alpha: universalDimOpacity,
+                      ),
+                    ),
+                    FadeTransition(
+                      opacity: _revealAnimation,
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          painter: DitherNoisePainter(AppState.themeBrightness),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-        ],
-      ),
+
+            if (_heldCoverProvider != null)
+              Positioned(
+                top: 0,
+                right: 0,
+                height: rightCoverHeight,
+                width: math.min(rightCoverHeight, constraints.maxWidth),
+                child: AnimatedOpacity(
+                  opacity: AppState.isVertical || AppState.coverProvider == null
+                      ? 0.0
+                      : 1.0,
+                  duration: AppState.layoutSwitchDuration,
+                  curve: AppState.layoutSwitchCurve,
+                  onEnd: _releaseHeldArtwork,
+                  child: SizedBox.expand(
+                    key: const ValueKey('background_right_artwork'),
+                    child: RightArtworkSurface(
+                      provider: _heldCoverProvider!,
+                      coverKey: coverKey,
+                      isPlaying: AppState.isPlaying,
+                    ),
+                  ),
+                ),
+              ),
+            Positioned(
+              right: 12,
+              bottom: 8,
+              child: ValueListenableBuilder<bool>(
+                valueListenable: AppState.backgroundCacheHit,
+                builder: (context, hit, _) {
+                  if (!hit) return const SizedBox.shrink();
+                  final scheme = AppState.currentScheme;
+                  return IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHigh.withValues(
+                          alpha: 0.82,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.cached_rounded,
+                              size: 12,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '背景缓存命中',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

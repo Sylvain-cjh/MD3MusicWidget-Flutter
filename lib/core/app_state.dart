@@ -16,6 +16,8 @@ import 'platform_provider.dart';
 import 'local_playlist_queue_provider.dart';
 import 'qq_music_playlist_queue_provider.dart';
 import 'queue_coordinator.dart';
+import 'system_performance_provider.dart';
+import 'next_up_preview_controller.dart';
 
 
 
@@ -36,6 +38,19 @@ enum SpectrumMode { off, bars, mirror, waveform }
 enum LyricsProviderChoice { lrclib, localLrc, qqMusic }
 
 enum LyricsTransitionStyle { fade, rise, descend, sideways, zoom, none }
+
+enum TrackTextTransitionStyle {
+  particles,
+  fade,
+  rise,
+  sideways,
+  zoom,
+  descend,
+  settle,
+  sweep,
+}
+
+enum TrackTextExitStyle { fade, rise, descend, sideways, shrink }
 
 enum MD3ProgressStyle { linear, pill, segmented }
 
@@ -84,6 +99,7 @@ class AppState {
   }
 
   static void refreshQueue({bool force = false}) {
+    _nextUpPreviewController?.refresh();
     if (force) _qqPlaylist.invalidate();
     unawaited(
       queue.setTrack(
@@ -149,6 +165,33 @@ class AppState {
   static final ValueNotifier<bool> nextUpPreviewVisible = ValueNotifier<bool>(
     false,
   );
+  static bool nextUpPanelOccupied = false;
+  static NextUpPreviewController? _nextUpPreviewController;
+  static NextUpPreviewController get nextUpPreviewController {
+    if (_nextUpPreviewController case final existing?) return existing;
+    final controller = NextUpPreviewController(
+      readInput: () => NextUpPreviewInput(
+        trackIdentity: currentPlatformTrack?.queueIdentity,
+        next: nextQueueItem,
+        enabled:
+            showNextUp &&
+            (playlistFilePath.isNotEmpty || qqPlaylistLink.isNotEmpty),
+        playing: isPlaying,
+        durationMs: playbackDurationMs,
+        positionMs: estimatedPlaybackPositionMs,
+        leadSeconds: nextUpLeadSeconds,
+      ),
+    );
+    _nextUpPreviewController = controller;
+    controller.addListener(
+      () => nextUpPreviewVisible.value = controller.visible,
+    );
+    playbackRevision.addListener(controller.refresh);
+    queue.addListener(controller.refresh);
+    controller.refresh();
+    return controller;
+  }
+
   static final ValueNotifier<int> trackTransitionRevision = ValueNotifier<int>(
     0,
   );
@@ -250,6 +293,14 @@ class AppState {
 
   static bool enableGlow = true;
   static GlowMode glowMode = GlowMode.waterfall;
+  static const defaultRightCoverDarkening = 0.32;
+  static const defaultRightCoverFadeLength = 0.65;
+  static const defaultRightCoverBlur = 1.2;
+  static double rightCoverDarkening = defaultRightCoverDarkening;
+  static double rightCoverFadeLength = defaultRightCoverFadeLength;
+  static double rightCoverBlur = defaultRightCoverBlur;
+  static final rightArtworkRevision = ValueNotifier<int>(0);
+  static void notifyRightArtworkChanged() => rightArtworkRevision.value++;
   static SpectrumMode spectrumMode = SpectrumMode.off;
   static bool showLyrics = false;
   static const String defaultFontFamily = 'System Default';
@@ -278,7 +329,15 @@ class AppState {
   static bool enableOledTheme = false;
   static bool enable3DCover = true;
   static bool showPlaybackControls = true;
+  static bool trackTextAnimationsEnabled = true;
+  static TrackTextTransitionStyle trackTextTransitionStyle =
+      TrackTextTransitionStyle.particles;
+  static bool trackTextAnimationsLinked = true;
+  static TrackTextExitStyle trackTextExitStyle = TrackTextExitStyle.fade;
   static bool showPerformanceMonitor = false;
+  static String performanceProcessExecutable = '';
+  static final performanceRevision = ValueNotifier<int>(0);
+  static void notifyPerformanceChanged() => performanceRevision.value++;
   static DynamicSchemeVariant themeVariant = DynamicSchemeVariant.tonalSpot;
 
   
@@ -378,9 +437,10 @@ class AppState {
       spectrumMode == SpectrumMode.off && !showPerformanceMonitor ? 0.0 : 64.0;
   static double lyricsPanelExtentOf(WidgetLayout l) => showLyrics ? 64.0 : 0.0;
   static double nextUpPanelExtentOf(WidgetLayout l) =>
-      showNextUp &&
-          nextUpPreviewVisible.value &&
-          (playlistFilePath.isNotEmpty || qqPlaylistLink.isNotEmpty)
+      nextUpPanelOccupied ||
+          (showNextUp &&
+              nextUpPreviewVisible.value &&
+              (playlistFilePath.isNotEmpty || qqPlaylistLink.isNotEmpty))
       ? 64.0
       : 0.0;
   static double innerPlayerHeightOf(WidgetLayout l) =>
@@ -499,6 +559,7 @@ class AppState {
       await flushSettings().timeout(const Duration(milliseconds: 700));
     } catch (_) {}
     try {
+      await SystemPerformanceProvider.shutdown();
       _commandClient.close(force: true);
       await stopFetcherProcess();
     } catch (_) {}
@@ -738,7 +799,27 @@ class AppState {
         showPlaybackControls = snapshot['showPlaybackControls'] is bool
             ? snapshot['showPlaybackControls'] as bool
             : true;
+        trackTextAnimationsEnabled =
+            snapshot['trackTextAnimationsEnabled'] is bool
+            ? snapshot['trackTextAnimationsEnabled'] as bool
+            : true;
+        trackTextTransitionStyle = _enumFromName(
+          TrackTextTransitionStyle.values,
+          snapshot['trackTextTransitionStyle'],
+          TrackTextTransitionStyle.particles,
+        );
+        trackTextAnimationsLinked =
+            snapshot['trackTextAnimationsLinked'] is bool
+            ? snapshot['trackTextAnimationsLinked'] as bool
+            : true;
+        trackTextExitStyle = _enumFromName(
+          TrackTextExitStyle.values,
+          snapshot['trackTextExitStyle'],
+          TrackTextExitStyle.fade,
+        );
         showPerformanceMonitor = snapshot['showPerformanceMonitor'] == true;
+        performanceProcessExecutable =
+            snapshot['performanceProcessExecutable'] as String? ?? '';
         selectedSourceAppId = snapshot['selectedSourceAppId'] is String
             ? snapshot['selectedSourceAppId'] as String
             : '';
@@ -811,6 +892,36 @@ class AppState {
         _loadLegacySettings(p);
       }
 
+      double boundedArtworkSetting(
+        String key,
+        double fallback,
+        double min,
+        double max,
+      ) {
+        final value = snapshot != null ? snapshot[key] : p.get(key);
+        if (value is! num || !value.isFinite) return fallback;
+        return value.toDouble().clamp(min, max);
+      }
+
+      rightCoverDarkening = boundedArtworkSetting(
+        'rightCoverDarkening',
+        defaultRightCoverDarkening,
+        0,
+        0.85,
+      );
+      rightCoverFadeLength = boundedArtworkSetting(
+        'rightCoverFadeLength',
+        defaultRightCoverFadeLength,
+        0.15,
+        1,
+      );
+      rightCoverBlur = boundedArtworkSetting(
+        'rightCoverBlur',
+        defaultRightCoverBlur,
+        0,
+        6,
+      );
+      notifyRightArtworkChanged();
       titleWeightValue = _safeWeight(titleWeightValue, 700.0);
       artistWeightValue = _safeWeight(artistWeightValue, 400.0);
       lyricsWeightValue = _safeWeight(lyricsWeightValue, 500.0);
@@ -881,7 +992,22 @@ class AppState {
     enableOledTheme = p.getBool('enableOledTheme') ?? false;
     enable3DCover = p.getBool('enable3DCover') ?? true;
     showPlaybackControls = p.getBool('showPlaybackControls') ?? true;
+    trackTextAnimationsEnabled =
+        p.getBool('trackTextAnimationsEnabled') ?? true;
+    trackTextTransitionStyle = _enumFromIndex(
+      TrackTextTransitionStyle.values,
+      p.getInt('trackTextTransitionStyle'),
+      TrackTextTransitionStyle.particles,
+    );
+    trackTextAnimationsLinked = p.getBool('trackTextAnimationsLinked') ?? true;
+    trackTextExitStyle = _enumFromIndex(
+      TrackTextExitStyle.values,
+      p.getInt('trackTextExitStyle'),
+      TrackTextExitStyle.fade,
+    );
     showPerformanceMonitor = p.getBool('showPerformanceMonitor') ?? false;
+    performanceProcessExecutable =
+        p.getString('performanceProcessExecutable') ?? '';
     selectedSourceAppId = p.getString('selectedSourceAppId') ?? '';
     playlistFilePath = p.getString('playlistFilePath') ?? '';
     qqPlaylistLink = p.getString('qqPlaylistLink') ?? '';
@@ -939,6 +1065,9 @@ class AppState {
     'themeVariant': themeVariant.name,
     'enableGlow': enableGlow,
     'glowMode': glowMode.name,
+    'rightCoverDarkening': rightCoverDarkening,
+    'rightCoverFadeLength': rightCoverFadeLength,
+    'rightCoverBlur': rightCoverBlur,
     'spectrumMode': spectrumMode.name,
     'showLyrics': showLyrics,
     'lyricsUseThemeFont': lyricsUseThemeFont,
@@ -956,7 +1085,12 @@ class AppState {
     'enableOledTheme': enableOledTheme,
     'enable3DCover': enable3DCover,
     'showPlaybackControls': showPlaybackControls,
+    'trackTextAnimationsEnabled': trackTextAnimationsEnabled,
+    'trackTextTransitionStyle': trackTextTransitionStyle.name,
+    'trackTextAnimationsLinked': trackTextAnimationsLinked,
+    'trackTextExitStyle': trackTextExitStyle.name,
     'showPerformanceMonitor': showPerformanceMonitor,
+    'performanceProcessExecutable': performanceProcessExecutable,
     'selectedSourceAppId': selectedSourceAppId,
     'playlistFilePath': playlistFilePath,
     'qqPlaylistLink': qqPlaylistLink,

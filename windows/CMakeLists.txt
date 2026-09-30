@@ -64,6 +64,7 @@ foreach(MUSIC_FETCHER_FILE ${MUSIC_FETCHER_CODE})
   endif()
 endforeach()
 set(APP_IMAGES_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../images")
+set(PRESENTMON_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/presentmon")
 
 
 add_subdirectory("runner")
@@ -109,6 +110,11 @@ if(EXISTS "${APP_IMAGES_SOURCE}")
     DESTINATION "${CMAKE_INSTALL_PREFIX}"
     COMPONENT Runtime)
 endif()
+
+install(FILES "${PRESENTMON_SOURCE}/PresentMon.exe"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/runtime" COMPONENT Runtime)
+install(FILES "${PRESENTMON_SOURCE}/LICENSE.txt" "${PRESENTMON_SOURCE}/NOTICE.md"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/runtime/presentmon" COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)

@@ -129,8 +129,12 @@ class ComponentSizeStage extends StatelessWidget {
       return SizedBox(
         width: frameWidth,
         height: frameHeight,
-        child: Align(
+        child: OverflowBox(
           alignment: alignment,
+          minWidth: designWidth,
+          maxWidth: designWidth,
+          minHeight: designHeight,
+          maxHeight: designHeight,
           child: Transform.scale(
             scale: frameScale,
             alignment: alignment,
@@ -139,6 +143,7 @@ class ComponentSizeStage extends StatelessWidget {
               height: designHeight,
               child: DecoratedBox(
                 decoration: decoration,
+                position: DecorationPosition.foreground,
                 child: ClipRRect(
                   borderRadius: decoration.borderRadius ?? BorderRadius.zero,
                   child: Stack(
@@ -170,7 +175,7 @@ class ComponentSizeStage extends StatelessWidget {
       curve: frameAnimationCurve,
       width: frameWidth,
       height: frameHeight,
-      decoration: decoration,
+      foregroundDecoration: decoration,
       child: ClipRRect(
         borderRadius: decoration.borderRadius ?? BorderRadius.zero,
         child: Stack(

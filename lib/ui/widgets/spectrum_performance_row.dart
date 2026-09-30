@@ -10,12 +10,14 @@ class SpectrumPerformanceRow extends StatefulWidget {
   final SpectrumMode spectrumMode;
   final bool isPlaying;
   final bool showPerformance;
+  final bool isVertical;
 
   const SpectrumPerformanceRow({
     super.key,
     required this.spectrumMode,
     required this.isPlaying,
     required this.showPerformance,
+    this.isVertical = false,
   });
 
   @override
@@ -127,7 +129,9 @@ class _SpectrumPerformanceRowState extends State<SpectrumPerformanceRow>
                     top: 0,
                     bottom: 0,
                     width: spectrumVisible ? halfWidth : width,
-                    child: const PerformanceMonitorPanel(),
+                    child: PerformanceMonitorPanel(
+                      isVertical: widget.isVertical,
+                    ),
                   ),
               ],
             );

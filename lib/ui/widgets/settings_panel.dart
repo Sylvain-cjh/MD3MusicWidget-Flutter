@@ -5,20 +5,23 @@ import 'package:file_picker/file_picker.dart';
 import '../../core/app_state.dart';
 import '../../core/media_provider.dart';
 import '../../core/music_source_service.dart';
+import '../../core/system_performance_provider.dart';
 import '../../core/qq_music_playlist_queue_provider.dart';
 import 'md3_anchored_select.dart';
 import 'settings_descriptions.dart';
+import 'settings_labels.dart';
 import 'settings_section_navigation.dart';
+import 'settings_scroll_viewport.dart';
 
 enum _SettingsSection { window, appearance, playback, lyrics, typography }
 
 extension on _SettingsSection {
   String get label => switch (this) {
-    _SettingsSection.window => '窗口',
-    _SettingsSection.appearance => '外观',
-    _SettingsSection.playback => '播放',
-    _SettingsSection.lyrics => '歌词',
-    _SettingsSection.typography => '字体',
+    _SettingsSection.window => SettingsLabels.windowTab,
+    _SettingsSection.appearance => SettingsLabels.appearanceTab,
+    _SettingsSection.playback => SettingsLabels.playbackTab,
+    _SettingsSection.lyrics => SettingsLabels.lyricsTab,
+    _SettingsSection.typography => SettingsLabels.typographyTab,
   };
 
   IconData get icon => switch (this) {
@@ -67,6 +70,50 @@ class _SettingsPanelState extends State<SettingsPanel>
   String? _sourceError;
   int _sourceRequestSerial = 0;
   Timer? _typographySaveTimer;
+  Timer? _rightArtworkSaveTimer;
+  List<PerformanceProcess> _performanceProcesses = const [];
+  bool _performanceProcessesLoading = false;
+
+  Future<void> _refreshPerformanceProcesses() async {
+    if (_performanceProcessesLoading) return;
+    setState(() => _performanceProcessesLoading = true);
+    final processes = await SystemPerformanceProvider.processes();
+    if (!mounted) return;
+    setState(() {
+      _performanceProcesses = processes;
+      _performanceProcessesLoading = false;
+    });
+  }
+
+  List<DropdownMenuEntry<String>> _performanceProcessEntries() {
+    final selected = AppState.performanceProcessExecutable;
+    return [
+      const DropdownMenuEntry(
+        value: '',
+        label: SettingsLabels.performanceProcessNone,
+      ),
+      if (selected.isNotEmpty &&
+          !_performanceProcesses.any(
+            (entry) => entry.executable.toLowerCase() == selected.toLowerCase(),
+          ))
+        DropdownMenuEntry(value: selected, label: '$selected · 未运行'),
+      for (final entry in _performanceProcesses)
+        DropdownMenuEntry(
+          value: entry.executable.toLowerCase() == selected.toLowerCase()
+              ? selected
+              : entry.executable,
+          label: entry.executable,
+        ),
+    ];
+  }
+
+  Future<void> _restartMonitorElevated() async {
+    await AppState.saveSettings();
+    await AppState.flushSettings();
+    if (await SystemPerformanceProvider.restartElevated()) {
+      await AppState.exitApp();
+    }
+  }
 
   void _updateTypography(VoidCallback change) {
     setState(change);
@@ -81,6 +128,22 @@ class _SettingsPanelState extends State<SettingsPanel>
   void _finishTypographyChange() {
     _typographySaveTimer?.cancel();
     _typographySaveTimer = null;
+    unawaited(AppState.saveSettings());
+  }
+
+  void _updateRightArtwork(VoidCallback change) {
+    setState(change);
+    AppState.notifyRightArtworkChanged();
+    _rightArtworkSaveTimer?.cancel();
+    _rightArtworkSaveTimer = Timer(
+      const Duration(milliseconds: 450),
+      () => unawaited(AppState.saveSettings()),
+    );
+  }
+
+  void _finishRightArtworkChange() {
+    _rightArtworkSaveTimer?.cancel();
+    _rightArtworkSaveTimer = null;
     unawaited(AppState.saveSettings());
   }
 
@@ -172,7 +235,7 @@ class _SettingsPanelState extends State<SettingsPanel>
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, updateDialog) => AlertDialog(
-          title: const Text('QQ 音乐歌单'),
+          title: const Text(SettingsLabels.qqPlaylist),
           content: SizedBox(
             width: 340,
             child: Column(
@@ -186,7 +249,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                   autofocus: true,
                   keyboardType: TextInputType.url,
                   decoration: InputDecoration(
-                    labelText: '歌单链接或 ID',
+                    labelText: SettingsLabels.qqPlaylistLink,
                     hintText: 'https://y.qq.com/n/ryqq/playlist/…',
                     errorText: error,
                     border: const OutlineInputBorder(),
@@ -254,7 +317,7 @@ class _SettingsPanelState extends State<SettingsPanel>
   List<DropdownMenuEntry<String>> _sourceEntries() {
     final selected = AppState.selectedSourceAppId;
     return [
-      const DropdownMenuEntry(value: '', label: '自动 · 系统当前播放器'),
+      const DropdownMenuEntry(value: '', label: SettingsLabels.sourceAutomatic),
       if (selected.isNotEmpty &&
           !_sources.any(
             (source) => source.id.toLowerCase() == selected.toLowerCase(),
@@ -273,6 +336,7 @@ class _SettingsPanelState extends State<SettingsPanel>
     _sourceRequestSerial++;
     _sectionEntryController.dispose();
     if (_typographySaveTimer?.isActive == true) _finishTypographyChange();
+    if (_rightArtworkSaveTimer?.isActive == true) _finishRightArtworkChange();
     AppState.playbackRevision.removeListener(_handleTimelineAvailability);
     AppState.fontsRevision.removeListener(_handleFontsChanged);
     super.dispose();
@@ -292,6 +356,9 @@ class _SettingsPanelState extends State<SettingsPanel>
       _sectionEntryController.forward(from: 0);
     }
     if (section == _SettingsSection.playback) unawaited(_refreshSources());
+    if (section == _SettingsSection.appearance) {
+      unawaited(_refreshPerformanceProcesses());
+    }
   }
 
   Widget _buildSectionNavigation() {
@@ -367,7 +434,7 @@ class _SettingsPanelState extends State<SettingsPanel>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "偏好设置",
+                  SettingsLabels.heading,
                   style: textTheme.headlineSmall?.copyWith(
                     color: headingColor,
                     shadows: headingShadows,
@@ -391,801 +458,1013 @@ class _SettingsPanelState extends State<SettingsPanel>
           _buildSectionNavigation(),
           const SizedBox(height: 12),
           Expanded(
-            child: ScrollConfiguration(
+            child: SettingsScrollViewport(
               key: ValueKey(_selectedSection),
-              behavior: ScrollConfiguration.of(
-                context,
-              ).copyWith(scrollbars: false),
-              child: ListView(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.only(bottom: 40, right: 8),
-                children: [
-                  if (_selectedSection == _SettingsSection.window)
-                    _buildCategoryCard(
-                      title: "窗口与布局",
-                      icon: Icons.dashboard_customize_rounded,
-                      children: [
-                        _buildSegmentedRow(
-                          "布局形态",
-                          null,
-                          [
-                            const ButtonSegment(
-                              value: WidgetLayout.horizontal,
-                              icon: Icon(Icons.view_stream_rounded),
-                              label: Text("横版"),
-                            ),
-                            const ButtonSegment(
-                              value: WidgetLayout.vertical,
-                              icon: Icon(Icons.view_carousel_rounded),
-                              label: Text("竖版"),
-                            ),
-                          ],
-                          AppState.widgetLayout,
-                          (val) {
-                            setState(() => AppState.widgetLayout = val);
-                            widget.onLayoutChanged();
-                          },
-                        ),
-                        _buildDivider(),
-                        _buildDropdownRow<ComponentSizeMode>(
-                          "组件大小",
-                          AppState.isCustomComponentSize
-                              ? SettingsDescriptions.customComponentSize(
-                                  (AppState.customComponentScale * 100).round(),
-                                )
-                              : SettingsDescriptions.componentSize,
-                          AppState.componentSizeMode,
-                          (val) {
-                            if (val == ComponentSizeMode.custom &&
-                                !AppState.isCustomComponentSize) {
-                              AppState.customComponentScale =
-                                  AppState.componentScale;
-                            }
-                            setState(() => AppState.componentSizeMode = val);
-                            widget.onLayoutChanged();
-                          },
-                          _componentSizeEntries(),
-                        ),
-                        _buildDivider(),
-                        _buildSwitchRow(
-                          "总在最前",
-                          SettingsDescriptions.alwaysOnTop,
-                          AppState.isAlwaysOnTop,
-                          (val) {
-                            setState(() => AppState.isAlwaysOnTop = val);
-                            widget.onWindowBehaviorChanged();
-                          },
-                        ),
-                        if (widget.isMousePassthroughAvailable) ...[
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(
+                  context,
+                ).copyWith(scrollbars: false),
+                child: ListView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.only(bottom: 40, right: 8),
+                  children: [
+                    if (_selectedSection == _SettingsSection.window)
+                      _buildCategoryCard(
+                        title: SettingsLabels.windowGroup,
+                        icon: Icons.dashboard_customize_rounded,
+                        children: [
+                          _buildSegmentedRow(
+                            SettingsLabels.layout,
+                            null,
+                            [
+                              const ButtonSegment(
+                                value: WidgetLayout.horizontal,
+                                icon: Icon(Icons.view_stream_rounded),
+                                label: Text(SettingsLabels.horizontal),
+                              ),
+                              const ButtonSegment(
+                                value: WidgetLayout.vertical,
+                                icon: Icon(Icons.view_carousel_rounded),
+                                label: Text(SettingsLabels.vertical),
+                              ),
+                            ],
+                            AppState.widgetLayout,
+                            (val) {
+                              setState(() => AppState.widgetLayout = val);
+                              widget.onLayoutChanged();
+                            },
+                          ),
+                          _buildDivider(),
+                          _buildDropdownRow<ComponentSizeMode>(
+                            SettingsLabels.componentSize,
+                            AppState.isCustomComponentSize
+                                ? SettingsDescriptions.customComponentSize(
+                                    (AppState.customComponentScale * 100)
+                                        .round(),
+                                  )
+                                : SettingsDescriptions.componentSize,
+                            AppState.componentSizeMode,
+                            (val) {
+                              if (val == ComponentSizeMode.custom &&
+                                  !AppState.isCustomComponentSize) {
+                                AppState.customComponentScale =
+                                    AppState.componentScale;
+                              }
+                              setState(() => AppState.componentSizeMode = val);
+                              widget.onLayoutChanged();
+                            },
+                            _componentSizeEntries(),
+                          ),
                           _buildDivider(),
                           _buildSwitchRow(
-                            "鼠标穿透",
-                            SettingsDescriptions.mousePassthrough,
-                            AppState.isMousePassthrough,
+                            SettingsLabels.alwaysOnTop,
+                            SettingsDescriptions.alwaysOnTop,
+                            AppState.isAlwaysOnTop,
                             (val) {
-                              setState(() => AppState.isMousePassthrough = val);
+                              setState(() => AppState.isAlwaysOnTop = val);
                               widget.onWindowBehaviorChanged();
                             },
                           ),
+                          if (widget.isMousePassthroughAvailable) ...[
+                            _buildDivider(),
+                            _buildSwitchRow(
+                              SettingsLabels.mousePassthrough,
+                              SettingsDescriptions.mousePassthrough,
+                              AppState.isMousePassthrough,
+                              (val) {
+                                setState(
+                                  () => AppState.isMousePassthrough = val,
+                                );
+                                widget.onWindowBehaviorChanged();
+                              },
+                            ),
+                          ],
                         ],
-                      ],
-                    ),
+                      ),
 
-                  if (_selectedSection == _SettingsSection.appearance)
-                    _buildCategoryCard(
-                      title: "主题与颜色",
-                      icon: Icons.palette_rounded,
-                      children: [
-                        _buildSegmentedRow(
-                          "色彩主题",
-                          SettingsDescriptions.colorTheme,
-                          [
-                            const ButtonSegment(
-                              value: DynamicSchemeVariant.tonalSpot,
-                              label: Text("柔和"),
-                            ),
-                            const ButtonSegment(
-                              value: DynamicSchemeVariant.vibrant,
-                              label: Text("艳丽"),
-                            ),
-                            const ButtonSegment(
-                              value: DynamicSchemeVariant.fidelity,
-                              label: Text("真实"),
-                            ),
-                          ],
-                          AppState.themeVariant,
-                          (val) {
-                            setState(() => AppState.themeVariant = val);
-                            widget.onThemeChanged();
-                          },
-                        ),
-                        _buildDivider(),
-                        _buildSwitchRow(
-                          "深色模式",
-                          null,
-                          AppState.themeBrightness == Brightness.dark,
-                          (val) {
-                            setState(
-                              () => AppState.themeBrightness = val
-                                  ? Brightness.dark
-                                  : Brightness.light,
-                            );
-                            widget.onThemeChanged();
-                          },
-                        ),
-                        _buildDivider(),
-                        _buildDropdownRow<MD3Shape>(
-                          '设置导航形状',
-                          SettingsDescriptions.settingsNavigationShape,
-                          AppState.settingsNavigationShape,
-                          (value) {
-                            setState(
-                              () => AppState.settingsNavigationShape = value,
-                            );
-                            widget.onVisualChanged();
-                          },
-                          const [
-                            DropdownMenuEntry(
-                              value: MD3Shape.stadium,
-                              label: '胶囊形',
-                            ),
-                            DropdownMenuEntry(
-                              value: MD3Shape.roundedExtraSmall,
-                              label: '极小圆角 · 4',
-                            ),
-                            DropdownMenuEntry(
-                              value: MD3Shape.roundedSmall,
-                              label: '小圆角 · 8',
-                            ),
-                            DropdownMenuEntry(
-                              value: MD3Shape.roundedMedium,
-                              label: '中圆角 · 12',
-                            ),
-                            DropdownMenuEntry(
-                              value: MD3Shape.roundedLarge,
-                              label: '大圆角 · 20',
-                            ),
-                            DropdownMenuEntry(
-                              value: MD3Shape.roundedExtraLarge,
-                              label: '超大圆角 · 28',
-                            ),
-                          ],
-                        ),
-                        _buildOptionalSetting(
-                          visible:
-                              AppState.themeBrightness == Brightness.dark &&
-                              !AppState.enableGlow,
-                          child: Column(
-                            children: [
-                              _buildDivider(),
-                              _buildSwitchRow(
-                                "纯黑底色 (OLED)",
-                                SettingsDescriptions.oled,
-                                AppState.enableOledTheme,
-                                (val) {
-                                  setState(
-                                    () => AppState.enableOledTheme = val,
-                                  );
-                                  widget.onBackgroundChanged();
-                                },
+                    if (_selectedSection == _SettingsSection.appearance)
+                      _buildCategoryCard(
+                        title: SettingsLabels.themeGroup,
+                        icon: Icons.palette_rounded,
+                        children: [
+                          _buildSegmentedRow(
+                            SettingsLabels.colorTheme,
+                            SettingsDescriptions.colorTheme,
+                            [
+                              const ButtonSegment(
+                                value: DynamicSchemeVariant.tonalSpot,
+                                label: Text(SettingsLabels.themeSoft),
+                              ),
+                              const ButtonSegment(
+                                value: DynamicSchemeVariant.vibrant,
+                                label: Text(SettingsLabels.themeVibrant),
+                              ),
+                              const ButtonSegment(
+                                value: DynamicSchemeVariant.fidelity,
+                                label: Text(SettingsLabels.themeFidelity),
                               ),
                             ],
+                            AppState.themeVariant,
+                            (val) {
+                              setState(() => AppState.themeVariant = val);
+                              widget.onThemeChanged();
+                            },
                           ),
-                        ),
-                      ],
-                    ),
-
-                  if (_selectedSection == _SettingsSection.appearance)
-                    _buildCategoryCard(
-                      title: "背景与交互",
-                      icon: Icons.animation_rounded,
-                      children: [
-                        _buildSwitchRow(
-                          "流光背景",
-                          SettingsDescriptions.glow,
-                          AppState.enableGlow,
-                          (val) {
-                            setState(() => AppState.enableGlow = val);
-                            widget.onBackgroundChanged();
-                          },
-                        ),
-                        _buildOptionalSetting(
-                          visible: AppState.enableGlow,
-                          child: Column(
-                            children: [
-                              _buildDivider(),
-                              _buildSegmentedRow(
-                                "背景渲染模式",
-                                SettingsDescriptions.glowMode,
-                                [
-                                  const ButtonSegment(
-                                    value: GlowMode.waterfall,
-                                    label: Text("瀑布"),
-                                  ),
-                                  const ButtonSegment(
-                                    value: GlowMode.wallpaper,
-                                    label: Text("全屏"),
-                                  ),
-                                ],
-                                AppState.glowMode,
-                                (val) {
-                                  setState(() => AppState.glowMode = val);
-                                  widget.onBackgroundChanged();
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                        _buildDivider(),
-                        _buildSwitchRow(
-                          "3D 悬浮交互",
-                          SettingsDescriptions.coverParallax,
-                          AppState.enable3DCover,
-                          (val) {
-                            setState(() => AppState.enable3DCover = val);
-                            widget.onVisualChanged();
-                          },
-                        ),
-                        if (_hasTimeline) _buildDivider(),
-                        if (_hasTimeline)
+                          _buildDivider(),
                           _buildSwitchRow(
-                            "进度自动反色",
-                            SettingsDescriptions.progressAutoContrast,
-                            AppState.enableProgressAutoContrast,
+                            SettingsLabels.darkMode,
+                            null,
+                            AppState.themeBrightness == Brightness.dark,
                             (val) {
                               setState(
-                                () => AppState.enableProgressAutoContrast = val,
+                                () => AppState.themeBrightness = val
+                                    ? Brightness.dark
+                                    : Brightness.light,
+                              );
+                              widget.onThemeChanged();
+                            },
+                          ),
+                          _buildDivider(),
+                          _buildDropdownRow<MD3Shape>(
+                            SettingsLabels.settingsNavigationShape,
+                            SettingsDescriptions.settingsNavigationShape,
+                            AppState.settingsNavigationShape,
+                            (value) {
+                              setState(
+                                () => AppState.settingsNavigationShape = value,
                               );
                               widget.onVisualChanged();
                             },
+                            const [
+                              DropdownMenuEntry(
+                                value: MD3Shape.stadium,
+                                label: SettingsLabels.shapeStadium,
+                              ),
+                              DropdownMenuEntry(
+                                value: MD3Shape.roundedExtraSmall,
+                                label: SettingsLabels.shapeExtraSmall,
+                              ),
+                              DropdownMenuEntry(
+                                value: MD3Shape.roundedSmall,
+                                label: SettingsLabels.shapeSmall,
+                              ),
+                              DropdownMenuEntry(
+                                value: MD3Shape.roundedMedium,
+                                label: SettingsLabels.shapeMedium,
+                              ),
+                              DropdownMenuEntry(
+                                value: MD3Shape.roundedLarge,
+                                label: SettingsLabels.shapeLarge,
+                              ),
+                              DropdownMenuEntry(
+                                value: MD3Shape.roundedExtraLarge,
+                                label: SettingsLabels.shapeExtraLarge,
+                              ),
+                            ],
                           ),
-                        if (MediaCapability.supports(
-                          AppState.mediaCapabilities,
-                          MediaCapability.spectrum,
-                        ))
-                          _buildDivider(),
-                        if (MediaCapability.supports(
-                          AppState.mediaCapabilities,
-                          MediaCapability.spectrum,
-                        ))
-                          _buildDropdownRow<SpectrumMode>(
-                            "音乐频谱",
-                            SettingsDescriptions.spectrum,
-                            AppState.spectrumMode,
+                          _buildOptionalSetting(
+                            visible:
+                                AppState.themeBrightness == Brightness.dark &&
+                                !AppState.enableGlow,
+                            child: Column(
+                              children: [
+                                _buildDivider(),
+                                _buildSwitchRow(
+                                  SettingsLabels.oled,
+                                  SettingsDescriptions.oled,
+                                  AppState.enableOledTheme,
+                                  (val) {
+                                    setState(
+                                      () => AppState.enableOledTheme = val,
+                                    );
+                                    widget.onBackgroundChanged();
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+
+                    if (_selectedSection == _SettingsSection.appearance)
+                      _buildCategoryCard(
+                        title: SettingsLabels.backgroundGroup,
+                        icon: Icons.animation_rounded,
+                        children: [
+                          _buildSwitchRow(
+                            SettingsLabels.glow,
+                            SettingsDescriptions.glow,
+                            AppState.enableGlow,
                             (val) {
-                              final bool visibilityChanged =
-                                  (AppState.spectrumMode == SpectrumMode.off) !=
-                                  (val == SpectrumMode.off);
-                              setState(() => AppState.spectrumMode = val);
-                              if (visibilityChanged) {
+                              setState(() => AppState.enableGlow = val);
+                              widget.onBackgroundChanged();
+                            },
+                          ),
+                          _buildOptionalSetting(
+                            visible: AppState.enableGlow,
+                            child: Column(
+                              children: [
+                                _buildDivider(),
+                                _buildSegmentedRow(
+                                  SettingsLabels.glowMode,
+                                  SettingsDescriptions.glowMode,
+                                  [
+                                    const ButtonSegment(
+                                      value: GlowMode.waterfall,
+                                      label: Text(SettingsLabels.glowWaterfall),
+                                    ),
+                                    const ButtonSegment(
+                                      value: GlowMode.wallpaper,
+                                      label: Text(SettingsLabels.glowWallpaper),
+                                    ),
+                                  ],
+                                  AppState.glowMode,
+                                  (val) {
+                                    setState(() => AppState.glowMode = val);
+                                    widget.onBackgroundChanged();
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                          _buildDivider(),
+                          _buildSwitchRow(
+                            SettingsLabels.coverParallax,
+                            SettingsDescriptions.coverParallax,
+                            AppState.enable3DCover,
+                            (val) {
+                              setState(() => AppState.enable3DCover = val);
+                              widget.onVisualChanged();
+                            },
+                          ),
+                          if (_hasTimeline) _buildDivider(),
+                          if (_hasTimeline)
+                            _buildSwitchRow(
+                              SettingsLabels.progressAutoContrast,
+                              SettingsDescriptions.progressAutoContrast,
+                              AppState.enableProgressAutoContrast,
+                              (val) {
+                                setState(
+                                  () =>
+                                      AppState.enableProgressAutoContrast = val,
+                                );
+                                widget.onVisualChanged();
+                              },
+                            ),
+                          if (MediaCapability.supports(
+                            AppState.mediaCapabilities,
+                            MediaCapability.spectrum,
+                          ))
+                            _buildDivider(),
+                          if (MediaCapability.supports(
+                            AppState.mediaCapabilities,
+                            MediaCapability.spectrum,
+                          ))
+                            _buildDropdownRow<SpectrumMode>(
+                              SettingsLabels.spectrum,
+                              SettingsDescriptions.spectrum,
+                              AppState.spectrumMode,
+                              (val) {
+                                final bool visibilityChanged =
+                                    (AppState.spectrumMode ==
+                                        SpectrumMode.off) !=
+                                    (val == SpectrumMode.off);
+                                setState(() => AppState.spectrumMode = val);
+                                if (visibilityChanged) {
+                                  widget.onLayoutChanged();
+                                } else {
+                                  widget.onVisualChanged();
+                                }
+                              },
+                              _spectrumEntries(),
+                            ),
+                        ],
+                      ),
+
+                    if (_selectedSection == _SettingsSection.appearance &&
+                        !AppState.isVertical)
+                      _buildCategoryCard(
+                        title: SettingsLabels.rightCoverGroup,
+                        icon: Icons.gradient_rounded,
+                        children: [
+                          _buildContinuousSliderRow(
+                            title: SettingsLabels.rightCoverDarkening,
+                            subtitle: SettingsDescriptions.rightCoverDarkening,
+                            value: AppState.rightCoverDarkening,
+                            min: 0,
+                            max: 0.85,
+                            resetValue: AppState.defaultRightCoverDarkening,
+                            valueLabel: (value) => '${(value * 100).round()}%',
+                            sliderKey: const ValueKey(
+                              'right_cover_darkening_slider',
+                            ),
+                            onChanged: (value) => _updateRightArtwork(
+                              () => AppState.rightCoverDarkening = value,
+                            ),
+                            onChangeEnd: _finishRightArtworkChange,
+                          ),
+                          _buildContinuousSliderRow(
+                            title: SettingsLabels.rightCoverFadeLength,
+                            subtitle: SettingsDescriptions.rightCoverFadeLength,
+                            value: AppState.rightCoverFadeLength,
+                            min: 0.15,
+                            max: 1,
+                            resetValue: AppState.defaultRightCoverFadeLength,
+                            valueLabel: (value) => '${(value * 100).round()}%',
+                            sliderKey: const ValueKey(
+                              'right_cover_fade_slider',
+                            ),
+                            onChanged: (value) => _updateRightArtwork(
+                              () => AppState.rightCoverFadeLength = value,
+                            ),
+                            onChangeEnd: _finishRightArtworkChange,
+                          ),
+                          _buildContinuousSliderRow(
+                            title: SettingsLabels.rightCoverBlur,
+                            subtitle: SettingsDescriptions.rightCoverBlur,
+                            value: AppState.rightCoverBlur,
+                            min: 0,
+                            max: 6,
+                            resetValue: AppState.defaultRightCoverBlur,
+                            valueLabel: (value) => value.toStringAsFixed(1),
+                            sliderKey: const ValueKey(
+                              'right_cover_blur_slider',
+                            ),
+                            onChanged: (value) => _updateRightArtwork(
+                              () => AppState.rightCoverBlur = value,
+                            ),
+                            onChangeEnd: _finishRightArtworkChange,
+                          ),
+                        ],
+                      ),
+                    if (_selectedSection == _SettingsSection.appearance)
+                      _buildCategoryCard(
+                        title: SettingsLabels.performanceGroup,
+                        icon: Icons.speed_rounded,
+                        children: [
+                          _buildSwitchRow(
+                            SettingsLabels.performanceMonitor,
+                            SettingsDescriptions.performanceMonitor,
+                            AppState.showPerformanceMonitor,
+                            (value) {
+                              setState(
+                                () => AppState.showPerformanceMonitor = value,
+                              );
+                              if (value) {
+                                unawaited(_refreshPerformanceProcesses());
+                              }
+                              if (AppState.spectrumMode == SpectrumMode.off) {
                                 widget.onLayoutChanged();
                               } else {
                                 widget.onVisualChanged();
                               }
                             },
-                            _spectrumEntries(),
                           ),
-                      ],
-                    ),
-
-                  if (_selectedSection == _SettingsSection.appearance)
-                    _buildCategoryCard(
-                      title: "性能与诊断",
-                      icon: Icons.speed_rounded,
-                      children: [
-                        _buildSwitchRow(
-                          "显示性能监视器",
-                          SettingsDescriptions.performanceMonitor,
-                          AppState.showPerformanceMonitor,
-                          (value) {
-                            setState(
-                              () => AppState.showPerformanceMonitor = value,
-                            );
-                            if (AppState.spectrumMode == SpectrumMode.off) {
-                              widget.onLayoutChanged();
-                            } else {
-                              widget.onVisualChanged();
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-
-                  if (_selectedSection == _SettingsSection.playback)
-                    _buildCategoryCard(
-                      title: "播放显示与控件",
-                      icon: Icons.widgets_rounded,
-                      children: [
-                        _buildDropdownRow<String>(
-                          '采集程序',
-                          _sourceError ??
-                              (AppState.selectedSourceAppId.isEmpty
-                                  ? SettingsDescriptions.sourceAutomatic
-                                  : SettingsDescriptions.sourceSelected),
-                          AppState.selectedSourceAppId,
-                          (id) => unawaited(_selectSource(id)),
-                          _sourceEntries(),
-                          fullWidth: true,
-                          actionButton: IconButton(
-                            tooltip: '刷新播放程序列表',
-                            onPressed: _sourcesLoading ? null : _refreshSources,
-                            icon: _sourcesLoading
-                                ? const SizedBox.square(
-                                    dimension: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.refresh_rounded),
+                          _buildOptionalSetting(
+                            visible: AppState.showPerformanceMonitor,
+                            child: Column(
+                              children: [
+                                _buildDivider(),
+                                ValueListenableBuilder<String>(
+                                  valueListenable:
+                                      SystemPerformanceProvider.fpsStatus,
+                                  builder: (context, status, _) => Column(
+                                    children: [
+                                      _buildDropdownRow<String>(
+                                        SettingsLabels.performanceProcess,
+                                        SettingsDescriptions.performanceFpsStatus(
+                                          status,
+                                        ),
+                                        AppState.performanceProcessExecutable,
+                                        (value) {
+                                          setState(
+                                            () =>
+                                                AppState.performanceProcessExecutable =
+                                                    value,
+                                          );
+                                          AppState.notifyPerformanceChanged();
+                                          unawaited(AppState.saveSettings());
+                                        },
+                                        _performanceProcessEntries(),
+                                        fullWidth: true,
+                                        actionButton: IconButton(
+                                          tooltip: '刷新程序列表',
+                                          onPressed:
+                                              _performanceProcessesLoading
+                                              ? null
+                                              : _refreshPerformanceProcesses,
+                                          icon: const Icon(
+                                            Icons.refresh_rounded,
+                                          ),
+                                        ),
+                                      ),
+                                      if (status == 'permissionDenied')
+                                        TextButton.icon(
+                                          onPressed: _restartMonitorElevated,
+                                          icon: const Icon(
+                                            Icons.admin_panel_settings_outlined,
+                                          ),
+                                          label: const Text(
+                                            SettingsLabels.performanceAuthorize,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        _buildDivider(),
-                        _buildSwitchRow(
-                          "显示播放控制",
-                          SettingsDescriptions.playbackControls,
-                          AppState.showPlaybackControls,
-                          (val) {
-                            setState(() => AppState.showPlaybackControls = val);
-                            widget.onLayoutChanged();
-                          },
-                        ),
-                        _buildDivider(),
-                        if (MediaCapability.supports(
-                          AppState.mediaCapabilities,
-                          MediaCapability.timeline,
-                        ))
-                          _buildDropdownRow<MD3ProgressStyle>(
-                            "进度条样式",
-                            null,
-                            AppState.progressStyle,
-                            (val) {
-                              setState(() => AppState.progressStyle = val);
+                        ],
+                      ),
+
+                    if (_selectedSection == _SettingsSection.playback)
+                      _buildCategoryCard(
+                        title: SettingsLabels.playbackGroup,
+                        icon: Icons.widgets_rounded,
+                        children: [
+                          _buildDropdownRow<String>(
+                            SettingsLabels.sourceApp,
+                            _sourceError ??
+                                (AppState.selectedSourceAppId.isEmpty
+                                    ? SettingsDescriptions.sourceAutomatic
+                                    : SettingsDescriptions.sourceSelected),
+                            AppState.selectedSourceAppId,
+                            (id) => unawaited(_selectSource(id)),
+                            _sourceEntries(),
+                            fullWidth: true,
+                            actionButton: IconButton(
+                              tooltip: '刷新播放程序列表',
+                              onPressed: _sourcesLoading
+                                  ? null
+                                  : _refreshSources,
+                              icon: _sourcesLoading
+                                  ? const SizedBox.square(
+                                      dimension: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.refresh_rounded),
+                            ),
+                          ),
+                          _buildDivider(),
+                          _buildSwitchRow(
+                            SettingsLabels.trackTextAnimations,
+                            SettingsDescriptions.trackTextAnimations,
+                            AppState.trackTextAnimationsEnabled,
+                            (value) {
+                              setState(
+                                () =>
+                                    AppState.trackTextAnimationsEnabled = value,
+                              );
                               widget.onVisualChanged();
                             },
-                            _progressStyleEntries(),
                           ),
-                        if (MediaCapability.supports(
-                          AppState.mediaCapabilities,
-                          MediaCapability.timeline,
-                        ))
-                          _buildDivider(),
-                        _buildOptionalSetting(
-                          visible: AppState.showPlaybackControls,
-                          child: Column(
-                            children: [
-                              _buildDropdownRow<MD3Shape>(
-                                "播放按钮",
-                                null,
-                                AppState.playButtonShape,
-                                (val) {
-                                  setState(
-                                    () => AppState.playButtonShape = val,
-                                  );
-                                  widget.onVisualChanged();
-                                },
-                                _shapeEntries(),
-                              ),
-                              _buildDivider(),
-                              _buildDropdownRow<MD3Shape>(
-                                "上一首按钮",
-                                null,
-                                AppState.prevButtonShape,
-                                (val) {
-                                  setState(
-                                    () => AppState.prevButtonShape = val,
-                                  );
-                                  widget.onVisualChanged();
-                                },
-                                _shapeEntries(),
-                              ),
-                              _buildDivider(),
-                              _buildDropdownRow<MD3Shape>(
-                                "下一首按钮",
-                                null,
-                                AppState.nextButtonShape,
-                                (val) {
-                                  setState(
-                                    () => AppState.nextButtonShape = val,
-                                  );
-                                  widget.onVisualChanged();
-                                },
-                                _shapeEntries(),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-
-                  if (_selectedSection == _SettingsSection.playback)
-                    _buildCategoryCard(
-                      title: '下一首预告',
-                      icon: Icons.queue_music_rounded,
-                      children: [
-                        _buildSwitchRow(
-                          '显示下一首预告',
-                          SettingsDescriptions.showPlaylist,
-                          AppState.showNextUp,
-                          (value) {
-                            setState(() => AppState.showNextUp = value);
-                            AppState.refreshQueue(force: true);
-                            widget.onLayoutChanged();
-                          },
-                        ),
-                        _buildOptionalSetting(
-                          visible: AppState.showNextUp,
-                          child: Column(
-                            children: [
-                              _buildDivider(),
-                              _buildPlaylistFileRow(),
-                              _buildDivider(),
-                              _buildQqPlaylistRow(),
-                              _buildDivider(),
-                              _buildDropdownRow<int>(
-                                '预告提前量',
-                                SettingsDescriptions.nextUpLead,
-                                AppState.nextUpLeadSeconds,
-                                (value) {
-                                  setState(
-                                    () => AppState.nextUpLeadSeconds = value,
-                                  );
-                                  AppState.playbackRevision.value++;
-                                  widget.onVisualChanged();
-                                },
-                                const [
-                                  DropdownMenuEntry(value: 10, label: '10 秒'),
-                                  DropdownMenuEntry(value: 20, label: '20 秒'),
-                                  DropdownMenuEntry(value: 30, label: '30 秒'),
-                                  DropdownMenuEntry(value: 45, label: '45 秒'),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-
-                  if (_selectedSection == _SettingsSection.lyrics)
-                    _buildCategoryCard(
-                      title: '歌词',
-                      icon: Icons.lyrics_rounded,
-                      children: [
-                        _buildSwitchRow(
-                          '显示歌词',
-                          SettingsDescriptions.showLyrics,
-                          AppState.showLyrics,
-                          (value) {
-                            setState(() => AppState.showLyrics = value);
-                            AppState.refreshLyrics();
-                            widget.onLayoutChanged();
-                          },
-                        ),
-                        _buildOptionalSetting(
-                          visible: AppState.showLyrics,
-                          child: Column(
-                            children: [
-                              _buildDivider(),
-                              _buildDropdownRow<LyricsProviderChoice>(
-                                '歌词提供商',
-                                switch (AppState.lyricsProviderChoice) {
-                                  LyricsProviderChoice.lrclib =>
-                                    SettingsDescriptions.lyricsProviderLrclib,
-                                  LyricsProviderChoice.localLrc =>
-                                    SettingsDescriptions.lyricsProviderLocal,
-                                  LyricsProviderChoice.qqMusic =>
-                                    SettingsDescriptions.lyricsProviderQqMusic,
-                                },
-                                AppState.lyricsProviderChoice,
-                                (value) {
-                                  setState(
-                                    () => AppState.lyricsProviderChoice = value,
-                                  );
-                                  AppState.refreshLyrics();
-                                  widget.onVisualChanged();
-                                },
-                                const [
-                                  DropdownMenuEntry(
-                                    value: LyricsProviderChoice.lrclib,
-                                    label: 'LRCLIB · 在线',
-                                  ),
-                                  DropdownMenuEntry(
-                                    value: LyricsProviderChoice.localLrc,
-                                    label: '本地 LRC',
-                                  ),
-                                  DropdownMenuEntry(
-                                    value: LyricsProviderChoice.qqMusic,
-                                    label: 'QQ 音乐 · 实验性',
-                                  ),
-                                ],
-                              ),
-                              _buildOptionalSetting(
-                                visible:
-                                    AppState.lyricsProviderChoice ==
-                                    LyricsProviderChoice.localLrc,
-                                child: Column(
-                                  children: [
-                                    _buildDivider(),
-                                    _buildLocalLyricsFolderRow(),
-                                  ],
+                          _buildOptionalSetting(
+                            visible: AppState.trackTextAnimationsEnabled,
+                            child: Column(
+                              children: [
+                                _buildDivider(),
+                                _buildDropdownRow<TrackTextTransitionStyle>(
+                                  SettingsLabels.trackTextTransition,
+                                  SettingsDescriptions.trackTextTransition,
+                                  AppState.trackTextTransitionStyle,
+                                  (value) {
+                                    setState(
+                                      () => AppState.trackTextTransitionStyle =
+                                          value,
+                                    );
+                                    widget.onVisualChanged();
+                                  },
+                                  _trackTextTransitionEntries(),
                                 ),
-                              ),
-                              _buildDivider(),
-                              _buildSwitchRow(
-                                '进出动画使用同一预设',
-                                SettingsDescriptions.lyricsLinkAnimations,
-                                AppState.lyricsAnimationsLinked,
-                                (value) {
-                                  setState(
-                                    () =>
-                                        AppState.lyricsAnimationsLinked = value,
-                                  );
-                                  AppState.notifyLyricsVisualChanged();
-                                  widget.onVisualChanged();
-                                },
-                              ),
-                              _buildDivider(),
-                              _buildDropdownRow<LyricsTransitionStyle>(
-                                AppState.lyricsAnimationsLinked
-                                    ? '歌词切换动画'
-                                    : '歌词进入动画',
-                                SettingsDescriptions.lyricsTransition,
-                                AppState.lyricsTransitionStyle,
-                                (value) {
-                                  setState(() {
-                                    AppState.lyricsTransitionStyle = value;
-                                    if (AppState.lyricsAnimationsLinked) {
-                                      AppState.lyricsExitTransitionStyle =
-                                          value;
-                                    }
-                                  });
-                                  AppState.notifyLyricsVisualChanged();
-                                  widget.onVisualChanged();
-                                },
-                                _lyricsTransitionEntries(),
-                              ),
-                              _buildOptionalSetting(
-                                visible: !AppState.lyricsAnimationsLinked,
-                                child: Column(
-                                  children: [
-                                    _buildDivider(),
-                                    _buildDropdownRow<LyricsTransitionStyle>(
-                                      '上一句退出动画',
-                                      SettingsDescriptions.lyricsExitTransition,
-                                      AppState.lyricsExitTransitionStyle,
-                                      (value) {
-                                        setState(
-                                          () =>
-                                              AppState.lyricsExitTransitionStyle =
-                                                  value,
-                                        );
-                                        AppState.notifyLyricsVisualChanged();
-                                        widget.onVisualChanged();
-                                      },
-                                      _lyricsTransitionEntries(exiting: true),
-                                    ),
-                                  ],
+                                _buildDivider(),
+                                _buildSwitchRow(
+                                  SettingsLabels.trackTextAnimationsLinked,
+                                  SettingsDescriptions
+                                      .trackTextAnimationsLinked,
+                                  AppState.trackTextAnimationsLinked,
+                                  (value) {
+                                    setState(
+                                      () => AppState.trackTextAnimationsLinked =
+                                          value,
+                                    );
+                                    widget.onVisualChanged();
+                                  },
                                 ),
-                              ),
-                              _buildDivider(),
-                              _buildSwitchRow(
-                                '跟随主题字体',
-                                SettingsDescriptions.lyricsUseThemeFont,
-                                AppState.lyricsUseThemeFont,
-                                (value) {
-                                  _updateTypography(
-                                    () => AppState.lyricsUseThemeFont = value,
-                                  );
-                                },
-                                onReset: AppState.lyricsUseThemeFont
-                                    ? null
-                                    : () {
-                                        _updateTypography(
-                                          () => AppState.lyricsUseThemeFont =
-                                              true,
-                                        );
-                                        _finishTypographyChange();
-                                      },
-                              ),
-                              _buildOptionalSetting(
-                                visible: !AppState.lyricsUseThemeFont,
-                                child: _buildDropdownRow<String>(
-                                  '歌词字体',
-                                  null,
-                                  AppState.lyricsFontFamily,
-                                  (value) => _updateTypography(
-                                    () => AppState.lyricsFontFamily = value,
-                                  ),
-                                  AppState.loadedSystemFonts
-                                      .map(
-                                        (font) => DropdownMenuEntry<String>(
-                                          value: font,
-                                          label: font == 'System Default'
-                                              ? '系统默认'
-                                              : font,
-                                        ),
-                                      )
-                                      .toList(),
-                                  actionButton: IconButton(
-                                    tooltip: '导入歌词字体文件',
-                                    icon: const Icon(
-                                      Icons.add_circle_outline_rounded,
-                                    ),
-                                    onPressed: () async {
-                                      final success =
-                                          await AppState.importCustomFont(
-                                            forLyrics: true,
+                                _buildOptionalSetting(
+                                  visible: !AppState.trackTextAnimationsLinked,
+                                  child: Column(
+                                    children: [
+                                      _buildDivider(),
+                                      _buildDropdownRow<TrackTextExitStyle>(
+                                        SettingsLabels.trackTextExitTransition,
+                                        SettingsDescriptions
+                                            .trackTextExitTransition,
+                                        AppState.trackTextExitStyle,
+                                        (value) {
+                                          setState(
+                                            () => AppState.trackTextExitStyle =
+                                                value,
                                           );
-                                      if (!mounted || !success) return;
-                                      setState(() {});
-                                      AppState.notifyTypographyChanged();
-                                      widget.onVisualChanged();
-                                    },
+                                          widget.onVisualChanged();
+                                        },
+                                        _trackTextExitEntries(),
+                                      ),
+                                    ],
                                   ),
-                                  onReset:
-                                      AppState.lyricsFontFamily ==
-                                          AppState.defaultFontFamily
+                                ),
+                              ],
+                            ),
+                          ),
+                          _buildDivider(),
+                          _buildSwitchRow(
+                            SettingsLabels.playbackControls,
+                            SettingsDescriptions.playbackControls,
+                            AppState.showPlaybackControls,
+                            (val) {
+                              setState(
+                                () => AppState.showPlaybackControls = val,
+                              );
+                              widget.onLayoutChanged();
+                            },
+                          ),
+                          _buildDivider(),
+                          if (MediaCapability.supports(
+                            AppState.mediaCapabilities,
+                            MediaCapability.timeline,
+                          ))
+                            _buildDropdownRow<MD3ProgressStyle>(
+                              SettingsLabels.progressStyle,
+                              null,
+                              AppState.progressStyle,
+                              (val) {
+                                setState(() => AppState.progressStyle = val);
+                                widget.onVisualChanged();
+                              },
+                              _progressStyleEntries(),
+                            ),
+                          if (MediaCapability.supports(
+                            AppState.mediaCapabilities,
+                            MediaCapability.timeline,
+                          ))
+                            _buildDivider(),
+                          _buildOptionalSetting(
+                            visible: AppState.showPlaybackControls,
+                            child: Column(
+                              children: [
+                                _buildDropdownRow<MD3Shape>(
+                                  SettingsLabels.playButton,
+                                  null,
+                                  AppState.playButtonShape,
+                                  (val) {
+                                    setState(
+                                      () => AppState.playButtonShape = val,
+                                    );
+                                    widget.onVisualChanged();
+                                  },
+                                  _shapeEntries(),
+                                ),
+                                _buildDivider(),
+                                _buildDropdownRow<MD3Shape>(
+                                  SettingsLabels.previousButton,
+                                  null,
+                                  AppState.prevButtonShape,
+                                  (val) {
+                                    setState(
+                                      () => AppState.prevButtonShape = val,
+                                    );
+                                    widget.onVisualChanged();
+                                  },
+                                  _shapeEntries(),
+                                ),
+                                _buildDivider(),
+                                _buildDropdownRow<MD3Shape>(
+                                  SettingsLabels.nextButton,
+                                  null,
+                                  AppState.nextButtonShape,
+                                  (val) {
+                                    setState(
+                                      () => AppState.nextButtonShape = val,
+                                    );
+                                    widget.onVisualChanged();
+                                  },
+                                  _shapeEntries(),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+
+                    if (_selectedSection == _SettingsSection.playback)
+                      _buildCategoryCard(
+                        title: SettingsLabels.nextUpGroup,
+                        icon: Icons.queue_music_rounded,
+                        children: [
+                          _buildSwitchRow(
+                            SettingsLabels.showNextUp,
+                            SettingsDescriptions.showPlaylist,
+                            AppState.showNextUp,
+                            (value) {
+                              setState(() => AppState.showNextUp = value);
+                              AppState.refreshQueue(force: true);
+                              widget.onLayoutChanged();
+                            },
+                          ),
+                          _buildOptionalSetting(
+                            visible: AppState.showNextUp,
+                            child: Column(
+                              children: [
+                                _buildDivider(),
+                                _buildPlaylistFileRow(),
+                                _buildDivider(),
+                                _buildQqPlaylistRow(),
+                                _buildDivider(),
+                                _buildDropdownRow<int>(
+                                  SettingsLabels.nextUpLead,
+                                  SettingsDescriptions.nextUpLead,
+                                  AppState.nextUpLeadSeconds,
+                                  (value) {
+                                    setState(
+                                      () => AppState.nextUpLeadSeconds = value,
+                                    );
+                                    AppState.playbackRevision.value++;
+                                    widget.onVisualChanged();
+                                  },
+                                  const [
+                                    DropdownMenuEntry(
+                                      value: 10,
+                                      label: SettingsLabels.lead10Seconds,
+                                    ),
+                                    DropdownMenuEntry(
+                                      value: 20,
+                                      label: SettingsLabels.lead20Seconds,
+                                    ),
+                                    DropdownMenuEntry(
+                                      value: 30,
+                                      label: SettingsLabels.lead30Seconds,
+                                    ),
+                                    DropdownMenuEntry(
+                                      value: 45,
+                                      label: SettingsLabels.lead45Seconds,
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+
+                    if (_selectedSection == _SettingsSection.lyrics)
+                      _buildCategoryCard(
+                        title: SettingsLabels.lyricsGroup,
+                        icon: Icons.lyrics_rounded,
+                        children: [
+                          _buildSwitchRow(
+                            SettingsLabels.showLyrics,
+                            SettingsDescriptions.showLyrics,
+                            AppState.showLyrics,
+                            (value) {
+                              setState(() => AppState.showLyrics = value);
+                              AppState.refreshLyrics();
+                              widget.onLayoutChanged();
+                            },
+                          ),
+                          _buildOptionalSetting(
+                            visible: AppState.showLyrics,
+                            child: Column(
+                              children: [
+                                _buildDivider(),
+                                _buildDropdownRow<LyricsProviderChoice>(
+                                  SettingsLabels.lyricsProvider,
+                                  switch (AppState.lyricsProviderChoice) {
+                                    LyricsProviderChoice.lrclib =>
+                                      SettingsDescriptions.lyricsProviderLrclib,
+                                    LyricsProviderChoice.localLrc =>
+                                      SettingsDescriptions.lyricsProviderLocal,
+                                    LyricsProviderChoice.qqMusic =>
+                                      SettingsDescriptions
+                                          .lyricsProviderQqMusic,
+                                  },
+                                  AppState.lyricsProviderChoice,
+                                  (value) {
+                                    setState(
+                                      () =>
+                                          AppState.lyricsProviderChoice = value,
+                                    );
+                                    AppState.refreshLyrics();
+                                    widget.onVisualChanged();
+                                  },
+                                  const [
+                                    DropdownMenuEntry(
+                                      value: LyricsProviderChoice.lrclib,
+                                      label: SettingsLabels.providerLrclib,
+                                    ),
+                                    DropdownMenuEntry(
+                                      value: LyricsProviderChoice.localLrc,
+                                      label: SettingsLabels.providerLocal,
+                                    ),
+                                    DropdownMenuEntry(
+                                      value: LyricsProviderChoice.qqMusic,
+                                      label: SettingsLabels.providerQqMusic,
+                                    ),
+                                  ],
+                                ),
+                                _buildOptionalSetting(
+                                  visible:
+                                      AppState.lyricsProviderChoice ==
+                                      LyricsProviderChoice.localLrc,
+                                  child: Column(
+                                    children: [
+                                      _buildDivider(),
+                                      _buildLocalLyricsFolderRow(),
+                                    ],
+                                  ),
+                                ),
+                                _buildDivider(),
+                                _buildSwitchRow(
+                                  SettingsLabels.lyricsLinkAnimations,
+                                  SettingsDescriptions.lyricsLinkAnimations,
+                                  AppState.lyricsAnimationsLinked,
+                                  (value) {
+                                    setState(
+                                      () => AppState.lyricsAnimationsLinked =
+                                          value,
+                                    );
+                                    AppState.notifyLyricsVisualChanged();
+                                    widget.onVisualChanged();
+                                  },
+                                ),
+                                _buildDivider(),
+                                _buildDropdownRow<LyricsTransitionStyle>(
+                                  AppState.lyricsAnimationsLinked
+                                      ? SettingsLabels.lyricsTransition
+                                      : SettingsLabels.lyricsEnterTransition,
+                                  SettingsDescriptions.lyricsTransition,
+                                  AppState.lyricsTransitionStyle,
+                                  (value) {
+                                    setState(() {
+                                      AppState.lyricsTransitionStyle = value;
+                                      if (AppState.lyricsAnimationsLinked) {
+                                        AppState.lyricsExitTransitionStyle =
+                                            value;
+                                      }
+                                    });
+                                    AppState.notifyLyricsVisualChanged();
+                                    widget.onVisualChanged();
+                                  },
+                                  _lyricsTransitionEntries(),
+                                ),
+                                _buildOptionalSetting(
+                                  visible: !AppState.lyricsAnimationsLinked,
+                                  child: Column(
+                                    children: [
+                                      _buildDivider(),
+                                      _buildDropdownRow<LyricsTransitionStyle>(
+                                        SettingsLabels.lyricsExitTransition,
+                                        SettingsDescriptions
+                                            .lyricsExitTransition,
+                                        AppState.lyricsExitTransitionStyle,
+                                        (value) {
+                                          setState(
+                                            () =>
+                                                AppState.lyricsExitTransitionStyle =
+                                                    value,
+                                          );
+                                          AppState.notifyLyricsVisualChanged();
+                                          widget.onVisualChanged();
+                                        },
+                                        _lyricsTransitionEntries(exiting: true),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                _buildDivider(),
+                                _buildSwitchRow(
+                                  SettingsLabels.lyricsUseThemeFont,
+                                  SettingsDescriptions.lyricsUseThemeFont,
+                                  AppState.lyricsUseThemeFont,
+                                  (value) {
+                                    _updateTypography(
+                                      () => AppState.lyricsUseThemeFont = value,
+                                    );
+                                  },
+                                  onReset: AppState.lyricsUseThemeFont
                                       ? null
                                       : () {
                                           _updateTypography(
-                                            () => AppState.lyricsFontFamily =
-                                                AppState.defaultFontFamily,
+                                            () => AppState.lyricsUseThemeFont =
+                                                true,
                                           );
                                           _finishTypographyChange();
                                         },
                                 ),
-                              ),
-                              _buildDivider(),
-                              _buildContinuousSliderRow(
-                                title: '歌词字重',
-                                subtitle: SettingsDescriptions.lyricsWeight,
-                                value: AppState.lyricsWeightValue,
-                                min: 100,
-                                max: 900,
-                                valueLabel: (value) => 'W${value.round()}',
-                                sliderKey: const ValueKey(
-                                  'lyrics_weight_slider',
+                                _buildOptionalSetting(
+                                  visible: !AppState.lyricsUseThemeFont,
+                                  child: _buildDropdownRow<String>(
+                                    SettingsLabels.lyricsFont,
+                                    null,
+                                    AppState.lyricsFontFamily,
+                                    (value) => _updateTypography(
+                                      () => AppState.lyricsFontFamily = value,
+                                    ),
+                                    AppState.loadedSystemFonts
+                                        .map(
+                                          (font) => DropdownMenuEntry<String>(
+                                            value: font,
+                                            label: font == 'System Default'
+                                                ? SettingsLabels
+                                                      .systemDefaultFont
+                                                : font,
+                                          ),
+                                        )
+                                        .toList(),
+                                    actionButton: IconButton(
+                                      tooltip: '导入歌词字体文件',
+                                      icon: const Icon(
+                                        Icons.add_circle_outline_rounded,
+                                      ),
+                                      onPressed: () async {
+                                        final success =
+                                            await AppState.importCustomFont(
+                                              forLyrics: true,
+                                            );
+                                        if (!mounted || !success) return;
+                                        setState(() {});
+                                        AppState.notifyTypographyChanged();
+                                        widget.onVisualChanged();
+                                      },
+                                    ),
+                                    onReset:
+                                        AppState.lyricsFontFamily ==
+                                            AppState.defaultFontFamily
+                                        ? null
+                                        : () {
+                                            _updateTypography(
+                                              () => AppState.lyricsFontFamily =
+                                                  AppState.defaultFontFamily,
+                                            );
+                                            _finishTypographyChange();
+                                          },
+                                  ),
                                 ),
-                                resetValue: AppState.defaultLyricsWeightValue,
-                                onChanged: (value) => _updateTypography(
-                                  () => AppState.lyricsWeightValue = value,
+                                _buildDivider(),
+                                _buildContinuousSliderRow(
+                                  title: SettingsLabels.lyricsWeight,
+                                  subtitle: SettingsDescriptions.lyricsWeight,
+                                  value: AppState.lyricsWeightValue,
+                                  min: 100,
+                                  max: 900,
+                                  valueLabel: (value) => 'W${value.round()}',
+                                  sliderKey: const ValueKey(
+                                    'lyrics_weight_slider',
+                                  ),
+                                  resetValue: AppState.defaultLyricsWeightValue,
+                                  onChanged: (value) => _updateTypography(
+                                    () => AppState.lyricsWeightValue = value,
+                                  ),
                                 ),
-                              ),
-                              _buildDivider(),
-                              _buildContinuousSliderRow(
-                                title: '歌词字号',
-                                subtitle: SettingsDescriptions.lyricsSize,
-                                value: AppState.lyricsFontSize,
-                                min: 12,
-                                max: 17,
-                                valueLabel: (value) =>
-                                    '${value.toStringAsFixed(1)} px',
-                                sliderKey: const ValueKey('lyrics_size_slider'),
-                                resetValue: AppState.defaultLyricsFontSize,
-                                onChanged: (value) => _updateTypography(
-                                  () => AppState.lyricsFontSize = value,
+                                _buildDivider(),
+                                _buildContinuousSliderRow(
+                                  title: SettingsLabels.lyricsSize,
+                                  subtitle: SettingsDescriptions.lyricsSize,
+                                  value: AppState.lyricsFontSize,
+                                  min: 12,
+                                  max: 17,
+                                  valueLabel: (value) =>
+                                      '${value.toStringAsFixed(1)} px',
+                                  sliderKey: const ValueKey(
+                                    'lyrics_size_slider',
+                                  ),
+                                  resetValue: AppState.defaultLyricsFontSize,
+                                  onChanged: (value) => _updateTypography(
+                                    () => AppState.lyricsFontSize = value,
+                                  ),
                                 ),
-                              ),
-                              _buildTypographyPreview(
-                                title: '歌词实时预览',
-                                sample: '此刻播放的音乐，值得被看见。',
-                                style: AppState.lyricsTextStyle(
-                                  AppState.currentScheme.onSurface,
+                                _buildTypographyPreview(
+                                  title: SettingsLabels.lyricsPreview,
+                                  sample: '此刻播放的音乐，值得被看见。',
+                                  style: AppState.lyricsTextStyle(
+                                    AppState.currentScheme.onSurface,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
 
-                  if (_selectedSection == _SettingsSection.typography)
-                    _buildCategoryCard(
-                      title: "字体与排版",
-                      icon: Icons.text_fields_rounded,
-                      children: [
-                        _buildDropdownRow<String>(
-                          "全局文本字体",
-                          SettingsDescriptions.globalFont,
-                          AppState.currentFontFamily,
-                          (val) {
-                            setState(() => AppState.currentFontFamily = val);
-                            widget.onVisualChanged();
-                          },
-                          AppState.loadedSystemFonts
-                              .map(
-                                (fontName) => DropdownMenuEntry<String>(
-                                  value: fontName,
-                                  label: fontName,
-                                ),
-                              )
-                              .toList(),
-                          actionButton: IconButton(
-                            tooltip: "导入本地 .ttf 字体文件",
-                            icon: Icon(
-                              Icons.add_circle_outline_rounded,
-                              color: AppState.currentScheme.primary,
-                            ),
-                            onPressed: () async {
-                              final bool success =
-                                  await AppState.importCustomFont();
-                              if (success) {
-                                setState(() {});
-                                widget.onVisualChanged();
-                              }
+                    if (_selectedSection == _SettingsSection.typography)
+                      _buildCategoryCard(
+                        title: SettingsLabels.typographyGroup,
+                        icon: Icons.text_fields_rounded,
+                        children: [
+                          _buildDropdownRow<String>(
+                            SettingsLabels.globalFont,
+                            SettingsDescriptions.globalFont,
+                            AppState.currentFontFamily,
+                            (val) {
+                              setState(() => AppState.currentFontFamily = val);
+                              widget.onVisualChanged();
                             },
-                          ),
-                          onReset:
-                              AppState.currentFontFamily ==
-                                  AppState.defaultFontFamily
-                              ? null
-                              : () {
-                                  _updateTypography(
-                                    () => AppState.currentFontFamily =
-                                        AppState.defaultFontFamily,
-                                  );
-                                  _finishTypographyChange();
+                            AppState.loadedSystemFonts
+                                .map(
+                                  (fontName) => DropdownMenuEntry<String>(
+                                    value: fontName,
+                                    label: fontName,
+                                  ),
+                                )
+                                .toList(),
+                            actionButton: IconButton(
+                              tooltip: "导入本地 .ttf 字体文件",
+                              icon: Icon(
+                                Icons.add_circle_outline_rounded,
+                                color: AppState.currentScheme.primary,
+                              ),
+                              onPressed: () async {
+                                final bool success =
+                                    await AppState.importCustomFont();
+                                if (success) {
+                                  setState(() {});
                                   widget.onVisualChanged();
-                                },
-                        ),
-                        _buildDivider(),
-                        _buildContinuousSliderRow(
-                          title: '歌曲名字重',
-                          subtitle: SettingsDescriptions.titleWeight,
-                          value: AppState.titleWeightValue,
-                          min: 100,
-                          max: 900,
-                          valueLabel: (value) => 'W${value.round()}',
-                          sliderKey: const ValueKey('title_weight_slider'),
-                          resetValue: AppState.defaultTitleWeightValue,
-                          onChanged: (value) => _updateTypography(
-                            () => AppState.titleWeightValue = value,
-                          ),
-                        ),
-                        _buildDivider(),
-                        _buildContinuousSliderRow(
-                          title: '歌手名字重',
-                          subtitle: SettingsDescriptions.artistWeight,
-                          value: AppState.artistWeightValue,
-                          min: 100,
-                          max: 900,
-                          valueLabel: (value) => 'W${value.round()}',
-                          sliderKey: const ValueKey('artist_weight_slider'),
-                          resetValue: AppState.defaultArtistWeightValue,
-                          onChanged: (value) => _updateTypography(
-                            () => AppState.artistWeightValue = value,
-                          ),
-                        ),
-                        _buildTypographyPreview(
-                          title: '播放信息实时预览',
-                          sample: '歌曲名称',
-                          style: TextStyle(
-                            fontFamily:
-                                AppState.currentFontFamily == 'System Default'
+                                }
+                              },
+                            ),
+                            onReset:
+                                AppState.currentFontFamily ==
+                                    AppState.defaultFontFamily
                                 ? null
-                                : AppState.currentFontFamily,
-                            fontFamilyFallback: AppState.textFontFallback,
-                            color: AppState.currentScheme.onSurface,
-                            fontWeight: AppState.titleWeight,
-                            fontVariations: AppState.variationsFor(
-                              AppState.titleWeightValue,
+                                : () {
+                                    _updateTypography(
+                                      () => AppState.currentFontFamily =
+                                          AppState.defaultFontFamily,
+                                    );
+                                    _finishTypographyChange();
+                                    widget.onVisualChanged();
+                                  },
+                          ),
+                          _buildDivider(),
+                          _buildContinuousSliderRow(
+                            title: SettingsLabels.titleWeight,
+                            subtitle: SettingsDescriptions.titleWeight,
+                            value: AppState.titleWeightValue,
+                            min: 100,
+                            max: 900,
+                            valueLabel: (value) => 'W${value.round()}',
+                            sliderKey: const ValueKey('title_weight_slider'),
+                            resetValue: AppState.defaultTitleWeightValue,
+                            onChanged: (value) => _updateTypography(
+                              () => AppState.titleWeightValue = value,
                             ),
                           ),
-                          secondaryStyle: TextStyle(
-                            fontFamily:
-                                AppState.currentFontFamily == 'System Default'
-                                ? null
-                                : AppState.currentFontFamily,
-                            fontFamilyFallback: AppState.textFontFallback,
-                            color: AppState.currentScheme.onSurfaceVariant,
-                            fontWeight: AppState.artistWeight,
-                            fontVariations: AppState.variationsFor(
-                              AppState.artistWeightValue,
+                          _buildDivider(),
+                          _buildContinuousSliderRow(
+                            title: SettingsLabels.artistWeight,
+                            subtitle: SettingsDescriptions.artistWeight,
+                            value: AppState.artistWeightValue,
+                            min: 100,
+                            max: 900,
+                            valueLabel: (value) => 'W${value.round()}',
+                            sliderKey: const ValueKey('artist_weight_slider'),
+                            resetValue: AppState.defaultArtistWeightValue,
+                            onChanged: (value) => _updateTypography(
+                              () => AppState.artistWeightValue = value,
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                ],
+                          _buildTypographyPreview(
+                            title: SettingsLabels.playbackPreview,
+                            sample: '歌曲名称',
+                            style: TextStyle(
+                              fontFamily:
+                                  AppState.currentFontFamily == 'System Default'
+                                  ? null
+                                  : AppState.currentFontFamily,
+                              fontFamilyFallback: AppState.textFontFallback,
+                              color: AppState.currentScheme.onSurface,
+                              fontWeight: AppState.titleWeight,
+                              fontVariations: AppState.variationsFor(
+                                AppState.titleWeightValue,
+                              ),
+                            ),
+                            secondaryStyle: TextStyle(
+                              fontFamily:
+                                  AppState.currentFontFamily == 'System Default'
+                                  ? null
+                                  : AppState.currentFontFamily,
+                              fontFamilyFallback: AppState.textFontFallback,
+                              color: AppState.currentScheme.onSurfaceVariant,
+                              fontWeight: AppState.artistWeight,
+                              fontVariations: AppState.variationsFor(
+                                AppState.artistWeightValue,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1287,6 +1566,7 @@ class _SettingsPanelState extends State<SettingsPanel>
     required ValueChanged<double> onChanged,
     required Key sliderKey,
     required double resetValue,
+    VoidCallback? onChangeEnd,
   }) {
     final displayedValue = value.clamp(min, max);
     return Padding(
@@ -1311,7 +1591,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                   visualDensity: VisualDensity.compact,
                   onPressed: () {
                     onChanged(resetValue);
-                    _finishTypographyChange();
+                    (onChangeEnd ?? _finishTypographyChange)();
                   },
                 ),
             ],
@@ -1325,7 +1605,7 @@ class _SettingsPanelState extends State<SettingsPanel>
             label: valueLabel(displayedValue),
             semanticFormatterCallback: valueLabel,
             onChanged: onChanged,
-            onChangeEnd: (_) => _finishTypographyChange(),
+            onChangeEnd: (_) => (onChangeEnd ?? _finishTypographyChange)(),
           ),
         ],
       ),
@@ -1371,20 +1651,53 @@ class _SettingsPanelState extends State<SettingsPanel>
   }
 
   List<DropdownMenuEntry<MD3Shape>> _shapeEntries() => const [
-    DropdownMenuEntry(value: MD3Shape.circle, label: '圆形'),
-    DropdownMenuEntry(value: MD3Shape.stadium, label: '胶囊形'),
-    DropdownMenuEntry(value: MD3Shape.roundedExtraSmall, label: '极小圆角 · 4'),
-    DropdownMenuEntry(value: MD3Shape.roundedSmall, label: '小圆角 · 8'),
-    DropdownMenuEntry(value: MD3Shape.roundedMedium, label: '中圆角 · 12'),
-    DropdownMenuEntry(value: MD3Shape.roundedLarge, label: '大圆角 · 20'),
-    DropdownMenuEntry(value: MD3Shape.roundedExtraLarge, label: '超大圆角 · 28'),
+    DropdownMenuEntry(
+      value: MD3Shape.circle,
+      label: SettingsLabels.shapeCircle,
+    ),
+    DropdownMenuEntry(
+      value: MD3Shape.stadium,
+      label: SettingsLabels.shapeStadium,
+    ),
+    DropdownMenuEntry(
+      value: MD3Shape.roundedExtraSmall,
+      label: SettingsLabels.shapeExtraSmall,
+    ),
+    DropdownMenuEntry(
+      value: MD3Shape.roundedSmall,
+      label: SettingsLabels.shapeSmall,
+    ),
+    DropdownMenuEntry(
+      value: MD3Shape.roundedMedium,
+      label: SettingsLabels.shapeMedium,
+    ),
+    DropdownMenuEntry(
+      value: MD3Shape.roundedLarge,
+      label: SettingsLabels.shapeLarge,
+    ),
+    DropdownMenuEntry(
+      value: MD3Shape.roundedExtraLarge,
+      label: SettingsLabels.shapeExtraLarge,
+    ),
   ];
 
   List<DropdownMenuEntry<SpectrumMode>> _spectrumEntries() => const [
-    DropdownMenuEntry(value: SpectrumMode.off, label: '关闭'),
-    DropdownMenuEntry(value: SpectrumMode.bars, label: '均衡柱状'),
-    DropdownMenuEntry(value: SpectrumMode.mirror, label: '镜像频谱'),
-    DropdownMenuEntry(value: SpectrumMode.waveform, label: '波形线条'),
+    DropdownMenuEntry(
+      value: SpectrumMode.off,
+      label: SettingsLabels.spectrumOff,
+    ),
+    DropdownMenuEntry(
+      value: SpectrumMode.bars,
+      label: SettingsLabels.spectrumBars,
+    ),
+    DropdownMenuEntry(
+      value: SpectrumMode.mirror,
+      label: SettingsLabels.spectrumMirror,
+    ),
+    DropdownMenuEntry(
+      value: SpectrumMode.waveform,
+      label: SettingsLabels.spectrumWaveform,
+    ),
   ];
 
   Widget _buildLocalLyricsFolderRow() {
@@ -1396,7 +1709,10 @@ class _SettingsPanelState extends State<SettingsPanel>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('本地歌词目录', style: _settingTitleStyle()),
+                Text(
+                  SettingsLabels.localLyricsDirectory,
+                  style: _settingTitleStyle(),
+                ),
                 Text(
                   AppState.localLyricsDirectory.isEmpty
                       ? SettingsDescriptions.localLyricsEmpty
@@ -1434,7 +1750,7 @@ class _SettingsPanelState extends State<SettingsPanel>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('导入播放列表', style: _settingTitleStyle()),
+                Text(SettingsLabels.playlistFile, style: _settingTitleStyle()),
                 Text(
                   AppState.playlistFilePath.isEmpty
                       ? SettingsDescriptions.playlistFileEmpty
@@ -1483,7 +1799,7 @@ class _SettingsPanelState extends State<SettingsPanel>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('QQ 音乐歌单', style: _settingTitleStyle()),
+                Text(SettingsLabels.qqPlaylist, style: _settingTitleStyle()),
                 Text(
                   AppState.qqPlaylistLink.isEmpty
                       ? SettingsDescriptions.qqPlaylistEmpty
@@ -1523,48 +1839,152 @@ class _SettingsPanelState extends State<SettingsPanel>
   }
 
   List<DropdownMenuEntry<MD3ProgressStyle>> _progressStyleEntries() => const [
-    DropdownMenuEntry(value: MD3ProgressStyle.linear, label: '标准线性 · MD3'),
-    DropdownMenuEntry(value: MD3ProgressStyle.pill, label: '圆角胶囊'),
-    DropdownMenuEntry(value: MD3ProgressStyle.segmented, label: '动态分段'),
+    DropdownMenuEntry(
+      value: MD3ProgressStyle.linear,
+      label: SettingsLabels.progressLinear,
+    ),
+    DropdownMenuEntry(
+      value: MD3ProgressStyle.pill,
+      label: SettingsLabels.progressPill,
+    ),
+    DropdownMenuEntry(
+      value: MD3ProgressStyle.segmented,
+      label: SettingsLabels.progressSegmented,
+    ),
+  ];
+
+  List<DropdownMenuEntry<TrackTextTransitionStyle>>
+  _trackTextTransitionEntries() => const [
+    DropdownMenuEntry(
+      value: TrackTextTransitionStyle.particles,
+      label: SettingsLabels.trackTextParticles,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextTransitionStyle.fade,
+      label: SettingsLabels.trackTextFade,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextTransitionStyle.rise,
+      label: SettingsLabels.trackTextRise,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextTransitionStyle.sideways,
+      label: SettingsLabels.trackTextSideways,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextTransitionStyle.zoom,
+      label: SettingsLabels.trackTextZoom,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextTransitionStyle.descend,
+      label: SettingsLabels.trackTextDescend,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextTransitionStyle.settle,
+      label: SettingsLabels.trackTextSettle,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextTransitionStyle.sweep,
+      label: SettingsLabels.trackTextSweep,
+    ),
+  ];
+
+  List<DropdownMenuEntry<TrackTextExitStyle>> _trackTextExitEntries() => const [
+    DropdownMenuEntry(
+      value: TrackTextExitStyle.fade,
+      label: SettingsLabels.trackTextExitFade,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextExitStyle.rise,
+      label: SettingsLabels.trackTextExitRise,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextExitStyle.descend,
+      label: SettingsLabels.trackTextExitDescend,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextExitStyle.sideways,
+      label: SettingsLabels.trackTextExitSideways,
+    ),
+    DropdownMenuEntry(
+      value: TrackTextExitStyle.shrink,
+      label: SettingsLabels.trackTextExitShrink,
+    ),
   ];
 
   List<DropdownMenuEntry<LyricsTransitionStyle>> _lyricsTransitionEntries({
     bool exiting = false,
   }) => exiting
       ? const [
-          DropdownMenuEntry(value: LyricsTransitionStyle.fade, label: '柔和淡出'),
-          DropdownMenuEntry(value: LyricsTransitionStyle.rise, label: '向上飞出'),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.fade,
+            label: SettingsLabels.lyricsFadeOut,
+          ),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.rise,
+            label: SettingsLabels.lyricsRiseOut,
+          ),
           DropdownMenuEntry(
             value: LyricsTransitionStyle.descend,
-            label: '向下飞出',
+            label: SettingsLabels.lyricsDescendOut,
           ),
           DropdownMenuEntry(
             value: LyricsTransitionStyle.sideways,
-            label: '向左滑出',
+            label: SettingsLabels.lyricsSidewaysOut,
           ),
-          DropdownMenuEntry(value: LyricsTransitionStyle.zoom, label: '放大离开'),
-          DropdownMenuEntry(value: LyricsTransitionStyle.none, label: '直接切换'),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.zoom,
+            label: SettingsLabels.lyricsZoomOut,
+          ),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.none,
+            label: SettingsLabels.lyricsNoExitAnimation,
+          ),
         ]
       : const [
-          DropdownMenuEntry(value: LyricsTransitionStyle.fade, label: '柔和淡入'),
-          DropdownMenuEntry(value: LyricsTransitionStyle.rise, label: '轻轻上浮'),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.fade,
+            label: SettingsLabels.lyricsFadeIn,
+          ),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.rise,
+            label: SettingsLabels.lyricsRiseIn,
+          ),
           DropdownMenuEntry(
             value: LyricsTransitionStyle.descend,
-            label: '轻轻落下',
+            label: SettingsLabels.lyricsDescendIn,
           ),
           DropdownMenuEntry(
             value: LyricsTransitionStyle.sideways,
-            label: '侧向滑入',
+            label: SettingsLabels.lyricsSidewaysIn,
           ),
-          DropdownMenuEntry(value: LyricsTransitionStyle.zoom, label: '微微放大'),
-          DropdownMenuEntry(value: LyricsTransitionStyle.none, label: '关闭动画'),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.zoom,
+            label: SettingsLabels.lyricsZoomIn,
+          ),
+          DropdownMenuEntry(
+            value: LyricsTransitionStyle.none,
+            label: SettingsLabels.lyricsNoEnterAnimation,
+          ),
         ];
 
   List<DropdownMenuEntry<ComponentSizeMode>> _componentSizeEntries() => const [
-    DropdownMenuEntry(value: ComponentSizeMode.small, label: '小 · 82%'),
-    DropdownMenuEntry(value: ComponentSizeMode.standard, label: '标准 · 100%'),
-    DropdownMenuEntry(value: ComponentSizeMode.large, label: '大 · 122%'),
-    DropdownMenuEntry(value: ComponentSizeMode.custom, label: '自由缩放'),
+    DropdownMenuEntry(
+      value: ComponentSizeMode.small,
+      label: SettingsLabels.componentSmall,
+    ),
+    DropdownMenuEntry(
+      value: ComponentSizeMode.standard,
+      label: SettingsLabels.componentStandard,
+    ),
+    DropdownMenuEntry(
+      value: ComponentSizeMode.large,
+      label: SettingsLabels.componentLarge,
+    ),
+    DropdownMenuEntry(
+      value: ComponentSizeMode.custom,
+      label: SettingsLabels.componentCustom,
+    ),
   ];
 
   Widget _buildOptionalSetting({required bool visible, required Widget child}) {

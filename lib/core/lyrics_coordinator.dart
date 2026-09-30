@@ -45,6 +45,7 @@ final class LyricsCoordinator extends ChangeNotifier {
     issue: LyricsIssue.noTrack,
   );
   String? _trackIdentity;
+  String? _displayTrackIdentity;
   int _providerRevision = -1;
   String? _selectedProviderId;
   int _generation = 0;
@@ -61,13 +62,24 @@ final class LyricsCoordinator extends ChangeNotifier {
     bool force = false,
   }) async {
     final identity = track?.identity;
+    final displayIdentity = track?.queueIdentity;
     if (!force &&
         identity == _trackIdentity &&
         _selectedProviderId == providerId &&
         _providerRevision == providers.revision) {
       return;
     }
+    if (!force &&
+        displayIdentity != null &&
+        displayIdentity == _displayTrackIdentity &&
+        _state.status == LyricsStatus.ready &&
+        _selectedProviderId == providerId &&
+        _providerRevision == providers.revision) {
+      _trackIdentity = identity;
+      return;
+    }
     _trackIdentity = identity;
+    _displayTrackIdentity = displayIdentity;
     _selectedProviderId = providerId;
     _providerRevision = providers.revision;
     final generation = ++_generation;

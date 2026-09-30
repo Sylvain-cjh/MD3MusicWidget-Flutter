@@ -79,6 +79,9 @@ final class PlatformTrack {
     durationMs.round(),
   ]);
 
+  String get queueIdentity =>
+      jsonEncode([sourceAppId.toLowerCase(), title.trim(), artist.trim()]);
+
   MusicPlatform get platform => identifyMusicPlatform(sourceAppId);
 }
 
