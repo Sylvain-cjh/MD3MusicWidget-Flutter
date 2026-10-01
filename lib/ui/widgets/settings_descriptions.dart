@@ -1,6 +1,7 @@
 
 final class SettingsDescriptions {
   SettingsDescriptions._();
+  static const playbackTime = '在进度条后显示已播放与总时长';
 
   static const overview = '把它调成你喜欢的样子';
 
@@ -19,6 +20,7 @@ final class SettingsDescriptions {
   static const coverParallax = '3D大封面，用过都说好';
   static const rightCoverDarkening = '让它安静一点，把主角留给左边';
   static const rightCoverFadeLength = '拉长一点，更自然地融进背景';
+  static const rightCoverFadeLinked = '一起调，或给横向、纵向各留一条滑块';
   static const rightCoverBlur = '保留轮廓，少一点抢眼的细节';
   static const progressAutoContrast = '保持进度条清晰可见，减少背景干扰';
   static const spectrum = '音频可视化会在组件上方显示';

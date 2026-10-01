@@ -115,6 +115,7 @@ class _PlayerViewState extends State<PlayerView>
 
   bool _isSettingsOpen = false;
   bool _isMenuOpen = false;
+  bool _menuResizeInFlight = false;
   bool _isSystemTrayReady = false;
   String _menuSide = "right";
   double _menuTop = 12.0;
@@ -140,6 +141,8 @@ class _PlayerViewState extends State<PlayerView>
   bool _nextUpResizeInFlight = false;
   bool _nextUpSyncScheduled = false;
   late final NextUpPresenceMotion _nextUpMotion;
+  double? _backgroundAnchorHeight;
+  Widget? _anchoredPlayerBackground;
 
   static const String _dotnetRuntimeDownloadUrl =
       'https://aka.ms/dotnet/8.0/dotnet-runtime-win-x64.exe';
@@ -910,7 +913,6 @@ class _PlayerViewState extends State<PlayerView>
     AppState.currentPlatformTrack = PlatformTrack.fromSnapshot(snapshot);
     AppState.isShuffleActive = snapshot.isShuffleActive;
     AppState.autoRepeatMode = snapshot.autoRepeatMode;
-    AppState.refreshQueue();
     AppState.updatePlaybackTimeline(
       positionMs: snapshot.positionMs,
       durationMs: snapshot.durationMs,
@@ -918,6 +920,9 @@ class _PlayerViewState extends State<PlayerView>
           ? snapshot.timelineUpdatedAtMs
           : DateTime.now().millisecondsSinceEpoch,
     );
+    
+    
+    AppState.refreshQueue();
     if (playbackStateChanged) _syncSpectrumPolling();
     AppState.refreshLyrics();
     if (AppState.showLyrics) {
@@ -1261,25 +1266,38 @@ class _PlayerViewState extends State<PlayerView>
 
   Future<void> _reserveNextUpSpace(bool occupied) async {
     if (!mounted) return;
-    AppState.nextUpPanelOccupied = occupied;
-    setState(() {});
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
+    if (occupied && !AppState.nextUpPreviewVisible.value) return;
     if (_isTransitioning) {
+      AppState.nextUpPanelOccupied = occupied;
+      setState(() {});
       _nextUpResizePending = true;
       return;
+    }
+    
+    
+    
+    if (!occupied) {
+      AppState.nextUpPanelOccupied = false;
+      setState(() {});
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
     }
     final bounds = await windowManager.getBounds();
     if (!mounted) return;
+    if (occupied && !AppState.nextUpPreviewVisible.value) return;
     if (_isTransitioning) {
       _nextUpResizePending = true;
       return;
     }
+    final designHeight = _designWindowSize(
+      layout: AppState.widgetLayout,
+      settingsOpen: _isSettingsOpen,
+    ).height;
+    final targetExtent = occupied ? 64.0 : 0.0;
     final targetHeight =
-        _designWindowSize(
-          layout: AppState.widgetLayout,
-          settingsOpen: _isSettingsOpen,
-        ).height *
+        (designHeight +
+            targetExtent -
+            AppState.nextUpPanelExtentOf(AppState.widgetLayout)) *
         _frameScale;
     if ((bounds.height - targetHeight).abs() > 0.5) {
       await windowManager.setBounds(
@@ -1288,6 +1306,8 @@ class _PlayerViewState extends State<PlayerView>
       );
     }
     if (!mounted) return;
+    if (occupied && !AppState.nextUpPreviewVisible.value) return;
+    AppState.nextUpPanelOccupied = occupied;
     setState(() {});
     await WidgetsBinding.instance.endOfFrame;
   }
@@ -1296,7 +1316,8 @@ class _PlayerViewState extends State<PlayerView>
     if (!mounted ||
         !_nextUpResizePending ||
         _nextUpResizeInFlight ||
-        _isTransitioning) {
+        _isTransitioning ||
+        _menuResizeInFlight) {
       return;
     }
     _nextUpResizePending = false;
@@ -1468,10 +1489,16 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   Future<void> _toggleSettings() async {
+    if (_menuResizeInFlight) return;
     final int serial = _beginWindowTransition();
     try {
       if (_isMenuOpen) {
-        await _menuAnimController.reverse();
+        if (MediaQuery.disableAnimationsOf(context)) {
+          _menuAnimController.value = 0;
+        } else {
+          await _menuAnimController.reverse();
+        }
+        if (!mounted) return;
         _isMenuOpen = false;
       }
       setState(() {
@@ -1527,6 +1554,7 @@ class _PlayerViewState extends State<PlayerView>
           !AppState.isCustomComponentSize ||
           _nextUpResizePending ||
           _nextUpResizeInFlight ||
+          _menuResizeInFlight ||
           _isTransitioning) {
         return;
       }
@@ -1562,79 +1590,109 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   Future<void> _openMenu(bool toLeft) async {
-    if (_isSettingsOpen || _isTransitioning) return;
+    if (_isSettingsOpen ||
+        _isTransitioning ||
+        _menuResizeInFlight ||
+        _nextUpResizeInFlight) {
+      return;
+    }
+    setState(() {
+      _menuResizeInFlight = true;
+      _menuSide = toLeft ? 'left' : 'right';
+    });
     try {
+      
+      
+      await WidgetsBinding.instance.endOfFrame;
       final bounds = await windowManager.getBounds();
-      final double menuWindowHeight = AppState.baseWindowHeight;
-      if (toLeft) {
-        _leftPadding = AppState.menuExtraSpace;
-        setState(() {
-          _menuSide = "left";
-          _isMenuOpen = true;
-        });
-        await windowManager.setBounds(
-          Rect.fromLTWH(
-            bounds.left - AppState.menuExtraSpace,
-            bounds.top,
-            AppState.menuWindowWidth,
-            menuWindowHeight,
-          ),
-          animate: false,
-        );
-      } else {
-        _leftPadding = 0.0;
-        setState(() {
-          _menuSide = "right";
-          _isMenuOpen = true;
-        });
-        await windowManager.setBounds(
-          Rect.fromLTWH(
-            bounds.left,
-            bounds.top,
-            AppState.menuWindowWidth,
-            menuWindowHeight,
-          ),
-          animate: false,
-        );
+      if (!mounted) return;
+      await windowManager.setBounds(
+        Rect.fromLTWH(
+          bounds.left - (toLeft ? AppState.menuExtraSpace : 0),
+          bounds.top,
+          bounds.width + AppState.menuExtraSpace,
+          bounds.height,
+        ),
+        animate: false,
+      );
+      if (!mounted) return;
+      setState(() {
+        _leftPadding = toLeft ? AppState.menuExtraSpace : 0;
+        _isMenuOpen = true;
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      if (mounted) {
+        if (MediaQuery.disableAnimationsOf(context)) {
+          _menuAnimController.value = 1;
+        } else {
+          _menuAnimController.forward();
+        }
       }
-      _menuAnimController.forward(from: 0.0);
-    } catch (_) {}
+    } catch (error) {
+      debugPrint('右键菜单展开失败: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _menuResizeInFlight = false);
+        if (_nextUpResizePending) _onNextUpVisibilityChanged();
+      }
+    }
   }
 
   Future<void> _closeMenu() async {
-    if (!_isMenuOpen || _isTransitioning) return;
+    if (!_isMenuOpen ||
+        _isTransitioning ||
+        _menuResizeInFlight ||
+        _nextUpResizeInFlight) {
+      return;
+    }
+    setState(() => _menuResizeInFlight = true);
     try {
-      await _menuAnimController.reverse();
+      if (MediaQuery.disableAnimationsOf(context)) {
+        _menuAnimController.value = 0;
+      } else {
+        await _menuAnimController.reverse();
+      }
+      if (!mounted) return;
       setState(() => _isMenuOpen = false);
+      await WidgetsBinding.instance.endOfFrame;
       final bounds = await windowManager.getBounds();
+      if (!mounted) return;
       double resetLeft = bounds.left + _leftPadding;
       _leftPadding = 0.0;
-      setState(() {});
       await windowManager.setBounds(
         Rect.fromLTWH(
           resetLeft,
           bounds.top,
-          AppState.baseWindowWidth,
-          AppState.baseWindowHeight,
+          bounds.width - AppState.menuExtraSpace,
+          bounds.height,
         ),
         animate: false,
       );
-    } catch (_) {}
+      await WidgetsBinding.instance.endOfFrame;
+    } catch (error) {
+      debugPrint('右键菜单收起失败: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _menuResizeInFlight = false);
+        if (_nextUpResizePending) _onNextUpVisibilityChanged();
+      }
+    }
   }
 
   void _handleSecondaryTap(TapDownDetails details) async {
-    if (_isTransitioning) return;
+    if (_isTransitioning || _menuResizeInFlight) return;
     if (_isSettingsOpen) {
       _toggleSettings();
       return;
     }
 
     final double clickX = details.localPosition.dx;
-    final double clickY = details.globalPosition.dy;
+    final double clickY = details.localPosition.dy * _contentScale;
     final double maxTop = AppState.baseWindowHeight - 100.0 * _frameScale;
     _menuTop = clickY.clamp(12.0, maxTop);
 
-    final bool toLeft = clickX < AppState.baseWindowWidth / 2;
+    final bool toLeft =
+        clickX < AppState.innerPlayerWidthOf(AppState.widgetLayout) / 2;
 
     if (_isMenuOpen) {
       if ((toLeft && _menuSide == 'left') ||
@@ -1694,7 +1752,7 @@ class _PlayerViewState extends State<PlayerView>
             AppState.qqPlaylistLink.isNotEmpty);
     bool nextUpVisible =
         nextUpConfigured && AppState.nextUpPreviewVisible.value;
-    bool nextUpOccupied = nextUpVisible || AppState.nextUpPanelOccupied;
+    bool nextUpOccupied = AppState.nextUpPanelOccupied;
     double playerHorizontalPadding = isV ? 24.0 : 16.0;
 
     double innerSettingsW = isV
@@ -1752,6 +1810,7 @@ class _PlayerViewState extends State<PlayerView>
         AppState.isCustomComponentSize &&
         !_isTransitioning &&
         !_isMenuOpen &&
+        !_menuResizeInFlight &&
         !_nextUpResizePending &&
         !_nextUpResizeInFlight;
     if (isLiveCustomResize) {
@@ -1784,7 +1843,16 @@ class _PlayerViewState extends State<PlayerView>
         ? AppState.layoutSwitchDuration
         : Duration.zero;
 
-    const Widget playerBackground = RepaintBoundary(child: DynamicBackground());
+    final backgroundAnchorHeight =
+        (containerH - AppState.nextUpPanelExtentOf(AppState.widgetLayout)) *
+        (_isComponentSizeTransitioning ? 1.0 : renderFrameScale);
+    if (_backgroundAnchorHeight != backgroundAnchorHeight) {
+      _backgroundAnchorHeight = backgroundAnchorHeight;
+      _anchoredPlayerBackground = RepaintBoundary(
+        child: DynamicBackground(anchorHeight: backgroundAnchorHeight),
+      );
+    }
+    final playerBackground = _anchoredPlayerBackground!;
     Widget playerContent = Stack(
       children: [
         AnimatedPositioned(
@@ -1940,20 +2008,23 @@ class _PlayerViewState extends State<PlayerView>
       },
     );
 
-    if (AppState.isCustomComponentSize && !_isTransitioning && !_isMenuOpen) {
-      mainStage = LockedAspectResizeArea(
-        designSize: Size(containerW, containerH),
-        minimumScale: AppState.minimumComponentScale,
-        maximumScale: AppState.maximumComponentScale,
-        onResizeEnd: () {
-          _resizeSaveTimer?.cancel();
-          _resizeSaveTimer = Timer(const Duration(milliseconds: 180), () {
-            unawaited(AppState.saveSettings());
-          });
-        },
-        child: mainStage,
-      );
-    }
+    mainStage = LockedAspectResizeArea(
+      enabled:
+          AppState.isCustomComponentSize &&
+          !_isTransitioning &&
+          !_isMenuOpen &&
+          !_menuResizeInFlight,
+      designSize: Size(containerW, containerH),
+      minimumScale: AppState.minimumComponentScale,
+      maximumScale: AppState.maximumComponentScale,
+      onResizeEnd: () {
+        _resizeSaveTimer?.cancel();
+        _resizeSaveTimer = Timer(const Duration(milliseconds: 180), () {
+          unawaited(AppState.saveSettings());
+        });
+      },
+      child: mainStage,
+    );
 
     return AnimatedTheme(
       data: ThemeData(
@@ -1975,8 +2046,18 @@ class _PlayerViewState extends State<PlayerView>
             clipBehavior: Clip.none,
             children: [
               Positioned(
-                left: anchorRight ? null : _leftPadding,
-                right: anchorRight ? 0.0 : null,
+                left:
+                    anchorRight ||
+                        (_menuSide == 'left' &&
+                            (_isMenuOpen || _menuResizeInFlight))
+                    ? null
+                    : _leftPadding,
+                right:
+                    anchorRight ||
+                        (_menuSide == 'left' &&
+                            (_isMenuOpen || _menuResizeInFlight))
+                    ? 0.0
+                    : null,
                 top: 0,
                 child: mainStage,
               ),

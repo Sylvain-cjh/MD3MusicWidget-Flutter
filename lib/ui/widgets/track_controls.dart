@@ -8,6 +8,7 @@ import '../../core/media_provider.dart';
 import '../../widgets/parallax_button.dart';
 import 'cover_parallax.dart';
 import 'spectrum_glass_surface.dart';
+import 'playback_time_label.dart';
 
 int _globalSlideDirection = 1;
 String _lastMeasureKey = "";
@@ -32,7 +33,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
   @override
   void initState() {
     super.initState();
-    _hasTimeline = AppState.playbackDurationMs > 0;
+    _hasTimeline = _timelineAvailable;
     AppState.playbackRevision.addListener(_handleTimelineAvailability);
     AppState.typographyRevision.addListener(_handleTypographyChanged);
   }
@@ -41,8 +42,15 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     if (mounted) setState(() {});
   }
 
+  bool get _timelineAvailable =>
+      AppState.playbackDurationMs > 0 &&
+      MediaCapability.supports(
+        AppState.mediaCapabilities,
+        MediaCapability.timeline,
+      );
+
   void _handleTimelineAvailability() {
-    final bool nextHasTimeline = AppState.playbackDurationMs > 0;
+    final bool nextHasTimeline = _timelineAvailable;
     if (!mounted) return;
     if (nextHasTimeline) {
       _timelineHideTimer?.cancel();
@@ -53,7 +61,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     
     
     _timelineHideTimer = Timer(const Duration(milliseconds: 900), () {
-      if (mounted && AppState.playbackDurationMs <= 0 && _hasTimeline) {
+      if (mounted && !_timelineAvailable && _hasTimeline) {
         setState(() => _hasTimeline = false);
       }
     });
@@ -306,10 +314,6 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         : null;
     final bool isV = widget.isVertical;
     final double uiOpacity = AppState.isPlaying ? 1.0 : 0.5;
-    final bool canShowTimeline = MediaCapability.supports(
-      AppState.mediaCapabilities,
-      MediaCapability.timeline,
-    );
     final bool canPrevious =
         AppState.showPlaybackControls &&
         MediaCapability.supports(
@@ -328,7 +332,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
           AppState.mediaCapabilities,
           MediaCapability.next,
         );
-    final bool hasProgress = _hasTimeline && canShowTimeline;
+    final bool hasProgress = _hasTimeline;
     final bool hasControls = canPrevious || canPlayPause || canNext;
 
     return Builder(
@@ -339,11 +343,13 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         final double availableW = AppState.innerPlayerWidthOf(targetLayout);
         final double availableH = AppState.corePlayerHeightOf(targetLayout);
         final double devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
-        final double md3ProgressHeight = switch (AppState.progressStyle) {
-          MD3ProgressStyle.linear => isV ? 5.0 : 4.0,
-          MD3ProgressStyle.pill => isV ? 9.0 : 8.0,
-          MD3ProgressStyle.segmented => isV ? 7.0 : 6.0,
-        };
+        final double md3ProgressHeight = AppState.showPlaybackTime
+            ? 18.0
+            : switch (AppState.progressStyle) {
+                MD3ProgressStyle.linear => isV ? 5.0 : 4.0,
+                MD3ProgressStyle.pill => isV ? 9.0 : 8.0,
+                MD3ProgressStyle.segmented => isV ? 7.0 : 6.0,
+              };
 
         late double coverSize;
         late double coverL;
@@ -377,6 +383,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
           artistH = artistFontSize * 1.38;
           progressH = hasProgress ? md3ProgressHeight : 0.0;
           progressW = (infoW * 0.78).clamp(180.0, 228.0);
+          if (AppState.showPlaybackTime) progressW = infoW;
           playH = hasControls ? (availableH * 0.116).clamp(52.0, 60.0) : 0.0;
           btnH = playH * 0.83;
 
@@ -421,6 +428,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
           artistH = artistFontSize * 1.32;
           progressH = hasProgress ? md3ProgressHeight : 0.0;
           progressW = (infoW * 0.72).clamp(180.0, 218.0);
+          if (AppState.showPlaybackTime) progressW = infoW;
           final double contentHeight = math.max(
             80.0,
             availableH - padding * 2.0,
@@ -675,7 +683,38 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               top: progressT,
               width: progressW,
               height: progressH,
-              child: const RepaintBoundary(child: _PlaybackProgress()),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: SizedBox(
+                        height: switch (AppState.progressStyle) {
+                          MD3ProgressStyle.linear => isV ? 5.0 : 4.0,
+                          MD3ProgressStyle.pill => isV ? 9.0 : 8.0,
+                          MD3ProgressStyle.segmented => isV ? 7.0 : 6.0,
+                        },
+                        child: const RepaintBoundary(
+                          child: _PlaybackProgress(),
+                        ),
+                      ),
+                    ),
+                  ),
+                  AnimatedSize(
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 240),
+                    curve: Curves.easeInOutCubicEmphasized,
+                    alignment: Alignment.centerRight,
+                    child: AppState.showPlaybackTime
+                        ? const Padding(
+                            padding: EdgeInsets.only(left: 10),
+                            child: RepaintBoundary(child: PlaybackTimeLabel()),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
             ),
 
             AnimatedPositioned(
@@ -876,6 +915,7 @@ class _PlaybackProgressState extends State<_PlaybackProgress>
   Timer? _progressTimer;
   final _ProgressPaintState _paintState = _ProgressPaintState();
   final Stopwatch _clock = Stopwatch()..start();
+  String _trackSource = '';
   String _trackVersion = '';
   String _trackTitle = '';
   String _trackArtist = '';
@@ -899,6 +939,7 @@ class _PlaybackProgressState extends State<_PlaybackProgress>
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..addListener(_onFrame);
+    _trackSource = AppState.currentPlatformTrack?.sourceAppId ?? '';
     _trackVersion = AppState.trackVersion;
     _trackTitle = AppState.trackTitle;
     _trackArtist = AppState.artistName;
@@ -922,7 +963,7 @@ class _PlaybackProgressState extends State<_PlaybackProgress>
 
   double get _currentTargetProgress {
     final double duration = AppState.playbackDurationMs;
-    if (duration <= 0) return 0.0;
+    if (duration <= 0) return _displayProgress;
     return (AppState.estimatedPlaybackPositionMs / duration).clamp(0.0, 1.0);
   }
 
@@ -974,17 +1015,20 @@ class _PlaybackProgressState extends State<_PlaybackProgress>
     final double target = _currentTargetProgress;
     final int now = _clock.elapsedMilliseconds + 1;
 
-    final bool trackChanged =
-        _trackVersion != AppState.trackVersion ||
+    final bool metadataChanged =
+        _trackSource != (AppState.currentPlatformTrack?.sourceAppId ?? '') ||
         _trackTitle != AppState.trackTitle ||
         _trackArtist != AppState.artistName;
+    final bool trackChanged =
+        metadataChanged || _trackVersion != AppState.trackVersion;
     if (trackChanged) {
       final bool hasPreviousTrack =
-          _trackVersion.isNotEmpty || _trackTitle.isNotEmpty;
+          _trackSource.isNotEmpty || _trackTitle.isNotEmpty;
+      _trackSource = AppState.currentPlatformTrack?.sourceAppId ?? '';
       _trackVersion = AppState.trackVersion;
       _trackTitle = AppState.trackTitle;
       _trackArtist = AppState.artistName;
-      if (hasPreviousTrack && !_hasExplicitTrackSignal) {
+      if (hasPreviousTrack && metadataChanged && !_hasExplicitTrackSignal) {
         _transitionFrom = _displayProgress;
         _transitionStartedAtMs = now;
         _catchUpStartedAtMs = 0;

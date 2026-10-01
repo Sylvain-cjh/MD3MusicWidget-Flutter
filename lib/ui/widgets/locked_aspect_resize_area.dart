@@ -104,6 +104,7 @@ final class LockedAspectResizeGeometry {
 
 class LockedAspectResizeArea extends StatefulWidget {
   final Widget child;
+  final bool enabled;
   final Size designSize;
   final double minimumScale;
   final double maximumScale;
@@ -113,6 +114,7 @@ class LockedAspectResizeArea extends StatefulWidget {
   const LockedAspectResizeArea({
     super.key,
     required this.child,
+    this.enabled = true,
     required this.designSize,
     required this.minimumScale,
     required this.maximumScale,
@@ -133,14 +135,16 @@ class _LockedAspectResizeAreaState extends State<LockedAspectResizeArea> {
   int _dragSerial = 0;
 
   Future<void> _startResize(LockedResizeEdge edge) async {
+    if (!widget.enabled) return;
     final int serial = ++_dragSerial;
     _dragDelta = Offset.zero;
     final Rect bounds = await windowManager.getBounds();
-    if (!mounted || serial != _dragSerial) return;
+    if (!mounted || !widget.enabled || serial != _dragSerial) return;
     _startBounds = bounds;
   }
 
   void _updateResize(LockedResizeEdge edge, DragUpdateDetails details) {
+    if (!widget.enabled) return;
     _dragDelta += details.delta;
     final Rect? startBounds = _startBounds;
     if (startBounds == null) return;
@@ -165,7 +169,12 @@ class _LockedAspectResizeAreaState extends State<LockedAspectResizeArea> {
   }
 
   Future<void> _flushBounds() async {
-    if (_writeInFlight || _pendingBounds == null) return;
+    if (!mounted ||
+        !widget.enabled ||
+        _writeInFlight ||
+        _pendingBounds == null) {
+      return;
+    }
     _writeInFlight = true;
     final Rect target = _pendingBounds!;
     _pendingBounds = null;
@@ -181,6 +190,17 @@ class _LockedAspectResizeAreaState extends State<LockedAspectResizeArea> {
     _dragSerial++;
     _startBounds = null;
     widget.onResizeEnd?.call();
+  }
+
+  @override
+  void didUpdateWidget(covariant LockedAspectResizeArea oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.enabled && !widget.enabled) {
+      _dragSerial++;
+      _startBounds = null;
+      _pendingBounds = null;
+      _dragDelta = Offset.zero;
+    }
   }
 
   Widget _edge({
@@ -208,86 +228,88 @@ class _LockedAspectResizeAreaState extends State<LockedAspectResizeArea> {
     return Stack(
       children: [
         widget.child,
-        Positioned(
-          left: 0,
-          top: 0,
-          width: edgeSize,
-          height: edgeSize,
-          child: _edge(
-            edge: LockedResizeEdge.topLeft,
-            cursor: SystemMouseCursors.resizeUpLeft,
+        if (widget.enabled) ...[
+          Positioned(
+            left: 0,
+            top: 0,
+            width: edgeSize,
+            height: edgeSize,
+            child: _edge(
+              edge: LockedResizeEdge.topLeft,
+              cursor: SystemMouseCursors.resizeUpLeft,
+            ),
           ),
-        ),
-        Positioned(
-          left: edgeSize,
-          right: edgeSize,
-          top: 0,
-          height: edgeSize,
-          child: _edge(
-            edge: LockedResizeEdge.top,
-            cursor: SystemMouseCursors.resizeUp,
+          Positioned(
+            left: edgeSize,
+            right: edgeSize,
+            top: 0,
+            height: edgeSize,
+            child: _edge(
+              edge: LockedResizeEdge.top,
+              cursor: SystemMouseCursors.resizeUp,
+            ),
           ),
-        ),
-        Positioned(
-          right: 0,
-          top: 0,
-          width: edgeSize,
-          height: edgeSize,
-          child: _edge(
-            edge: LockedResizeEdge.topRight,
-            cursor: SystemMouseCursors.resizeUpRight,
+          Positioned(
+            right: 0,
+            top: 0,
+            width: edgeSize,
+            height: edgeSize,
+            child: _edge(
+              edge: LockedResizeEdge.topRight,
+              cursor: SystemMouseCursors.resizeUpRight,
+            ),
           ),
-        ),
-        Positioned(
-          left: 0,
-          top: edgeSize,
-          bottom: edgeSize,
-          width: edgeSize,
-          child: _edge(
-            edge: LockedResizeEdge.left,
-            cursor: SystemMouseCursors.resizeLeft,
+          Positioned(
+            left: 0,
+            top: edgeSize,
+            bottom: edgeSize,
+            width: edgeSize,
+            child: _edge(
+              edge: LockedResizeEdge.left,
+              cursor: SystemMouseCursors.resizeLeft,
+            ),
           ),
-        ),
-        Positioned(
-          right: 0,
-          top: edgeSize,
-          bottom: edgeSize,
-          width: edgeSize,
-          child: _edge(
-            edge: LockedResizeEdge.right,
-            cursor: SystemMouseCursors.resizeRight,
+          Positioned(
+            right: 0,
+            top: edgeSize,
+            bottom: edgeSize,
+            width: edgeSize,
+            child: _edge(
+              edge: LockedResizeEdge.right,
+              cursor: SystemMouseCursors.resizeRight,
+            ),
           ),
-        ),
-        Positioned(
-          left: 0,
-          bottom: 0,
-          width: edgeSize,
-          height: edgeSize,
-          child: _edge(
-            edge: LockedResizeEdge.bottomLeft,
-            cursor: SystemMouseCursors.resizeDownLeft,
+          Positioned(
+            left: 0,
+            bottom: 0,
+            width: edgeSize,
+            height: edgeSize,
+            child: _edge(
+              edge: LockedResizeEdge.bottomLeft,
+              cursor: SystemMouseCursors.resizeDownLeft,
+            ),
           ),
-        ),
-        Positioned(
-          left: edgeSize,
-          right: edgeSize,
-          bottom: 0,
-          height: edgeSize,
-          child: _edge(
-            edge: LockedResizeEdge.bottom,
-            cursor: SystemMouseCursors.resizeDown,
+          Positioned(
+            left: edgeSize,
+            right: edgeSize,
+            bottom: 0,
+            height: edgeSize,
+            child: _edge(
+              edge: LockedResizeEdge.bottom,
+              cursor: SystemMouseCursors.resizeDown,
+            ),
           ),
-        ),
-        Positioned(
-          right: 0,
-          bottom: 0,
-          width: edgeSize,
-          height: edgeSize,
-          child: _edge(
-            edge: LockedResizeEdge.bottomRight,
-            cursor: SystemMouseCursors.resizeDownRight,
+          Positioned(
+            right: 0,
+            bottom: 0,
+            width: edgeSize,
+            height: edgeSize,
+            child: _edge(
+              edge: LockedResizeEdge.bottomRight,
+              cursor: SystemMouseCursors.resizeDownRight,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }

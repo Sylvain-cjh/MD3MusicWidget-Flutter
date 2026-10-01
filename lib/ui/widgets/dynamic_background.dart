@@ -129,8 +129,38 @@ class DitherNoisePainter extends CustomPainter {
       oldDelegate.brightness != brightness;
 }
 
+
+
+class _AnchoredBackgroundCanvas extends StatelessWidget {
+  final double width;
+  final double height;
+  final double anchorHeight;
+  final Widget child;
+
+  const _AnchoredBackgroundCanvas({
+    required this.width,
+    required this.height,
+    required this.anchorHeight,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) => OverflowBox(
+    alignment: Alignment.topCenter,
+    minWidth: width,
+    maxWidth: width,
+    minHeight: height,
+    maxHeight: height,
+    child: Transform.translate(
+      offset: Offset(0, (anchorHeight - height) / 2),
+      child: child,
+    ),
+  );
+}
+
 class DynamicBackground extends StatefulWidget {
-  const DynamicBackground({super.key});
+  final double? anchorHeight;
+  const DynamicBackground({super.key, this.anchorHeight});
   @override
   State<DynamicBackground> createState() => _DynamicBackgroundState();
 }
@@ -373,12 +403,10 @@ class _DynamicBackgroundState extends State<DynamicBackground>
         return Stack(
           children: [
             Positioned.fill(
-              child: OverflowBox(
-                minWidth: canvasW,
-                maxWidth: canvasW,
-                minHeight: canvasH,
-                maxHeight: canvasH,
-                alignment: Alignment.center,
+              child: _AnchoredBackgroundCanvas(
+                width: canvasW,
+                height: canvasH,
+                anchorHeight: widget.anchorHeight ?? constraints.maxHeight,
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 800),
                   curve: Curves.easeOutQuart,
@@ -404,12 +432,10 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                   curve: Curves.easeOutCubic,
                   opacity: activeBackground == null ? 0.0 : 1.0,
                   onEnd: _releaseHeldArtwork,
-                  child: OverflowBox(
-                    minWidth: canvasW,
-                    maxWidth: canvasW,
-                    minHeight: canvasH,
-                    maxHeight: canvasH,
-                    alignment: Alignment.center,
+                  child: _AnchoredBackgroundCanvas(
+                    width: canvasW,
+                    height: canvasH,
+                    anchorHeight: widget.anchorHeight ?? constraints.maxHeight,
                     child: AnimatedBuilder(
                       animation: _revealAnimation,
                       builder: (context, child) {
@@ -567,12 +593,10 @@ class _DynamicBackgroundState extends State<DynamicBackground>
               ),
 
             Positioned.fill(
-              child: OverflowBox(
-                minWidth: canvasW,
-                maxWidth: canvasW,
-                minHeight: canvasH,
-                maxHeight: canvasH,
-                alignment: Alignment.center,
+              child: _AnchoredBackgroundCanvas(
+                width: canvasW,
+                height: canvasH,
+                anchorHeight: widget.anchorHeight ?? constraints.maxHeight,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [

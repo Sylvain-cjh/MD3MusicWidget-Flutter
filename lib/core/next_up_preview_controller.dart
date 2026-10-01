@@ -26,11 +26,11 @@ class NextUpPreviewInput {
 
 
 class NextUpPreviewController extends ChangeNotifier {
+  static const dismissBeforeEnd = Duration(seconds: 2);
   final NextUpPreviewInput Function() readInput;
   Timer? _boundaryTimer;
-  Timer? _graceTimer;
   String? _trackIdentity;
-  bool _graceExpired = false;
+  bool _closedForTrack = false;
   bool _visible = false;
   PlatformQueueItem? _next;
 
@@ -45,9 +45,7 @@ class NextUpPreviewController extends ChangeNotifier {
     final trackChanged = input.trackIdentity != _trackIdentity;
     if (trackChanged) {
       _trackIdentity = input.trackIdentity;
-      _graceTimer?.cancel();
-      _graceTimer = null;
-      _graceExpired = false;
+      _closedForTrack = false;
     }
     var visible = false;
     final eligible =
@@ -55,42 +53,35 @@ class NextUpPreviewController extends ChangeNotifier {
         input.playing &&
         input.trackIdentity != null &&
         input.next != null &&
-        input.durationMs > 0;
+        input.durationMs.isFinite &&
+        input.durationMs > 0 &&
+        input.positionMs.isFinite;
     if (eligible) {
       final remaining = input.durationMs - input.positionMs;
       final lead = (input.leadSeconds * 1000.0).clamp(0.0, input.durationMs);
-      if (remaining > lead + 500) {
-        _graceTimer?.cancel();
-        _graceTimer = null;
-        _graceExpired = false;
+      final cutoff = dismissBeforeEnd.inMilliseconds.toDouble();
+      if (remaining <= cutoff) {
+        _closedForTrack = true;
+      } else if (remaining > cutoff + 500) {
+        
+        _closedForTrack = false;
       }
-      if (!_graceExpired) {
-        visible = remaining > 0
-            ? remaining <= lead ||
-                  (!trackChanged && _visible && remaining <= lead + 500)
-            : !trackChanged && _visible;
-        if (visible && remaining <= 0) {
-          _graceTimer ??= Timer(const Duration(milliseconds: 1100), () {
-            _graceTimer = null;
-            _graceExpired = true;
-            refresh();
-          });
-        }
-      }
-      if (!visible && remaining > lead) {
+      visible =
+          !_closedForTrack &&
+          remaining > cutoff &&
+          (remaining <= lead ||
+              (!trackChanged && _visible && remaining <= lead + 500));
+      if (!visible && remaining > lead && lead > cutoff) {
         _boundaryTimer = Timer(
           Duration(milliseconds: (remaining - lead).ceil() + 16),
           refresh,
         );
-      } else if (visible && remaining > 0) {
+      } else if (visible) {
         _boundaryTimer = Timer(
-          Duration(milliseconds: remaining.ceil() + 16),
+          Duration(milliseconds: (remaining - cutoff).ceil() + 16),
           refresh,
         );
       }
-    } else {
-      _graceTimer?.cancel();
-      _graceTimer = null;
     }
     final next = visible ? input.next : null;
     if (_visible == visible && identical(_next, next)) return;
@@ -102,7 +93,6 @@ class NextUpPreviewController extends ChangeNotifier {
   @override
   void dispose() {
     _boundaryTimer?.cancel();
-    _graceTimer?.cancel();
     super.dispose();
   }
 }

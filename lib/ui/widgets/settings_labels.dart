@@ -49,6 +49,9 @@ final class SettingsLabels {
   static const rightCoverGroup = '右侧渐变封面';
   static const rightCoverDarkening = '压暗程度';
   static const rightCoverFadeLength = '渐隐长度';
+  static const rightCoverFadeLinked = 'X／Y 渐隐联动';
+  static const rightCoverFadeX = '横向渐隐 · X';
+  static const rightCoverFadeY = '纵向渐隐 · Y';
   static const rightCoverBlur = '柔化程度';
   static const progressAutoContrast = '进度条自动反色';
   static const spectrum = '音乐频谱';
@@ -79,6 +82,7 @@ final class SettingsLabels {
   static const trackTextExitSideways = '侧向离开';
   static const trackTextExitShrink = '轻轻缩小';
   static const progressStyle = '进度条样式';
+  static const playbackTime = '播放时间';
   static const playButton = '播放按钮';
   static const previousButton = '上一首按钮';
   static const nextButton = '下一首按钮';

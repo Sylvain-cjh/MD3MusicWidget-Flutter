@@ -72,7 +72,8 @@ final class LyricsCoordinator extends ChangeNotifier {
     if (!force &&
         displayIdentity != null &&
         displayIdentity == _displayTrackIdentity &&
-        _state.status == LyricsStatus.ready &&
+        (_state.status == LyricsStatus.ready ||
+            _state.status == LyricsStatus.loading) &&
         _selectedProviderId == providerId &&
         _providerRevision == providers.revision) {
       _trackIdentity = identity;

@@ -17,16 +17,19 @@ class SlideMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final offsetBegin = menuSide == "left"
+    final offsetBegin = MediaQuery.disableAnimationsOf(context)
+        ? Offset.zero
+        : menuSide == "left"
         ? const Offset(0.2, 0)
         : const Offset(-0.2, 0);
 
     return FadeTransition(
       opacity: animation,
       child: SlideTransition(
-        position: Tween<Offset>(begin: offsetBegin, end: Offset.zero).animate(
-          CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-        ),
+        position: Tween<Offset>(
+          begin: offsetBegin,
+          end: Offset.zero,
+        ).animate(animation.drive(CurveTween(curve: Curves.easeOutCubic))),
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 4),
           child: IntrinsicWidth(

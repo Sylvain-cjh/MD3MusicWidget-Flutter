@@ -126,7 +126,9 @@ class AppState {
       0.0,
       playbackDurationMs,
     );
-    return remaining > 0 && remaining <= windowMs;
+    return remaining >
+            NextUpPreviewController.dismissBeforeEnd.inMilliseconds &&
+        remaining <= windowMs;
   }
 
   static void setLocalLyricsDirectory(String path) {
@@ -295,6 +297,26 @@ class AppState {
   static const defaultRightCoverBlur = 1.2;
   static double rightCoverDarkening = defaultRightCoverDarkening;
   static double rightCoverFadeLength = defaultRightCoverFadeLength;
+  static bool rightCoverFadeLinked = true;
+  static double rightCoverFadeLengthX = defaultRightCoverFadeLength;
+  static double rightCoverFadeLengthY = defaultRightCoverFadeLength;
+  static double get rightCoverEffectiveFadeX =>
+      rightCoverFadeLinked ? rightCoverFadeLength : rightCoverFadeLengthX;
+  static double get rightCoverEffectiveFadeY =>
+      rightCoverFadeLinked ? rightCoverFadeLength : rightCoverFadeLengthY;
+  static void setRightCoverFadeLinked(bool linked) {
+    if (rightCoverFadeLinked == linked) return;
+    if (linked) {
+      rightCoverFadeLength =
+          (rightCoverFadeLengthX + rightCoverFadeLengthY) / 2;
+    } else {
+      
+      rightCoverFadeLengthX = rightCoverFadeLength;
+      rightCoverFadeLengthY = rightCoverFadeLength;
+    }
+    rightCoverFadeLinked = linked;
+  }
+
   static double rightCoverBlur = defaultRightCoverBlur;
   static final rightArtworkRevision = ValueNotifier<int>(0);
   static void notifyRightArtworkChanged() => rightArtworkRevision.value++;
@@ -321,6 +343,7 @@ class AppState {
   static double lyricsWeightValue = defaultLyricsWeightValue;
   static double lyricsFontSize = defaultLyricsFontSize;
   static MD3ProgressStyle progressStyle = MD3ProgressStyle.linear;
+  static bool showPlaybackTime = false;
   static MD3Shape settingsNavigationShape = MD3Shape.roundedLarge;
   static bool enableProgressAutoContrast = true;
   static bool enableOledTheme = false;
@@ -434,12 +457,7 @@ class AppState {
       spectrumMode == SpectrumMode.off && !showPerformanceMonitor ? 0.0 : 64.0;
   static double lyricsPanelExtentOf(WidgetLayout l) => showLyrics ? 64.0 : 0.0;
   static double nextUpPanelExtentOf(WidgetLayout l) =>
-      nextUpPanelOccupied ||
-          (showNextUp &&
-              nextUpPreviewVisible.value &&
-              (playlistFilePath.isNotEmpty || qqPlaylistLink.isNotEmpty))
-      ? 64.0
-      : 0.0;
+      nextUpPanelOccupied ? 64.0 : 0.0;
   static double innerPlayerHeightOf(WidgetLayout l) =>
       corePlayerHeightOf(l) +
       spectrumPanelExtentOf(l) +
@@ -781,6 +799,7 @@ class AppState {
           snapshot['progressStyle'],
           MD3ProgressStyle.linear,
         );
+        showPlaybackTime = snapshot['showPlaybackTime'] == true;
         settingsNavigationShape = _enumFromName(
           MD3Shape.values,
           snapshot['settingsNavigationShape'],
@@ -912,6 +931,22 @@ class AppState {
         0.15,
         1,
       );
+      final linkedFade = snapshot != null
+          ? snapshot['rightCoverFadeLinked']
+          : p.get('rightCoverFadeLinked');
+      rightCoverFadeLinked = linkedFade is bool ? linkedFade : true;
+      rightCoverFadeLengthX = boundedArtworkSetting(
+        'rightCoverFadeLengthX',
+        rightCoverFadeLength,
+        0.15,
+        1,
+      );
+      rightCoverFadeLengthY = boundedArtworkSetting(
+        'rightCoverFadeLengthY',
+        rightCoverFadeLength,
+        0.15,
+        1,
+      );
       rightCoverBlur = boundedArtworkSetting(
         'rightCoverBlur',
         defaultRightCoverBlur,
@@ -979,6 +1014,7 @@ class AppState {
       p.getInt('progressStyle'),
       MD3ProgressStyle.linear,
     );
+    showPlaybackTime = p.getBool('showPlaybackTime') ?? false;
     settingsNavigationShape = _enumFromIndex(
       MD3Shape.values,
       p.getInt('settingsNavigationShape'),
@@ -1064,6 +1100,9 @@ class AppState {
     'glowMode': glowMode.name,
     'rightCoverDarkening': rightCoverDarkening,
     'rightCoverFadeLength': rightCoverFadeLength,
+    'rightCoverFadeLinked': rightCoverFadeLinked,
+    'rightCoverFadeLengthX': rightCoverFadeLengthX,
+    'rightCoverFadeLengthY': rightCoverFadeLengthY,
     'rightCoverBlur': rightCoverBlur,
     'spectrumMode': spectrumMode.name,
     'showLyrics': showLyrics,
@@ -1077,6 +1116,7 @@ class AppState {
     'lyricsExitTransitionStyle': lyricsExitTransitionStyle.name,
     'localLyricsDirectory': localLyricsDirectory,
     'progressStyle': progressStyle.name,
+    'showPlaybackTime': showPlaybackTime,
     'settingsNavigationShape': settingsNavigationShape.name,
     'enableProgressAutoContrast': enableProgressAutoContrast,
     'enableOledTheme': enableOledTheme,

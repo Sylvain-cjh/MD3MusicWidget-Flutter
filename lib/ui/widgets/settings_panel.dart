@@ -141,6 +141,25 @@ class _SettingsPanelState extends State<SettingsPanel>
     );
   }
 
+  Widget _buildRightCoverFadeSlider({
+    required String title,
+    String subtitle = '',
+    required double value,
+    required String keyName,
+    required ValueChanged<double> onChanged,
+  }) => _buildContinuousSliderRow(
+    title: title,
+    subtitle: subtitle,
+    value: value,
+    min: 0.15,
+    max: 1,
+    resetValue: AppState.defaultRightCoverFadeLength,
+    valueLabel: (value) => '${(value * 100).round()}%',
+    sliderKey: ValueKey(keyName),
+    onChanged: (value) => _updateRightArtwork(() => onChanged(value)),
+    onChangeEnd: _finishRightArtworkChange,
+  );
+
   void _finishRightArtworkChange() {
     _rightArtworkSaveTimer?.cancel();
     _rightArtworkSaveTimer = null;
@@ -763,21 +782,54 @@ class _SettingsPanelState extends State<SettingsPanel>
                             ),
                             onChangeEnd: _finishRightArtworkChange,
                           ),
-                          _buildContinuousSliderRow(
-                            title: SettingsLabels.rightCoverFadeLength,
-                            subtitle: SettingsDescriptions.rightCoverFadeLength,
-                            value: AppState.rightCoverFadeLength,
-                            min: 0.15,
-                            max: 1,
-                            resetValue: AppState.defaultRightCoverFadeLength,
-                            valueLabel: (value) => '${(value * 100).round()}%',
-                            sliderKey: const ValueKey(
-                              'right_cover_fade_slider',
+                          KeyedSubtree(
+                            key: const ValueKey(
+                              'right_cover_fade_linked_switch',
                             ),
-                            onChanged: (value) => _updateRightArtwork(
-                              () => AppState.rightCoverFadeLength = value,
+                            child: _buildSwitchRow(
+                              SettingsLabels.rightCoverFadeLinked,
+                              SettingsDescriptions.rightCoverFadeLinked,
+                              AppState.rightCoverFadeLinked,
+                              (value) {
+                                _updateRightArtwork(
+                                  () => AppState.setRightCoverFadeLinked(value),
+                                );
+                                _finishRightArtworkChange();
+                              },
                             ),
-                            onChangeEnd: _finishRightArtworkChange,
+                          ),
+                          _buildOptionalSetting(
+                            visible: AppState.rightCoverFadeLinked,
+                            child: _buildRightCoverFadeSlider(
+                              title: SettingsLabels.rightCoverFadeLength,
+                              subtitle:
+                                  SettingsDescriptions.rightCoverFadeLength,
+                              value: AppState.rightCoverFadeLength,
+                              keyName: 'right_cover_fade_slider',
+                              onChanged: (value) =>
+                                  AppState.rightCoverFadeLength = value,
+                            ),
+                          ),
+                          _buildOptionalSetting(
+                            visible: !AppState.rightCoverFadeLinked,
+                            child: Column(
+                              children: [
+                                _buildRightCoverFadeSlider(
+                                  title: SettingsLabels.rightCoverFadeX,
+                                  value: AppState.rightCoverFadeLengthX,
+                                  keyName: 'right_cover_fade_x_slider',
+                                  onChanged: (value) =>
+                                      AppState.rightCoverFadeLengthX = value,
+                                ),
+                                _buildRightCoverFadeSlider(
+                                  title: SettingsLabels.rightCoverFadeY,
+                                  value: AppState.rightCoverFadeLengthY,
+                                  keyName: 'right_cover_fade_y_slider',
+                                  onChanged: (value) =>
+                                      AppState.rightCoverFadeLengthY = value,
+                                ),
+                              ],
+                            ),
                           ),
                           _buildContinuousSliderRow(
                             title: SettingsLabels.rightCoverBlur,
@@ -1003,6 +1055,24 @@ class _SettingsPanelState extends State<SettingsPanel>
                                 widget.onVisualChanged();
                               },
                               _progressStyleEntries(),
+                            ),
+                          if (MediaCapability.supports(
+                            AppState.mediaCapabilities,
+                            MediaCapability.timeline,
+                          ))
+                            KeyedSubtree(
+                              key: const ValueKey('playback_time_switch'),
+                              child: _buildSwitchRow(
+                                SettingsLabels.playbackTime,
+                                SettingsDescriptions.playbackTime,
+                                AppState.showPlaybackTime,
+                                (value) {
+                                  setState(
+                                    () => AppState.showPlaybackTime = value,
+                                  );
+                                  widget.onVisualChanged();
+                                },
+                              ),
                             ),
                           if (MediaCapability.supports(
                             AppState.mediaCapabilities,
