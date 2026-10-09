@@ -89,6 +89,15 @@ final class SettingsLabels {
   static const showNextUp = '显示下一首预告';
   static const playlistFile = '导入播放列表';
   static const qqPlaylist = 'QQ 音乐歌单';
+  static const neteasePlaylist = '网易云音乐歌单';
+  static const playlistSource = '预告歌单来源';
+  static const storageGroup = '缓存与存储';
+  static const lyricsCacheLimit = '歌词缓存上限';
+  static const backgroundCacheLimit = '背景缓存上限';
+  static const clearCaches = '清理本地缓存';
+  static String cacheCapacity(double value) =>
+      value.round() == 0 ? '不保留磁盘缓存' : '${value.round()} MiB';
+  static const providerNetease = '网易云音乐 · beta';
   static const qqPlaylistLink = '歌单链接或 ID';
   static const nextUpLead = '预告提前量';
   static const lead10Seconds = '10 秒';

@@ -6,6 +6,7 @@ import '../../core/app_state.dart';
 import '../../core/platform_provider.dart';
 import '../../core/next_up_preview_controller.dart';
 import '../animations/next_up_presence_motion.dart';
+import 'pixel_aligned_text.dart';
 
 class MusicNextUpPanel extends StatefulWidget {
   final Animation<double>? presenceAnimation;
@@ -105,6 +106,8 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
               ? next.artist
               : AppState.queue.providerId == 'qqMusicPlaylist'
               ? '来自 QQ 音乐歌单'
+              : AppState.queue.providerId == 'neteasePlaylist'
+              ? '来自网易云歌单'
               : '来自导入的播放列表'
         : '';
     return ClipRect(
@@ -153,25 +156,29 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      label,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelLarge
-                                          ?.copyWith(color: scheme.onSurface),
+                                    PixelAlignedText(
+                                      child: Text(
+                                        label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelLarge
+                                            ?.copyWith(color: scheme.onSurface),
+                                      ),
                                     ),
-                                    Text(
-                                      detail,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            color: scheme.onSurfaceVariant,
-                                          ),
+                                    PixelAlignedText(
+                                      child: Text(
+                                        detail,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall
+                                            ?.copyWith(
+                                              color: scheme.onSurfaceVariant,
+                                            ),
+                                      ),
                                     ),
                                   ],
                                 ),

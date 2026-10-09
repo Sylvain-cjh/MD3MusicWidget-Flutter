@@ -7,7 +7,8 @@ import 'dart:typed_data';
 import 'lyrics_document.dart';
 import 'platform_provider.dart';
 
-final class LrclibLyricsProvider implements LyricsPlatformProvider {
+final class LrclibLyricsProvider
+    implements LyricsPlatformProvider, RetryableLyricsProvider {
   static const String providerId = 'lrclib';
   static const int _maximumResponseBytes = 2 * 1024 * 1024;
   final HttpClient _client;
@@ -26,6 +27,13 @@ final class LrclibLyricsProvider implements LyricsPlatformProvider {
 
   @override
   bool accepts(PlatformTrack track) => track.title.trim().isNotEmpty;
+
+  @override
+  void invalidateMiss(PlatformTrack track) {
+    final key =
+        '${track.title.trim().toLowerCase()}|${track.artist.trim().toLowerCase()}|${(track.durationMs / 1000).round()}';
+    if (_cache[key]?.$1 == null) _cache.remove(key);
+  }
 
   @override
   Future<LyricsDocument?> loadLyrics(PlatformTrack track) {

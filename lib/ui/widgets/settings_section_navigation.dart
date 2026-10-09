@@ -7,6 +7,7 @@ import 'package:flutter/physics.dart';
 import '../../core/app_state.dart';
 import '../animations/component_size_motion.dart';
 import '../animations/settings_navigation_motion.dart';
+import 'settings_control_shape.dart';
 
 class SettingsSectionDestination {
   final String id;
@@ -57,7 +58,7 @@ class _SettingsSectionNavigationState extends State<SettingsSectionNavigation>
   int? _settlingIndex;
   int _settleEpoch = 0;
   int _stretchEpoch = 0;
-  int? _hoveredIndex;
+  final ValueNotifier<int?> _hoveredIndex = ValueNotifier<int?>(null);
 
   @override
   void initState() {
@@ -87,6 +88,7 @@ class _SettingsSectionNavigationState extends State<SettingsSectionNavigation>
     _pauseTimer?.cancel();
     _indicatorPosition.dispose();
     _indicatorStretch.dispose();
+    _hoveredIndex.dispose();
     super.dispose();
   }
 
@@ -153,24 +155,7 @@ class _SettingsSectionNavigationState extends State<SettingsSectionNavigation>
     });
   }
 
-  ShapeBorder get _shape => switch (widget.shape) {
-    MD3Shape.stadium || MD3Shape.circle => const StadiumBorder(),
-    MD3Shape.roundedExtraSmall => RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(4),
-    ),
-    MD3Shape.roundedSmall => RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(8),
-    ),
-    MD3Shape.roundedMedium => RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(12),
-    ),
-    MD3Shape.roundedLarge => RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(20),
-    ),
-    MD3Shape.roundedExtraLarge => RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(28),
-    ),
-  };
+  ShapeBorder get _shape => SettingsControlShape.borderFor(widget.shape);
 
   int _indexAt(double dx, double width) =>
       (dx / width * widget.destinations.length).floor().clamp(
@@ -333,7 +318,7 @@ class _SettingsSectionNavigationState extends State<SettingsSectionNavigation>
                 _previewIndex = null;
                 _dragging = false;
                 _pressOnIndicator = false;
-                _hoveredIndex = event.kind == PointerDeviceKind.mouse
+                _hoveredIndex.value = event.kind == PointerDeviceKind.mouse
                     ? index
                     : null;
               });
@@ -381,45 +366,56 @@ class _SettingsSectionNavigationState extends State<SettingsSectionNavigation>
                       ),
                     ),
                   ),
-                  Row(
-                    children: [
-                      for (var index = 0; index < destinations.length; index++)
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.all(3),
-                            child: AnimatedOpacity(
-                              duration: reduceMotion
-                                  ? Duration.zero
-                                  : const Duration(milliseconds: 120),
-                              opacity:
-                                  _activePointer == null &&
-                                      _hoveredIndex == index &&
-                                      index != indicatorIndex
-                                  ? 1
-                                  : 0,
-                              child: DecoratedBox(
-                                key: ValueKey('settings_section_hover_$index'),
-                                decoration: ShapeDecoration(
-                                  shape: shape,
-                                  color: scheme.onSurface.withValues(
-                                    alpha: 0.075,
-                                  ),
-                                  shadows: [
-                                    BoxShadow(
-                                      color: scheme.shadow.withValues(
-                                        alpha: 0.12,
-                                      ),
-                                      blurRadius: 7,
-                                      offset: const Offset(0, 2),
+                  ValueListenableBuilder<int?>(
+                    valueListenable: _hoveredIndex,
+                    builder: (context, hoveredIndex, _) => RepaintBoundary(
+                      child: Row(
+                        children: [
+                          for (
+                            var index = 0;
+                            index < destinations.length;
+                            index++
+                          )
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.all(3),
+                                child: AnimatedOpacity(
+                                  duration: reduceMotion
+                                      ? Duration.zero
+                                      : const Duration(milliseconds: 120),
+                                  opacity:
+                                      _activePointer == null &&
+                                          hoveredIndex == index &&
+                                          index != indicatorIndex
+                                      ? 1
+                                      : 0,
+                                  child: DecoratedBox(
+                                    key: ValueKey(
+                                      'settings_section_hover_$index',
                                     ),
-                                  ],
+                                    decoration: ShapeDecoration(
+                                      shape: shape,
+                                      color: scheme.onSurface.withValues(
+                                        alpha: 0.075,
+                                      ),
+                                      shadows: [
+                                        BoxShadow(
+                                          color: scheme.shadow.withValues(
+                                            alpha: 0.12,
+                                          ),
+                                          blurRadius: 7,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: const SizedBox.expand(),
+                                  ),
                                 ),
-                                child: const SizedBox.expand(),
                               ),
                             ),
-                          ),
-                        ),
-                    ],
+                        ],
+                      ),
+                    ),
                   ),
                   AnimatedBuilder(
                     animation: _indicatorVisual,
@@ -521,13 +517,13 @@ class _SettingsSectionNavigationState extends State<SettingsSectionNavigation>
                         Expanded(
                           child: MouseRegion(
                             onEnter: (_) {
-                              if (_activePointer == null) {
-                                setState(() => _hoveredIndex = index);
+                              if (mounted && _activePointer == null) {
+                                _hoveredIndex.value = index;
                               }
                             },
                             onExit: (_) {
-                              if (_hoveredIndex == index) {
-                                setState(() => _hoveredIndex = null);
+                              if (mounted && _hoveredIndex.value == index) {
+                                _hoveredIndex.value = null;
                               }
                             },
                             child: Padding(

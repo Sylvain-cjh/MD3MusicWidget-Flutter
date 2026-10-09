@@ -45,6 +45,61 @@ final class ComponentSizeMotion {
         .toDouble();
   }
 
+  
+  
+  static double stableFitScale({
+    required Size viewport,
+    required Size design,
+    required double referenceScale,
+    required double devicePixelRatio,
+    double maximumScale = double.infinity,
+  }) {
+    if (!viewport.width.isFinite ||
+        !viewport.height.isFinite ||
+        viewport.width <= 0 ||
+        viewport.height <= 0 ||
+        design.width <= 0 ||
+        design.height <= 0) {
+      return referenceScale.isFinite && referenceScale > 0
+          ? referenceScale.clamp(0.0, maximumScale)
+          : 1.0;
+    }
+    final tolerance = devicePixelRatio > 0 ? 1.0 / devicePixelRatio : 1.0;
+    if (referenceScale.isFinite &&
+        referenceScale > 0 &&
+        viewport.width > 0 &&
+        viewport.height > 0 &&
+        (viewport.width - design.width * referenceScale).abs() <=
+            tolerance + 0.000001 &&
+        (viewport.height - design.height * referenceScale).abs() <=
+            tolerance + 0.000001) {
+      return referenceScale.clamp(0.0, maximumScale);
+    }
+    return fitScale(
+      viewport: viewport,
+      design: design,
+      maximumScale: maximumScale,
+    );
+  }
+
+  static double stableWidthScale({
+    required double width,
+    required double designWidth,
+    required double referenceScale,
+    required double devicePixelRatio,
+    required double minimumScale,
+    required double maximumScale,
+  }) {
+    if (designWidth <= 0 || !width.isFinite || width <= 0) {
+      return referenceScale;
+    }
+    final tolerance = devicePixelRatio > 0 ? 1.0 / devicePixelRatio : 1.0;
+    if ((width - designWidth * referenceScale).abs() <= tolerance + 0.000001) {
+      return referenceScale.clamp(minimumScale, maximumScale);
+    }
+    return (width / designWidth).clamp(minimumScale, maximumScale);
+  }
+
   static SpringSimulation frameSimulation({
     required double begin,
     required double end,
@@ -157,7 +212,7 @@ class ComponentSizeStage extends StatelessWidget {
                         child: SizedBox(
                           width: designWidth,
                           height: designHeight,
-                          child: RepaintBoundary(child: child),
+                          child: child,
                         ),
                       ),
                     ],
@@ -194,7 +249,7 @@ class ComponentSizeStage extends StatelessWidget {
                 child: SizedBox(
                   width: designWidth,
                   height: designHeight,
-                  child: RepaintBoundary(child: child),
+                  child: child,
                 ),
               ),
             ),

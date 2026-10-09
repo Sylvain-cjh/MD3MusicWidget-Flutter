@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'lyrics_document.dart';
 import 'platform_provider.dart';
+import 'lyrics_disk_cache.dart';
 
 enum LyricsStatus { unavailable, loading, ready, failed }
 
@@ -25,6 +26,8 @@ final class LyricsState {
   final LyricsDocument? document;
   final int lineIndex;
   final LyricsIssue issue;
+  final int attempt;
+  final int maximumAttempts;
 
   const LyricsState({
     required this.status,
@@ -32,6 +35,8 @@ final class LyricsState {
     this.document,
     this.lineIndex = -1,
     this.issue = LyricsIssue.none,
+    this.attempt = 1,
+    this.maximumAttempts = 1,
   });
 
   LyricLine? get currentLine =>
@@ -51,8 +56,37 @@ final class LyricsCoordinator extends ChangeNotifier {
   int _generation = 0;
   double _positionMs = 0;
   bool _disposed = false;
+  final LyricsDiskCache? cache;
+  final int maximumAttempts;
+  final bool retryMissing;
+  Timer? _retryTimer;
+  Completer<void>? _retryWake;
 
-  LyricsCoordinator(this.providers);
+  LyricsCoordinator(
+    this.providers, {
+    this.cache,
+    int maximumAttempts = 1,
+    this.retryMissing = false,
+  }) : maximumAttempts = maximumAttempts.clamp(1, 5);
+
+  void _cancelRetry() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    final wake = _retryWake;
+    _retryWake = null;
+    if (wake != null && !wake.isCompleted) wake.complete();
+  }
+
+  Future<void> _waitRetry(int attempt) {
+    final wake = Completer<void>();
+    _retryWake = wake;
+    _retryTimer = Timer(Duration(milliseconds: attempt == 1 ? 500 : 1500), () {
+      _retryTimer = null;
+      _retryWake = null;
+      wake.complete();
+    });
+    return wake.future;
+  }
 
   LyricsState get state => _state;
 
@@ -83,6 +117,7 @@ final class LyricsCoordinator extends ChangeNotifier {
     _displayTrackIdentity = displayIdentity;
     _selectedProviderId = providerId;
     _providerRevision = providers.revision;
+    _cancelRetry();
     final generation = ++_generation;
     _positionMs = 0;
     final provider = track == null
@@ -98,10 +133,64 @@ final class LyricsCoordinator extends ChangeNotifier {
       return;
     }
     _setState(
-      LyricsState(status: LyricsStatus.loading, providerId: provider.id),
+      LyricsState(
+        status: LyricsStatus.loading,
+        providerId: provider.id,
+        maximumAttempts: maximumAttempts,
+      ),
     );
     try {
-      final document = await provider.loadLyrics(track!);
+      LyricsDocument? document;
+      final useDisk = provider.id != 'localLrc';
+      if (!force && useDisk && cache != null) {
+        document = await cache!.get(track!, provider.id);
+      }
+      final restoredFromDisk = document != null;
+      if (_disposed || generation != _generation) return;
+      if (document == null) {
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++) {
+          if (_disposed || generation != _generation) return;
+          if (attempt > 1) {
+            _setState(
+              LyricsState(
+                status: LyricsStatus.loading,
+                providerId: provider.id,
+                attempt: attempt,
+                maximumAttempts: maximumAttempts,
+              ),
+            );
+          }
+          try {
+            document = await provider.loadLyrics(track!);
+            if (_disposed || generation != _generation) return;
+            if (document != null && !document.isEmpty) break;
+            if (!retryMissing ||
+                provider is! RetryableLyricsProvider ||
+                attempt == maximumAttempts) {
+              break;
+            }
+            (provider as RetryableLyricsProvider).invalidateMiss(track);
+          } catch (error) {
+            if (_disposed || generation != _generation) return;
+            final rateLimited =
+                error is HttpException &&
+                RegExp(
+                  r'\b(401|403|404|429)\b|rate limited',
+                ).hasMatch(error.message);
+            final transient =
+                error is SocketException ||
+                error is TimeoutException ||
+                error is HttpException;
+            if (rateLimited || !transient || attempt == maximumAttempts) {
+              rethrow;
+            }
+            if (provider is RetryableLyricsProvider) {
+              (provider as RetryableLyricsProvider).invalidateMiss(track!);
+            }
+          }
+          await _waitRetry(attempt);
+        }
+      }
       if (_disposed || generation != _generation) return;
       if (document == null || document.isEmpty) {
         _setState(
@@ -112,6 +201,9 @@ final class LyricsCoordinator extends ChangeNotifier {
           ),
         );
       } else {
+        if (useDisk && cache != null && !restoredFromDisk) {
+          unawaited(cache!.put(track!, provider.id, document));
+        }
         _setState(
           LyricsState(
             status: LyricsStatus.ready,
@@ -170,6 +262,7 @@ final class LyricsCoordinator extends ChangeNotifier {
 
   @override
   void dispose() {
+    _cancelRetry();
     _disposed = true;
     _generation++;
     super.dispose();

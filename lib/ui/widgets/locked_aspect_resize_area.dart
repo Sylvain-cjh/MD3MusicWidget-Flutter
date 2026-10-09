@@ -123,24 +123,29 @@ class LockedAspectResizeArea extends StatefulWidget {
   });
 
   @override
-  State<LockedAspectResizeArea> createState() => _LockedAspectResizeAreaState();
+  State<LockedAspectResizeArea> createState() => LockedAspectResizeAreaState();
 }
 
-class _LockedAspectResizeAreaState extends State<LockedAspectResizeArea> {
+class LockedAspectResizeAreaState extends State<LockedAspectResizeArea> {
   Rect? _startBounds;
   Offset _dragDelta = Offset.zero;
   Rect? _pendingBounds;
   bool _frameScheduled = false;
   bool _writeInFlight = false;
+  Future<void>? _activeWrite;
   int _dragSerial = 0;
 
   Future<void> _startResize(LockedResizeEdge edge) async {
     if (!widget.enabled) return;
     final int serial = ++_dragSerial;
     _dragDelta = Offset.zero;
-    final Rect bounds = await windowManager.getBounds();
-    if (!mounted || !widget.enabled || serial != _dragSerial) return;
-    _startBounds = bounds;
+    try {
+      final Rect bounds = await windowManager.getBounds();
+      if (!mounted || !widget.enabled || serial != _dragSerial) return;
+      _startBounds = bounds;
+    } catch (error) {
+      debugPrint('自由缩放无法读取窗口尺寸: $error');
+    }
   }
 
   void _updateResize(LockedResizeEdge edge, DragUpdateDetails details) {
@@ -179,11 +184,21 @@ class _LockedAspectResizeAreaState extends State<LockedAspectResizeArea> {
     final Rect target = _pendingBounds!;
     _pendingBounds = null;
     try {
-      await windowManager.setBounds(target, animate: false);
+      _activeWrite = windowManager.setBounds(target, animate: false);
+      await _activeWrite;
+    } catch (error) {
+      debugPrint('自由缩放窗口尺寸同步失败: $error');
     } finally {
+      _activeWrite = null;
       _writeInFlight = false;
       if (mounted && _pendingBounds != null) _scheduleBoundsWrite();
     }
+  }
+
+  Future<void> waitForIdle() async {
+    try {
+      await _activeWrite;
+    } catch (_) {}
   }
 
   void _endResize() {

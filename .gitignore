@@ -11,6 +11,7 @@ portable/
 temp/
 *.cer
 *.exe
+!third_party/presentmon/PresentMon.exe
 *.iml
 *.pdb
 *.user

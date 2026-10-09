@@ -9,6 +9,7 @@ import '../../widgets/parallax_button.dart';
 import 'cover_parallax.dart';
 import 'spectrum_glass_surface.dart';
 import 'playback_time_label.dart';
+import 'adaptive_media_text.dart';
 
 int _globalSlideDirection = 1;
 String _lastMeasureKey = "";
@@ -257,9 +258,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
       fontSize: titleFontSize,
       fontWeight: AppState.titleWeight,
       fontVariations: AppState.variationsFor(AppState.titleWeightValue),
-      fontFamily: AppState.currentFontFamily == 'System Default'
-          ? null
-          : AppState.currentFontFamily,
+      fontFamily: AppState.effectiveGlobalFontFamily,
       color: textColor,
       fontFamilyFallback: AppState.textFontFallback,
       letterSpacing: 0.0,
@@ -269,9 +268,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
       fontSize: artistFontSize,
       fontWeight: AppState.artistWeight,
       fontVariations: AppState.variationsFor(AppState.artistWeightValue),
-      fontFamily: AppState.currentFontFamily == 'System Default'
-          ? null
-          : AppState.currentFontFamily,
+      fontFamily: AppState.effectiveGlobalFontFamily,
       color: textColor.withValues(alpha: 0.7),
       fontFamilyFallback: AppState.textFontFallback,
       height: 1.2,
@@ -292,6 +289,8 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     _cachedTitleTargetHeight = titlePainter.height;
     _cachedArtistTargetWidth = artistPainter.width;
     _cachedArtistTargetHeight = artistPainter.height;
+    titlePainter.dispose();
+    artistPainter.dispose();
   }
 
   @override
@@ -303,15 +302,6 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     final Color subTextColor = textOverArtwork
         ? Colors.white.withValues(alpha: 0.78)
         : AppState.currentScheme.onSurfaceVariant;
-    final List<Shadow>? artworkTextShadow = textOverArtwork
-        ? [
-            Shadow(
-              color: Colors.black.withValues(alpha: 0.42),
-              blurRadius: 8,
-              offset: const Offset(0, 1),
-            ),
-          ]
-        : null;
     final bool isV = widget.isVertical;
     final double uiOpacity = AppState.isPlaying ? 1.0 : 0.5;
     final bool canPrevious =
@@ -604,10 +594,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                         AppState.titleWeightValue,
                       ),
                       color: textColor.withValues(alpha: uiOpacity),
-                      shadows: artworkTextShadow,
-                      fontFamily: AppState.currentFontFamily == 'System Default'
-                          ? null
-                          : AppState.currentFontFamily,
+                      fontFamily: AppState.effectiveGlobalFontFamily,
                       fontFamilyFallback: AppState.textFontFallback,
                       letterSpacing: 0.0,
                       height: 1.2,
@@ -663,10 +650,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                         AppState.artistWeightValue,
                       ),
                       color: subTextColor.withValues(alpha: uiOpacity),
-                      shadows: artworkTextShadow,
-                      fontFamily: AppState.currentFontFamily == 'System Default'
-                          ? null
-                          : AppState.currentFontFamily,
+                      fontFamily: AppState.effectiveGlobalFontFamily,
                       fontFamilyFallback: AppState.textFontFallback,
                       letterSpacing: 0.0,
                       height: 1.2,
@@ -1499,7 +1483,7 @@ class _TextInfoWidget extends StatelessWidget {
     required this.measuredHeight,
   });
   @override
-  Widget build(BuildContext context) => Text(
+  Widget build(BuildContext context) => AdaptiveMediaText(
     text,
     maxLines: 1,
     softWrap: false,

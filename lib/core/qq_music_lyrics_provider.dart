@@ -7,7 +7,8 @@ import 'lyrics_document.dart';
 import 'lrclib_lyrics_provider.dart';
 import 'platform_provider.dart';
 
-final class QqMusicLyricsProvider implements LyricsPlatformProvider {
+final class QqMusicLyricsProvider
+    implements LyricsPlatformProvider, RetryableLyricsProvider {
   static const providerId = 'qqMusic';
   static const _maxBytes = 2 * 1024 * 1024;
   final HttpClient _client;
@@ -35,6 +36,14 @@ final class QqMusicLyricsProvider implements LyricsPlatformProvider {
 
   @override
   bool accepts(PlatformTrack track) => track.title.trim().isNotEmpty;
+
+  @override
+  void invalidateMiss(PlatformTrack track) {
+    final key =
+        '${_key(track.title)}|${_key(track.artist)}|${(track.durationMs / 1000).round()}';
+    if (_cache[key]?.$1 == null) _cache.remove(key);
+    _fallback.invalidateMiss(track);
+  }
 
   @override
   Future<LyricsDocument?> loadLyrics(PlatformTrack track) async {

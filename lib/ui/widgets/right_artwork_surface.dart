@@ -6,7 +6,7 @@ import '../../core/app_state.dart';
 
 
 
-class RightArtworkSurface extends StatelessWidget {
+class RightArtworkSurface extends StatefulWidget {
   final ImageProvider provider;
   final String coverKey;
   final bool isPlaying;
@@ -17,6 +17,9 @@ class RightArtworkSurface extends StatelessWidget {
     required this.coverKey,
     required this.isPlaying,
   });
+
+  @override
+  State<RightArtworkSurface> createState() => _RightArtworkSurfaceState();
 
   static LinearGradient _fadeGradient(double length, {required bool vertical}) {
     const samples = 16;
@@ -52,90 +55,135 @@ class RightArtworkSurface extends StatelessWidget {
       stops: stops,
     );
   }
+}
+
+final class _CachedFadeShader {
+  final double length;
+  final LinearGradient gradient;
+  Rect? _bounds;
+  Shader? _shader;
+
+  _CachedFadeShader(this.length, {required bool vertical})
+    : gradient = RightArtworkSurface._fadeGradient(length, vertical: vertical);
+
+  Shader call(Rect bounds) {
+    if (_bounds != bounds || _shader == null) {
+      _bounds = bounds;
+      _shader = gradient.createShader(bounds);
+    }
+    return _shader!;
+  }
+}
+
+class _RightArtworkSurfaceState extends State<RightArtworkSurface> {
+  _CachedFadeShader? _fadeX;
+  _CachedFadeShader? _fadeY;
+  double? _blurSigma;
+  ImageFilter? _blur;
+  Object? _imageKey;
+  Widget? _imageChild;
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<int>(
-    valueListenable: AppState.rightArtworkRevision,
-    child: RepaintBoundary(
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 800),
-        layoutBuilder: (current, previous) =>
-            Stack(fit: StackFit.expand, children: [...previous, ?current]),
-        child: Image(
-          key: ValueKey('${coverKey}_clear'),
-          image: provider,
-          fit: BoxFit.cover,
-          width: double.infinity,
-          height: double.infinity,
-          gaplessPlayback: true,
-        ),
-      ),
-    ),
-    builder: (context, _, image) => ClipRect(
-      child: ShaderMask(
-        key: const ValueKey('right_artwork_vertical_fade'),
-        blendMode: BlendMode.dstIn,
-        shaderCallback: (bounds) => _fadeGradient(
-          AppState.rightCoverEffectiveFadeY,
-          vertical: true,
-        ).createShader(bounds),
-        child: ShaderMask(
-          key: const ValueKey('right_artwork_horizontal_fade'),
-          blendMode: BlendMode.dstIn,
-          shaderCallback: (bounds) => _fadeGradient(
-            AppState.rightCoverEffectiveFadeX,
-            vertical: false,
-          ).createShader(bounds),
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(end: isPlaying ? 1 : 0.2),
-            duration: MediaQuery.disableAnimationsOf(context)
-                ? Duration.zero
-                : const Duration(milliseconds: 500),
-            curve: Curves.easeOutCubic,
-            child: ImageFiltered(
-              key: const ValueKey('right_artwork_softening'),
-              enabled: AppState.rightCoverBlur > 0,
-              imageFilter: ImageFilter.blur(
-                sigmaX: AppState.rightCoverBlur,
-                sigmaY: AppState.rightCoverBlur,
-                tileMode: TileMode.clamp,
-              ),
-              child: image,
-            ),
-            builder: (context, brightness, child) {
-              final gain = (1 - AppState.rightCoverDarkening) * brightness;
-              
-              
-              return ColorFiltered(
-                key: const ValueKey('right_artwork_dimming'),
-                colorFilter: ColorFilter.matrix([
-                  gain,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  gain,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  gain,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  1,
-                  0,
-                ]),
-                child: child,
-              );
-            },
+  Widget build(BuildContext context) {
+    final imageKey = (widget.provider, widget.coverKey);
+    if (_imageKey != imageKey) {
+      _imageKey = imageKey;
+      _imageChild = RepaintBoundary(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 800),
+          layoutBuilder: (current, previous) =>
+              Stack(fit: StackFit.expand, children: [...previous, ?current]),
+          child: Image(
+            key: ValueKey('${widget.coverKey}_clear'),
+            image: widget.provider,
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: double.infinity,
+            gaplessPlayback: true,
           ),
         ),
+      );
+    }
+    return RepaintBoundary(
+      child: ValueListenableBuilder<int>(
+        valueListenable: AppState.rightArtworkRevision,
+        child: _imageChild,
+        builder: (context, _, image) {
+          final x = AppState.rightCoverEffectiveFadeX;
+          final y = AppState.rightCoverEffectiveFadeY;
+          if (_fadeX?.length != x) {
+            _fadeX = _CachedFadeShader(x, vertical: false);
+          }
+          if (_fadeY?.length != y) {
+            _fadeY = _CachedFadeShader(y, vertical: true);
+          }
+          if (_blurSigma != AppState.rightCoverBlur) {
+            _blurSigma = AppState.rightCoverBlur;
+            _blur = ImageFilter.blur(
+              sigmaX: _blurSigma!,
+              sigmaY: _blurSigma!,
+              tileMode: TileMode.clamp,
+            );
+          }
+          return ClipRect(
+            child: ShaderMask(
+              key: const ValueKey('right_artwork_vertical_fade'),
+              blendMode: BlendMode.dstIn,
+              shaderCallback: _fadeY!.call,
+              child: ShaderMask(
+                key: const ValueKey('right_artwork_horizontal_fade'),
+                blendMode: BlendMode.dstIn,
+                shaderCallback: _fadeX!.call,
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween(end: widget.isPlaying ? 1 : 0.2),
+                  duration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 500),
+                  curve: Curves.easeOutCubic,
+                  child: ImageFiltered(
+                    key: const ValueKey('right_artwork_softening'),
+                    enabled: AppState.rightCoverBlur > 0,
+                    imageFilter: _blur!,
+                    child: image,
+                  ),
+                  builder: (context, brightness, child) {
+                    final gain =
+                        (1 - AppState.rightCoverDarkening) * brightness;
+                    
+                    
+                    return ColorFiltered(
+                      key: const ValueKey('right_artwork_dimming'),
+                      colorFilter: ColorFilter.matrix([
+                        gain,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        gain,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        gain,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                      ]),
+                      child: child,
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        },
       ),
-    ),
-  );
+    );
+  }
 }

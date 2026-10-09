@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/app_state.dart';
+import 'adaptive_media_text.dart';
 
 
 class PlaybackTimeLabel extends StatefulWidget {
@@ -105,14 +106,9 @@ class _PlaybackTimeLabelState extends State<PlaybackTimeLabel> {
       fontVariations: AppState.variationsFor(AppState.artistWeightValue),
       height: 1.2,
       color: color,
-      fontFamily: AppState.currentFontFamily == AppState.defaultFontFamily
-          ? null
-          : AppState.currentFontFamily,
+      fontFamily: AppState.effectiveGlobalFontFamily,
       fontFamilyFallback: AppState.textFontFallback,
       fontFeatures: const [FontFeature.tabularFigures()],
-      shadows: AppState.enableGlow
-          ? const [Shadow(color: Color(0x66000000), blurRadius: 3)]
-          : null,
     );
     final scaler = MediaQuery.textScalerOf(context);
     if (_measuredStyle != style ||
@@ -136,9 +132,9 @@ class _PlaybackTimeLabelState extends State<PlaybackTimeLabel> {
         child: FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerRight,
-          child: Text(
+          child: AdaptiveMediaText(
             _text,
-            key: const ValueKey('playback_time_text'),
+            textKey: const ValueKey('playback_time_text'),
             style: style,
           ),
         ),

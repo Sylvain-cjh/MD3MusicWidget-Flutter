@@ -17,7 +17,7 @@ publish_to: 'none'
 
 
 
-version: 0.12.6+1
+version: 0.12.7+1
 
 environment:
   sdk: ^3.12.2
@@ -40,6 +40,7 @@ dependencies:
   tray_manager: ^0.2.3
   shared_preferences: ^2.3.2
   file_picker: ^11.0.2
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:
@@ -70,6 +71,7 @@ flutter:
     - images/tray_icon.ico
     - images/tray_icon.png
     - assets/brand/qq_music.png
+    - assets/brand/netease_cloud.png
     - assets/brand/lrclib.png
 
   

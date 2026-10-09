@@ -130,7 +130,8 @@ List<PlatformQueueItem> parseQqPlaylistResponse(Object? decoded) {
   return List.unmodifiable(items);
 }
 
-final class QqMusicPlaylistQueueProvider implements QueuePlatformProvider {
+final class QqMusicPlaylistQueueProvider
+    implements QueuePlatformProvider, QueueContextProvider {
   final String Function() playlistInput;
   final HttpClient _client;
   final Uri _endpoint;
@@ -156,6 +157,8 @@ final class QqMusicPlaylistQueueProvider implements QueuePlatformProvider {
 
   @override
   String get id => 'qqMusicPlaylist';
+  @override
+  String get queueContextKey => playlistInput().trim();
 
   @override
   bool accepts(PlatformTrack track) =>

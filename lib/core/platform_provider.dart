@@ -123,9 +123,18 @@ abstract interface class LyricsPlatformProvider
   Future<LyricsDocument?> loadLyrics(PlatformTrack track);
 }
 
+abstract interface class RetryableLyricsProvider {
+  
+  void invalidateMiss(PlatformTrack track);
+}
+
 abstract interface class QueuePlatformProvider
     implements MusicPlatformProvider {
   Future<PlatformQueue?> loadQueue(PlatformTrack track);
+}
+
+abstract interface class QueueContextProvider {
+  String get queueContextKey;
 }
 
 final class PlatformProviderRegistry {
@@ -156,9 +165,11 @@ final class PlatformProviderRegistry {
     return null;
   }
 
-  QueuePlatformProvider? queueFor(PlatformTrack track) {
+  QueuePlatformProvider? queueFor(PlatformTrack track, {String? providerId}) {
     for (final provider in _providers) {
-      if (provider is QueuePlatformProvider && provider.accepts(track)) {
+      if (provider is QueuePlatformProvider &&
+          (providerId == null || provider.id == providerId) &&
+          provider.accepts(track)) {
         return provider;
       }
     }

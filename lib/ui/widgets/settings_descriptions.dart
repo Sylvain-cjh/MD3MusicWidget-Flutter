@@ -59,10 +59,15 @@ final class SettingsDescriptions {
   static const lyricsProviderLrclib = '会用歌名、歌手和时长，在线找一找歌词';
   static const lyricsProviderLocal = '只在你选的文件夹里找，不用在线查询';
   static const lyricsProviderQqMusic = '先试试 QQ 音乐；找不到时会回到 LRCLIB';
+  static const lyricsProviderNetease = '先从网易云找歌词，找不到时试试 LRCLIB';
+  static const neteasePlaylist = '连接公开歌单，按列表顺序推测下一首';
+  static const lyricsCacheLimit = '减少重复查找';
+  static const backgroundCacheLimit = '保存封面与背景';
+  static const cacheDiskOnly = '缓存上限';
   static const localLyricsEmpty = '把 .lrc 放进文件夹，按“歌手 - 歌名”命名更容易找到';
-  static const lyricsUseThemeFont = '歌词用同一套字体，大小和粗细仍然自己调';
-  static const lyricsWeight = '轻一点，或更有存在感；拖动时就能预览';
-  static const lyricsSize = '调到看着舒服的大小，下面会实时预览';
+  static const lyricsUseThemeFont = '歌词用同一套字体';
+  static const lyricsWeight = '减少打扰，或更有存在感';
+  static const lyricsSize = '调到看着舒服的大小';
 
   
   static const globalFont = '想换一种感觉，也可以加上自己的字体';

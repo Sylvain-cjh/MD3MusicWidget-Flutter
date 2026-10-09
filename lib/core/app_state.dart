@@ -12,12 +12,16 @@ import 'lyrics_coordinator.dart';
 import 'local_lrc_lyrics_provider.dart';
 import 'lrclib_lyrics_provider.dart';
 import 'qq_music_lyrics_provider.dart';
+import 'netease_lyrics_provider.dart';
+import 'netease_playlist_queue_provider.dart';
 import 'platform_provider.dart';
 import 'local_playlist_queue_provider.dart';
 import 'qq_music_playlist_queue_provider.dart';
 import 'queue_coordinator.dart';
 import 'system_performance_provider.dart';
 import 'next_up_preview_controller.dart';
+import 'persistent_cache.dart';
+import 'lyrics_disk_cache.dart';
 
 
 
@@ -35,7 +39,7 @@ enum GlowMode { waterfall, wallpaper }
 
 enum SpectrumMode { off, bars, mirror, waveform }
 
-enum LyricsProviderChoice { lrclib, localLrc, qqMusic }
+enum LyricsProviderChoice { lrclib, localLrc, qqMusic, neteaseCloud }
 
 enum LyricsTransitionStyle { fade, rise, descend, sideways, zoom, none }
 
@@ -70,6 +74,12 @@ class AppState {
   static String localLyricsDirectory = '';
   static String playlistFilePath = '';
   static String qqPlaylistLink = '';
+  static String neteasePlaylistLink = '';
+  static String selectedQueueProviderId = '';
+  static bool get hasPlaylistConfigured =>
+      playlistFilePath.isNotEmpty ||
+      qqPlaylistLink.isNotEmpty ||
+      neteasePlaylistLink.isNotEmpty;
   static bool showNextUp = false;
   static int nextUpLeadSeconds = 20;
   static bool? isShuffleActive;
@@ -78,15 +88,46 @@ class AppState {
   static final LrclibLyricsProvider _lrclibLyrics = LrclibLyricsProvider();
   static final QqMusicPlaylistQueueProvider _qqPlaylist =
       QqMusicPlaylistQueueProvider(playlistInput: () => qqPlaylistLink);
+  static final NeteasePlaylistQueueProvider _neteasePlaylist =
+      NeteasePlaylistQueueProvider(playlistInput: () => neteasePlaylistLink);
   static final PlatformProviderRegistry platformProviders =
       PlatformProviderRegistry()
         ..register(_lrclibLyrics)
         ..register(LocalLrcLyricsProvider(() => localLyricsDirectory))
         ..register(QqMusicLyricsProvider(fallback: _lrclibLyrics))
+        ..register(NeteaseLyricsProvider(fallback: _lrclibLyrics))
         ..register(_qqPlaylist)
+        ..register(_neteasePlaylist)
         ..register(LocalPlaylistQueueProvider(() => playlistFilePath));
-  static final LyricsCoordinator lyrics = LyricsCoordinator(platformProviders);
-  static final QueueCoordinator queue = QueueCoordinator(platformProviders);
+  static int lyricsCacheLimitMiB = 16;
+  static bool usePersistentCaches = true;
+  static int backgroundCacheLimitMiB = 128;
+  static final Directory _cacheRoot = Directory(
+    '${Platform.environment['LOCALAPPDATA'] ?? Platform.environment['HOME'] ?? Directory.systemTemp.path}${Platform.pathSeparator}MD3MusicWidget${Platform.pathSeparator}cache-v1',
+  );
+  static final PersistentCache lyricsCacheStore = PersistentCache(
+    isEnabled: () => usePersistentCaches,
+    directory: Directory('${_cacheRoot.path}${Platform.pathSeparator}lyrics'),
+    limitBytes: () => lyricsCacheLimitMiB * 1024 * 1024,
+    maximumEntryBytes: 2 * 1024 * 1024,
+  );
+  static final PersistentCache backgroundCacheStore = PersistentCache(
+    isEnabled: () => usePersistentCaches,
+    directory: Directory(
+      '${_cacheRoot.path}${Platform.pathSeparator}background',
+    ),
+    limitBytes: () => backgroundCacheLimitMiB * 1024 * 1024,
+  );
+  static final LyricsCoordinator lyrics = LyricsCoordinator(
+    platformProviders,
+    cache: LyricsDiskCache(lyricsCacheStore),
+    maximumAttempts: 3,
+    retryMissing: true,
+  );
+  static final QueueCoordinator queue = QueueCoordinator(
+    platformProviders,
+    maximumAttempts: 3,
+  );
 
   static void refreshLyrics({bool force = false}) {
     unawaited(
@@ -100,12 +141,18 @@ class AppState {
 
   static void refreshQueue({bool force = false}) {
     _nextUpPreviewController?.refresh();
-    if (force) _qqPlaylist.invalidate();
+    if (force) {
+      _qqPlaylist.invalidate();
+      _neteasePlaylist.invalidate();
+    }
     unawaited(
       queue.setTrack(
         showNextUp ? currentPlatformTrack : null,
         enabled: showNextUp,
         force: force,
+        providerId: selectedQueueProviderId.isEmpty
+            ? null
+            : selectedQueueProviderId,
       ),
     );
   }
@@ -159,7 +206,95 @@ class AppState {
   
   
   static final ValueNotifier<int> backgroundRevision = ValueNotifier<int>(0);
-  static void notifyBackgroundChanged() => backgroundRevision.value++;
+  static void notifyBackgroundChanged() {
+    backgroundRevision.value++;
+    _updateMediaTextColor();
+  }
+
+  static final ValueNotifier<Color> mediaTextColor = ValueNotifier<Color>(
+    Colors.white,
+  );
+  static Color? _previousArtworkTone;
+  static Color? _targetArtworkTone;
+  static int _artworkToneChangedAt = 0;
+  static Timer? _mediaTextToneTimer;
+  static Color? get _estimatedArtworkTone => Color.lerp(
+    _previousArtworkTone,
+    _targetArtworkTone,
+    ((_playbackClock.elapsedMilliseconds - _artworkToneChangedAt) / 800).clamp(
+      0.0,
+      1.0,
+    ),
+  );
+  static void setArtworkTone(Color? color) {
+    _previousArtworkTone = _targetArtworkTone == null
+        ? color
+        : _estimatedArtworkTone;
+    _targetArtworkTone = color;
+    _artworkToneChangedAt = _playbackClock.elapsedMilliseconds;
+    _mediaTextToneTimer?.cancel();
+    _updateMediaTextColor();
+    if (_previousArtworkTone == _targetArtworkTone) return;
+    _mediaTextToneTimer = Timer.periodic(const Duration(milliseconds: 50), (
+      timer,
+    ) {
+      _updateMediaTextColor();
+      if (_playbackClock.elapsedMilliseconds - _artworkToneChangedAt >= 800) {
+        timer.cancel();
+        _mediaTextToneTimer = null;
+      }
+    });
+  }
+
+  static void finishArtworkToneTransition() {
+    _mediaTextToneTimer?.cancel();
+    _mediaTextToneTimer = null;
+    _previousArtworkTone = _targetArtworkTone;
+    _artworkToneChangedAt = _playbackClock.elapsedMilliseconds - 800;
+    _updateMediaTextColor();
+  }
+
+  static Color get estimatedMediaBackdrop {
+    final dark = themeBrightness == Brightness.dark;
+    final surface = dark
+        ? (enableGlow
+              ? currentScheme.surfaceContainerLow
+              : enableOledTheme
+              ? Colors.black
+              : currentScheme.surfaceContainerHigh)
+        : enableGlow
+        ? currentScheme.surface
+        : currentScheme.surfaceContainerHighest;
+    final tone = _estimatedArtworkTone;
+    final imageColor = enableGlow && tone != null
+        ? Color.alphaBlend(tone, surface)
+        : surface;
+    final lum = currentScheme.surface.computeLuminance();
+    final opacity = dark
+        ? (0.25 + lum * 0.50).clamp(0.25, 0.75)
+        : (0.25 + (1 - lum) * 0.40).clamp(0.25, 0.65);
+    return Color.alphaBlend(
+      (dark ? Colors.black : Colors.white).withValues(alpha: opacity),
+      imageColor,
+    );
+  }
+
+  static Color readableMediaColor(Color background) =>
+      background.computeLuminance() > 0.179 ? Colors.black : Colors.white;
+  static void _updateMediaTextColor() =>
+      mediaTextColor.value = readableMediaColor(estimatedMediaBackdrop);
+
+  static Future<void> applyCacheLimits() async {
+    await Future.wait([
+      lyricsCacheStore.applyLimit(),
+      backgroundCacheStore.applyLimit(),
+    ]);
+  }
+
+  static Future<void> clearPersistentCaches() async {
+    await Future.wait([lyricsCacheStore.clear(), backgroundCacheStore.clear()]);
+  }
+
   static final ValueNotifier<int> playbackRevision = ValueNotifier<int>(0);
   static final ValueNotifier<bool> nextUpPreviewVisible = ValueNotifier<bool>(
     false,
@@ -172,9 +307,7 @@ class AppState {
       readInput: () => NextUpPreviewInput(
         trackIdentity: currentPlatformTrack?.queueIdentity,
         next: nextQueueItem,
-        enabled:
-            showNextUp &&
-            (playlistFilePath.isNotEmpty || qqPlaylistLink.isNotEmpty),
+        enabled: showNextUp && hasPlaylistConfigured,
         playing: isPlaying,
         durationMs: playbackDurationMs,
         positionMs: estimatedPlaybackPositionMs,
@@ -362,6 +495,10 @@ class AppState {
 
   
   static String currentFontFamily = defaultFontFamily;
+  static String get effectiveGlobalFontFamily =>
+      currentFontFamily == defaultFontFamily
+      ? 'Segoe UI Variable Text'
+      : currentFontFamily;
   static List<String> loadedSystemFonts = ['System Default'];
   static List<String> customFontPaths = [];
 
@@ -407,7 +544,7 @@ class AppState {
   static String? get effectiveLyricsFontFamily {
     final family = lyricsUseThemeFont ? currentFontFamily : lyricsFontFamily;
     if (family != 'System Default') return family;
-    return lyricsUseThemeFont ? null : 'Segoe UI Variable Text';
+    return 'Segoe UI Variable Text';
   }
 
   static TextStyle lyricsTextStyle(Color color) => TextStyle(
@@ -429,20 +566,28 @@ class AppState {
 
   static ComponentSizeMode componentSizeMode = ComponentSizeMode.standard;
   static double customComponentScale = 1.0;
-  static const double minimumComponentScale = 0.72;
-  static const double maximumComponentScale = 1.50;
+  
+  
+  static const double standardDisplayScale = 0.90;
+  static const double minimumSizeRatio = 0.72;
+  static const double maximumSizeRatio = 1.50;
+  static const double minimumComponentScale =
+      minimumSizeRatio * standardDisplayScale;
+  static const double maximumComponentScale =
+      maximumSizeRatio * standardDisplayScale;
 
   static double scaleForSizeMode(ComponentSizeMode mode) => switch (mode) {
     ComponentSizeMode.small => 0.82,
     ComponentSizeMode.standard => 1.0,
     ComponentSizeMode.large => 1.22,
     ComponentSizeMode.custom => customComponentScale.clamp(
-      minimumComponentScale,
-      maximumComponentScale,
+      minimumSizeRatio,
+      maximumSizeRatio,
     ),
   };
 
-  static double get componentScale => scaleForSizeMode(componentSizeMode);
+  static double get componentScale =>
+      standardDisplayScale * scaleForSizeMode(componentSizeMode);
   static bool get isCustomComponentSize =>
       componentSizeMode == ComponentSizeMode.custom;
 
@@ -568,10 +713,15 @@ class AppState {
   }
 
   static Future<void> exitApp() async {
+    finishArtworkToneTransition();
     if (_exitInProgress) return;
     _exitInProgress = true;
     try {
       await flushSettings().timeout(const Duration(milliseconds: 700));
+      await Future.wait([
+        lyricsCacheStore.flush(),
+        backgroundCacheStore.flush(),
+      ]).timeout(const Duration(seconds: 2));
     } catch (_) {}
     try {
       await SystemPerformanceProvider.shutdown();
@@ -845,7 +995,23 @@ class AppState {
         qqPlaylistLink = snapshot['qqPlaylistLink'] is String
             ? snapshot['qqPlaylistLink'] as String
             : '';
+        neteasePlaylistLink = snapshot['neteasePlaylistLink'] is String
+            ? snapshot['neteasePlaylistLink'] as String
+            : '';
+        selectedQueueProviderId = _validQueueProvider(
+          snapshot['selectedQueueProviderId'],
+        );
         showNextUp = snapshot['showNextUp'] == true;
+        lyricsCacheLimitMiB = _cacheLimit(
+          snapshot['lyricsCacheLimitMiB'],
+          16,
+          256,
+        );
+        backgroundCacheLimitMiB = _cacheLimit(
+          snapshot['backgroundCacheLimitMiB'],
+          128,
+          1024,
+        );
         nextUpLeadSeconds = switch (snapshot['nextUpLeadSeconds']) {
           10 || 20 || 30 || 45 => snapshot['nextUpLeadSeconds'] as int,
           _ => 20,
@@ -961,8 +1127,8 @@ class AppState {
           ? lyricsFontSize.clamp(12.0, 17.0)
           : 14.0;
       customComponentScale = customComponentScale.clamp(
-        minimumComponentScale,
-        maximumComponentScale,
+        minimumSizeRatio,
+        maximumSizeRatio,
       );
       isMousePassthrough = false;
       refreshQueue(force: true);
@@ -1044,7 +1210,17 @@ class AppState {
     selectedSourceAppId = p.getString('selectedSourceAppId') ?? '';
     playlistFilePath = p.getString('playlistFilePath') ?? '';
     qqPlaylistLink = p.getString('qqPlaylistLink') ?? '';
+    neteasePlaylistLink = p.getString('neteasePlaylistLink') ?? '';
+    selectedQueueProviderId = _validQueueProvider(
+      p.getString('selectedQueueProviderId'),
+    );
     showNextUp = p.getBool('showNextUp') ?? false;
+    lyricsCacheLimitMiB = _cacheLimit(p.getInt('lyricsCacheLimitMiB'), 16, 256);
+    backgroundCacheLimitMiB = _cacheLimit(
+      p.getInt('backgroundCacheLimitMiB'),
+      128,
+      1024,
+    );
     nextUpLeadSeconds = switch (p.getInt('nextUpLeadSeconds')) {
       10 || 20 || 30 || 45 => p.getInt('nextUpLeadSeconds')!,
       _ => 20,
@@ -1086,7 +1262,7 @@ class AppState {
     customComponentScale =
         p
             .getDouble('customComponentScale')
-            ?.clamp(minimumComponentScale, maximumComponentScale) ??
+            ?.clamp(minimumSizeRatio, maximumSizeRatio) ??
         1.0;
     isAlwaysOnTop = p.getBool('isAlwaysOnTop') ?? true;
     isMousePassthrough = p.getBool('isMousePassthrough') ?? false;
@@ -1131,7 +1307,11 @@ class AppState {
     'selectedSourceAppId': selectedSourceAppId,
     'playlistFilePath': playlistFilePath,
     'qqPlaylistLink': qqPlaylistLink,
+    'neteasePlaylistLink': neteasePlaylistLink,
+    'selectedQueueProviderId': selectedQueueProviderId,
     'showNextUp': showNextUp,
+    'lyricsCacheLimitMiB': lyricsCacheLimitMiB,
+    'backgroundCacheLimitMiB': backgroundCacheLimitMiB,
     'nextUpLeadSeconds': nextUpLeadSeconds,
     'currentFontFamily': currentFontFamily,
     'titleWeightValue': titleWeightValue,
@@ -1159,6 +1339,17 @@ class AppState {
     return _settingsWriteTail;
   }
 
+  static String _validQueueProvider(Object? value) => switch (value) {
+    'qqMusicPlaylist' => 'qqMusicPlaylist',
+    'neteasePlaylist' => 'neteasePlaylist',
+    'localPlaylist' => 'localPlaylist',
+    _ => '',
+  };
+
+  static int _cacheLimit(Object? value, int fallback, int maximum) =>
+      value is num && value.isFinite
+      ? value.toInt().clamp(0, maximum)
+      : fallback;
   static Future<void> saveSettings() async {
     if (_prefs == null) return;
     _pendingSettingsSnapshot = jsonEncode(_captureSettingsSnapshot());

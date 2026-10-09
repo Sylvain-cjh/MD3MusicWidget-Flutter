@@ -59,6 +59,11 @@ class MusicWidgetApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        fontFamily: AppState.effectiveGlobalFontFamily,
+        fontFamilyFallback: AppState.textFontFallback,
+      ),
       home: PlayerView(windowReady: windowReady),
     );
   }

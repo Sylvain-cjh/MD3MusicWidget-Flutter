@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show OverflowBoxFit;
 import 'package:window_manager/window_manager.dart';
 import 'package:tray_manager/tray_manager.dart' as tm;
 
@@ -73,7 +74,6 @@ class _PlayerViewState extends State<PlayerView>
   int _lastInfoSuccessAtMs = 0;
   int _lastFetcherHeartbeatAtMs = 0;
   int _infoFailureStreak = 0;
-  final Map<String, ColorScheme> _colorSchemeCache = <String, ColorScheme>{};
 
   static int _fingerprintBytes(Uint8List bytes) {
     int hash = 0x811c9dc5;
@@ -132,6 +132,9 @@ class _PlayerViewState extends State<PlayerView>
   bool _isComponentSizeTransitioning = false;
   bool _customScaleCommitScheduled = false;
   double? _pendingCustomScale;
+  Size? _pendingCustomViewport;
+  Size? _pendingCustomDesign;
+  int? _pendingCustomTransitionSerial;
   Timer? _resizeSaveTimer;
 
   bool _isTransitioning = false;
@@ -140,6 +143,10 @@ class _PlayerViewState extends State<PlayerView>
   bool _nextUpResizePending = false;
   bool _nextUpResizeInFlight = false;
   bool _nextUpSyncScheduled = false;
+  final _resizeAreaKey = GlobalKey<LockedAspectResizeAreaState>();
+  Timer? _nextUpRetryTimer;
+  bool? _nextUpRequestedVisible;
+  int _nextUpResizeFailures = 0;
   late final NextUpPresenceMotion _nextUpMotion;
   double? _backgroundAnchorHeight;
   Widget? _anchoredPlayerBackground;
@@ -186,6 +193,7 @@ class _PlayerViewState extends State<PlayerView>
 
   @override
   void dispose() {
+    _nextUpRetryTimer?.cancel();
     _pollingTimer?.cancel();
     _spectrumTimer?.cancel();
     _mediaReconnectTimer?.cancel();
@@ -351,41 +359,30 @@ class _PlayerViewState extends State<PlayerView>
         final coverIdentity = AppState.currentCoverVersion == 'legacy'
             ? _legacyCoverFingerprint
             : AppState.currentCoverVersion;
-        final cacheKey =
-            '$coverIdentity|${AppState.themeBrightness.name}|${AppState.themeVariant.name}';
-        final cachedScheme = _colorSchemeCache[cacheKey];
-        if (cachedScheme != null) {
-          if (mounted && serial == _colorSchemeRequestSerial) {
-            setState(() => AppState.currentScheme = cachedScheme);
-            AppState.notifyBackgroundChanged();
-          }
-          return;
-        }
-
-        final newScheme = await ColorScheme.fromImageProvider(
+        final newScheme = await _artworkResources.colorSchemes.resolve(
+          identity: coverIdentity,
           provider: provider,
           brightness: AppState.themeBrightness,
-          dynamicSchemeVariant: AppState.themeVariant,
+          variant: AppState.themeVariant,
         );
-        if (mounted && serial == _colorSchemeRequestSerial) {
-          if (_colorSchemeCache.length >= 8) {
-            _colorSchemeCache.remove(_colorSchemeCache.keys.first);
-          }
-          _colorSchemeCache[cacheKey] = newScheme;
+        if (mounted &&
+            serial == _colorSchemeRequestSerial &&
+            AppState.currentScheme != newScheme) {
           setState(() => AppState.currentScheme = newScheme);
           AppState.notifyBackgroundChanged();
         }
       } catch (_) {}
     } else {
       if (mounted && serial == _colorSchemeRequestSerial) {
-        setState(() {
-          AppState.currentScheme = ColorScheme.fromSeed(
-            seedColor: const Color(0xFF1E5B6B),
-            brightness: AppState.themeBrightness,
-            dynamicSchemeVariant: AppState.themeVariant,
-          );
-        });
-        AppState.notifyBackgroundChanged();
+        final scheme = ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1E5B6B),
+          brightness: AppState.themeBrightness,
+          dynamicSchemeVariant: AppState.themeVariant,
+        );
+        if (AppState.currentScheme != scheme) {
+          setState(() => AppState.currentScheme = scheme);
+          AppState.notifyBackgroundChanged();
+        }
       }
     }
   }
@@ -410,6 +407,8 @@ class _PlayerViewState extends State<PlayerView>
         AppState.coverProvider = null;
         AppState.bgBlurProvider = null;
       });
+      AppState.setArtworkTone(null);
+      AppState.notifyBackgroundChanged();
       await _updateColorScheme();
     }
   }
@@ -455,21 +454,48 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   Future<bool> _restoreCachedArtwork(String version) async {
-    final entry = _artworkResources.findArtwork(version);
+    var entry = _artworkResources.findArtwork(version);
+    if (entry == null) {
+      final bytes = await AppState.backgroundCacheStore.get(version);
+      if (!mounted || version != _latestCoverVersion) return true;
+      if (bytes != null) entry = CachedArtwork(bytes);
+    }
     if (entry == null) return false;
     if (!await _precacheArtwork(entry.cover) ||
         !await _precacheArtwork(entry.background)) {
       _artworkResources.forgetArtwork(version);
+      unawaited(AppState.backgroundCacheStore.remove(version));
       return false;
     }
     if (!mounted || version != _latestCoverVersion) return true;
+    _artworkResources.rememberPreparedArtwork(version, entry);
     if (version != AppState.currentCoverVersion) {
-      await _activateArtwork(version, entry);
+      await _activateArtwork(version, entry, persistSource: false);
     }
     return true;
   }
 
-  Future<void> _activateArtwork(String version, CachedArtwork entry) async {
+  Future<void> _activateArtwork(
+    String version,
+    CachedArtwork entry, {
+    bool persistSource = true,
+  }) async {
+    Color? tone = entry.averageColor;
+    if (tone == null) {
+      final saved = await AppState.backgroundCacheStore.get('tone|$version');
+      if (saved?.length == 4) {
+        tone = Color(ByteData.sublistView(saved!).getUint32(0));
+      }
+      tone ??= await entry.prepareAverageColor();
+      if (tone != null && saved?.length != 4) {
+        final bytes = Uint8List(4);
+        ByteData.sublistView(bytes).setUint32(0, tone.toARGB32());
+        unawaited(AppState.backgroundCacheStore.put('tone|$version', bytes));
+      }
+      entry.averageColor = tone;
+    }
+    if (!mounted || version != _latestCoverVersion) return;
+    AppState.setArtworkTone(tone);
     final previousCover = AppState.coverProvider;
     final previousBackground = AppState.bgBlurProvider;
     AppState.currentCoverVersion = version;
@@ -479,6 +505,9 @@ class _PlayerViewState extends State<PlayerView>
       AppState.bgBlurProvider = entry.background;
     });
     AppState.notifyBackgroundChanged();
+    if (persistSource) {
+      unawaited(AppState.backgroundCacheStore.put(version, entry.cover.bytes));
+    }
     unawaited(_artworkResources.retire(previousCover));
     unawaited(_artworkResources.retire(previousBackground));
     await _updateColorScheme();
@@ -496,9 +525,7 @@ class _PlayerViewState extends State<PlayerView>
         AppState.coverProvider != null) {
       return;
     }
-    if (_artworkResources.findArtwork(version) != null) {
-      if (await _restoreCachedArtwork(version)) return;
-    }
+    if (await _restoreCachedArtwork(version)) return;
 
     final entry = CachedArtwork(bytes);
     final coverReady = await _precacheArtwork(entry.cover);
@@ -531,6 +558,16 @@ class _PlayerViewState extends State<PlayerView>
   Future<bool> _precacheArtwork(ImageProvider provider) async {
     Object? decodeError;
     try {
+      final status = await provider.obtainCacheStatus(
+        configuration: createLocalImageConfiguration(context),
+        handleError: (error, stack) {
+          decodeError = error;
+        },
+      );
+      if (!mounted || decodeError != null) return false;
+      
+      
+      if (status?.keepAlive == true && status?.pending == false) return true;
       await precacheImage(
         provider,
         context,
@@ -598,6 +635,9 @@ class _PlayerViewState extends State<PlayerView>
       final bytes = base64Decode(base64);
       if (!mounted || bytes.isEmpty) return;
       final image = MemoryImage(bytes);
+      final tone = await CachedArtwork(bytes).prepareAverageColor();
+      if (!mounted) return;
+      AppState.setArtworkTone(tone);
       _legacyCoverFingerprint = fingerprint;
       AppState.currentRawBase64 = "";
       AppState.currentCoverVersion = "legacy";
@@ -1252,7 +1292,15 @@ class _PlayerViewState extends State<PlayerView>
 
   void _onNextUpVisibilityChanged() {
     if (!mounted) return;
+    final target = AppState.nextUpPreviewVisible.value;
+    if (_nextUpRequestedVisible != target) {
+      _nextUpRequestedVisible = target;
+      _nextUpResizeFailures = 0;
+      _nextUpRetryTimer?.cancel();
+      _nextUpRetryTimer = null;
+    }
     _nextUpResizePending = true;
+    setState(() {});
     _nextUpMotion.cancel();
     if (_nextUpSyncScheduled) return;
     _nextUpSyncScheduled = true;
@@ -1265,6 +1313,8 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   Future<void> _reserveNextUpSpace(bool occupied) async {
+    if (!mounted) return;
+    await _resizeAreaKey.currentState?.waitForIdle();
     if (!mounted) return;
     if (occupied && !AppState.nextUpPreviewVisible.value) return;
     if (_isTransitioning) {
@@ -1293,6 +1343,23 @@ class _PlayerViewState extends State<PlayerView>
       layout: AppState.widgetLayout,
       settingsOpen: _isSettingsOpen,
     ).height;
+    if (AppState.isCustomComponentSize) {
+      final designWidth = _designWindowSize(
+        layout: AppState.widgetLayout,
+        settingsOpen: _isSettingsOpen,
+      ).width;
+      final scale = ComponentSizeMotion.stableWidthScale(
+        width: bounds.width - (_isMenuOpen ? AppState.menuExtraSpace : 0),
+        designWidth: designWidth,
+        referenceScale: _frameScale,
+        devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+        minimumScale: AppState.minimumComponentScale,
+        maximumScale: AppState.maximumComponentScale,
+      );
+      _frameScale = scale;
+      _contentScale = scale;
+      AppState.customComponentScale = scale / AppState.standardDisplayScale;
+    }
     final targetExtent = occupied ? 64.0 : 0.0;
     final targetHeight =
         (designHeight +
@@ -1322,17 +1389,34 @@ class _PlayerViewState extends State<PlayerView>
     }
     _nextUpResizePending = false;
     _nextUpResizeInFlight = true;
+    _nextUpRetryTimer?.cancel();
+    _nextUpRetryTimer = null;
     try {
       await _nextUpMotion.setVisible(
         AppState.nextUpPreviewVisible.value,
         reduceMotion: MediaQuery.maybeOf(context)?.disableAnimations ?? false,
       );
+      _nextUpResizeFailures = 0;
     } catch (error) {
       debugPrint('下一首预告窗口尺寸同步失败: $error');
+      _nextUpResizeFailures++;
+      if (mounted && _nextUpResizeFailures < 3) {
+        _nextUpResizePending = true;
+        _nextUpRetryTimer = Timer(
+          Duration(milliseconds: _nextUpResizeFailures == 1 ? 160 : 400),
+          () {
+            _nextUpRetryTimer = null;
+            if (mounted) _onNextUpVisibilityChanged();
+          },
+        );
+      }
     } finally {
       _nextUpResizeInFlight = false;
       if (mounted) setState(() {});
-      if (mounted && _nextUpResizePending && !_isTransitioning) {
+      if (mounted &&
+          _nextUpResizePending &&
+          !_isTransitioning &&
+          _nextUpRetryTimer == null) {
         _onNextUpVisibilityChanged();
       }
     }
@@ -1541,24 +1625,40 @@ class _PlayerViewState extends State<PlayerView>
     }
   }
 
-  void _stageCustomScale(double scale) {
+  void _stageCustomScale(double scale, Size viewport, Size design) {
     _pendingCustomScale = scale;
+    _pendingCustomViewport = viewport;
+    _pendingCustomDesign = design;
+    _pendingCustomTransitionSerial = _windowTransitionSerial;
     if (_customScaleCommitScheduled) return;
     _customScaleCommitScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _customScaleCommitScheduled = false;
       final double? pending = _pendingCustomScale;
+      final viewport = _pendingCustomViewport;
+      final design = _pendingCustomDesign;
+      final serial = _pendingCustomTransitionSerial;
       _pendingCustomScale = null;
+      _pendingCustomViewport = null;
+      _pendingCustomDesign = null;
+      _pendingCustomTransitionSerial = null;
       if (!mounted ||
           pending == null ||
           !AppState.isCustomComponentSize ||
           _nextUpResizePending ||
           _nextUpResizeInFlight ||
           _menuResizeInFlight ||
-          _isTransitioning) {
+          _isTransitioning ||
+          serial != _windowTransitionSerial ||
+          viewport != MediaQuery.sizeOf(context) ||
+          design !=
+              _designWindowSize(
+                layout: AppState.widgetLayout,
+                settingsOpen: _isSettingsOpen,
+              )) {
         return;
       }
-      AppState.customComponentScale = pending;
+      AppState.customComponentScale = pending / AppState.standardDisplayScale;
       _frameScale = pending;
       _contentScale = pending;
     });
@@ -1708,26 +1808,32 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   Widget _buildSettingsPanel() {
-    return SettingsPanel(
-      isMousePassthroughAvailable: _isSystemTrayReady,
-      onThemeChanged: () {
-        setState(() {});
-        unawaited(_updateColorScheme());
-        unawaited(AppState.saveSettings());
-      },
-      onVisualChanged: () {
-        setState(() {});
-        _syncSpectrumPolling();
-        unawaited(AppState.saveSettings());
-      },
-      onBackgroundChanged: () {
-        AppState.notifyBackgroundChanged();
-        unawaited(AppState.saveSettings());
-      },
-      onLayoutChanged: _handleLayoutChanged,
-      onWindowBehaviorChanged: () {
-        unawaited(_handleWindowBehaviorChanged());
-      },
+    return RepaintBoundary(
+      key: const ValueKey('settings_panel_surface'),
+      child: Material(
+        type: MaterialType.transparency,
+        child: SettingsPanel(
+          isMousePassthroughAvailable: _isSystemTrayReady,
+          onThemeChanged: () {
+            setState(() {});
+            unawaited(_updateColorScheme());
+            unawaited(AppState.saveSettings());
+          },
+          onVisualChanged: () {
+            setState(() {});
+            _syncSpectrumPolling();
+            unawaited(AppState.saveSettings());
+          },
+          onBackgroundChanged: () {
+            AppState.notifyBackgroundChanged();
+            unawaited(AppState.saveSettings());
+          },
+          onLayoutChanged: _handleLayoutChanged,
+          onWindowBehaviorChanged: () {
+            unawaited(_handleWindowBehaviorChanged());
+          },
+        ),
+      ),
     );
   }
 
@@ -1747,9 +1853,7 @@ class _PlayerViewState extends State<PlayerView>
     bool spectrumRowVisible = spectrumVisible || performanceVisible;
     bool lyricsVisible = AppState.showLyrics;
     bool nextUpConfigured =
-        AppState.showNextUp &&
-        (AppState.playlistFilePath.isNotEmpty ||
-            AppState.qqPlaylistLink.isNotEmpty);
+        AppState.showNextUp && AppState.hasPlaylistConfigured;
     bool nextUpVisible =
         nextUpConfigured && AppState.nextUpPreviewVisible.value;
     bool nextUpOccupied = AppState.nextUpPanelOccupied;
@@ -1814,9 +1918,13 @@ class _PlayerViewState extends State<PlayerView>
         !_nextUpResizePending &&
         !_nextUpResizeInFlight;
     if (isLiveCustomResize) {
-      final double viewportScale = ComponentSizeMotion.fitScale(
-        viewport: MediaQuery.sizeOf(context),
-        design: Size(containerW, containerH),
+      final viewport = MediaQuery.sizeOf(context);
+      final design = Size(containerW, containerH);
+      final double viewportScale = ComponentSizeMotion.stableFitScale(
+        viewport: viewport,
+        design: design,
+        referenceScale: _frameScale,
+        devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
         maximumScale: AppState.maximumComponentScale,
       );
       renderFrameScale = viewportScale;
@@ -1825,8 +1933,8 @@ class _PlayerViewState extends State<PlayerView>
           viewportScale >= AppState.minimumComponentScale &&
           viewportScale <= AppState.maximumComponentScale;
       if (isPersistableScale &&
-          (viewportScale - AppState.customComponentScale).abs() > 0.0005) {
-        _stageCustomScale(viewportScale);
+          (viewportScale - AppState.componentScale).abs() > 0.0005) {
+        _stageCustomScale(viewportScale, viewport, design);
       }
     }
     final double stageScale = _isComponentSizeTransitioning
@@ -1888,81 +1996,84 @@ class _PlayerViewState extends State<PlayerView>
             onTapDown: (_) {
               if (_isMenuOpen) _closeMenu();
             },
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Positioned(
-                  left: 0,
-                  top: 0,
-                  width: innerPlayerW,
-                  height: corePlayerH,
-                  child: ContinuousTrackControls(isVertical: isV),
-                ),
-                AnimatedPositioned(
-                  duration: frameAnimationDuration,
-                  curve: AppState.layoutSwitchCurve,
-                  left: playerHorizontalPadding,
-                  top: corePlayerH + 8.0,
-                  width: innerPlayerW - playerHorizontalPadding * 2,
-                  height: spectrumRowVisible ? 48.0 : 0.0,
-                  child: AnimatedOpacity(
-                    duration: reduceMotion
-                        ? Duration.zero
-                        : const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    opacity: spectrumRowVisible ? 1.0 : 0.0,
-                    child: IgnorePointer(
-                      ignoring: !spectrumRowVisible,
-                      child: SpectrumPerformanceRow(
-                        spectrumMode: AppState.spectrumMode,
-                        isPlaying: AppState.isPlaying,
-                        showPerformance: performanceVisible,
-                        isVertical: isV,
+            child: RepaintBoundary(
+              key: const ValueKey('player_content_surface'),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    width: innerPlayerW,
+                    height: corePlayerH,
+                    child: ContinuousTrackControls(isVertical: isV),
+                  ),
+                  AnimatedPositioned(
+                    duration: frameAnimationDuration,
+                    curve: AppState.layoutSwitchCurve,
+                    left: playerHorizontalPadding,
+                    top: corePlayerH + 8.0,
+                    width: innerPlayerW - playerHorizontalPadding * 2,
+                    height: spectrumRowVisible ? 48.0 : 0.0,
+                    child: AnimatedOpacity(
+                      duration: reduceMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      opacity: spectrumRowVisible ? 1.0 : 0.0,
+                      child: IgnorePointer(
+                        ignoring: !spectrumRowVisible,
+                        child: SpectrumPerformanceRow(
+                          spectrumMode: AppState.spectrumMode,
+                          isPlaying: AppState.isPlaying,
+                          showPerformance: performanceVisible,
+                          isVertical: isV,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                AnimatedPositioned(
-                  duration: frameAnimationDuration,
-                  curve: AppState.layoutSwitchCurve,
-                  left: playerHorizontalPadding,
-                  top:
-                      corePlayerH +
-                      AppState.spectrumPanelExtentOf(AppState.widgetLayout) +
-                      8.0,
-                  width: innerPlayerW - playerHorizontalPadding * 2,
-                  height: lyricsVisible ? 48.0 : 0.0,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    opacity: lyricsVisible ? 1.0 : 0.0,
-                    child: IgnorePointer(
-                      ignoring: !lyricsVisible,
-                      child: const MusicLyricsPanel(),
+                  AnimatedPositioned(
+                    duration: frameAnimationDuration,
+                    curve: AppState.layoutSwitchCurve,
+                    left: playerHorizontalPadding,
+                    top:
+                        corePlayerH +
+                        AppState.spectrumPanelExtentOf(AppState.widgetLayout) +
+                        8.0,
+                    width: innerPlayerW - playerHorizontalPadding * 2,
+                    height: lyricsVisible ? 48.0 : 0.0,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      opacity: lyricsVisible ? 1.0 : 0.0,
+                      child: IgnorePointer(
+                        ignoring: !lyricsVisible,
+                        child: const MusicLyricsPanel(),
+                      ),
                     ),
                   ),
-                ),
-                AnimatedPositioned(
-                  duration: frameAnimationDuration,
-                  curve: AppState.layoutSwitchCurve,
-                  left: playerHorizontalPadding,
-                  top:
-                      corePlayerH +
-                      AppState.spectrumPanelExtentOf(AppState.widgetLayout) +
-                      AppState.lyricsPanelExtentOf(AppState.widgetLayout) +
-                      8.0,
-                  width: innerPlayerW - playerHorizontalPadding * 2,
-                  height: nextUpOccupied ? 48.0 : 0.0,
-                  child: IgnorePointer(
-                    ignoring: !nextUpVisible,
-                    child: nextUpConfigured || nextUpOccupied
-                        ? MusicNextUpPanel(
-                            presenceAnimation: _nextUpMotion.animation,
-                          )
-                        : const SizedBox.shrink(),
+                  AnimatedPositioned(
+                    duration: frameAnimationDuration,
+                    curve: AppState.layoutSwitchCurve,
+                    left: playerHorizontalPadding,
+                    top:
+                        corePlayerH +
+                        AppState.spectrumPanelExtentOf(AppState.widgetLayout) +
+                        AppState.lyricsPanelExtentOf(AppState.widgetLayout) +
+                        8.0,
+                    width: innerPlayerW - playerHorizontalPadding * 2,
+                    height: nextUpOccupied ? 48.0 : 0.0,
+                    child: IgnorePointer(
+                      ignoring: !nextUpVisible,
+                      child: nextUpConfigured || nextUpOccupied
+                          ? MusicNextUpPanel(
+                              presenceAnimation: _nextUpMotion.animation,
+                            )
+                          : const SizedBox.shrink(),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -2009,11 +2120,14 @@ class _PlayerViewState extends State<PlayerView>
     );
 
     mainStage = LockedAspectResizeArea(
+      key: _resizeAreaKey,
       enabled:
           AppState.isCustomComponentSize &&
           !_isTransitioning &&
           !_isMenuOpen &&
-          !_menuResizeInFlight,
+          !_menuResizeInFlight &&
+          !_nextUpResizePending &&
+          !_nextUpResizeInFlight,
       designSize: Size(containerW, containerH),
       minimumScale: AppState.minimumComponentScale,
       maximumScale: AppState.maximumComponentScale,
@@ -2030,9 +2144,7 @@ class _PlayerViewState extends State<PlayerView>
       data: ThemeData(
         useMaterial3: true,
         colorScheme: AppState.currentScheme,
-        fontFamily: AppState.currentFontFamily == 'System Default'
-            ? null
-            : AppState.currentFontFamily,
+        fontFamily: AppState.effectiveGlobalFontFamily,
         fontFamilyFallback: AppState.textFontFallback,
       ),
       duration: const Duration(milliseconds: 600),
@@ -2066,23 +2178,31 @@ class _PlayerViewState extends State<PlayerView>
                   left: _menuSide == "left" ? 0 : AppState.baseWindowWidth,
                   top: _menuTop,
                   width: AppState.menuExtraSpace,
-                  child: Transform.scale(
-                    scale: renderContentScale,
-                    alignment: _menuSide == "left"
+                  child: OverflowBox(
+                    fit: OverflowBoxFit.deferToChild,
+                    minWidth: AppState.unscaledMenuExtraSpace,
+                    maxWidth: AppState.unscaledMenuExtraSpace,
+                    alignment: _menuSide == 'left'
                         ? Alignment.topRight
                         : Alignment.topLeft,
-                    child: Align(
+                    child: Transform.scale(
+                      scale: renderContentScale,
                       alignment: _menuSide == "left"
                           ? Alignment.topRight
                           : Alignment.topLeft,
-                      child: SlideMenu(
-                        animation: _menuAnimController,
-                        menuSide: _menuSide,
-                        onSettingsTap: _toggleSettings,
-                        onExitTap: () {
-                          windowManager.hide();
-                          unawaited(_exitApplication());
-                        },
+                      child: Align(
+                        alignment: _menuSide == "left"
+                            ? Alignment.topRight
+                            : Alignment.topLeft,
+                        child: SlideMenu(
+                          animation: _menuAnimController,
+                          menuSide: _menuSide,
+                          onSettingsTap: _toggleSettings,
+                          onExitTap: () {
+                            windowManager.hide();
+                            unawaited(_exitApplication());
+                          },
+                        ),
                       ),
                     ),
                   ),

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
 import '../../core/lyrics_coordinator.dart';
 import '../animations/lyrics_content_transition.dart';
+import 'pixel_aligned_text.dart';
 
 class MusicLyricsPanel extends StatefulWidget {
   const MusicLyricsPanel({super.key});
@@ -74,7 +75,9 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     if (AppState.currentPlatformTrack == null) return '等待歌曲播放';
     switch (state.status) {
       case LyricsStatus.loading:
-        return '正在匹配歌词…';
+        return state.attempt > 1
+            ? '再试一次… ${state.attempt}/${state.maximumAttempts}'
+            : '正在匹配歌词…';
       case LyricsStatus.failed:
         return switch (state.issue) {
           LyricsIssue.rateLimited => '歌词服务请求过于频繁，请稍后切歌重试',
@@ -104,6 +107,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
         : AppState.lyricsProviderChoice.name;
     final (label, asset) = switch (source) {
       'qqMusic' => ('QQ 音乐', 'assets/brand/qq_music.png'),
+      'neteaseCloud' => ('网易云音乐', 'assets/brand/netease_cloud.png'),
       'lrclib' => ('LRCLIB', 'assets/brand/lrclib.png'),
       'localLrc' => ('本地 LRC', null),
       _ => ('歌词', null),
@@ -163,11 +167,13 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
         ),
         const SizedBox(width: 9),
         Flexible(
-          child: Text(
-            '正在匹配歌词…',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: AppState.lyricsTextStyle(scheme.onSurfaceVariant),
+          child: PixelAlignedText(
+            child: Text(
+              _displayText(AppState.lyrics.state),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: AppState.lyricsTextStyle(scheme.onSurfaceVariant),
+            ),
           ),
         ),
       ],
@@ -248,11 +254,15 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                           state.status == LyricsStatus.loading &&
                               AppState.currentPlatformTrack != null
                           ? _loadingContent(scheme, reduceMotion)
-                          : Text(
-                              displayText,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppState.lyricsTextStyle(scheme.onSurface),
+                          : PixelAlignedText(
+                              child: Text(
+                                displayText,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppState.lyricsTextStyle(
+                                  scheme.onSurface,
+                                ),
+                              ),
                             ),
                     ),
                   ),

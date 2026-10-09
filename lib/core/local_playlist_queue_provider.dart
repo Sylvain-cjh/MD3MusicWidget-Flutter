@@ -3,13 +3,16 @@ import 'dart:io';
 
 import 'platform_provider.dart';
 
-final class LocalPlaylistQueueProvider implements QueuePlatformProvider {
+final class LocalPlaylistQueueProvider
+    implements QueuePlatformProvider, QueueContextProvider {
   final String Function() playlistPath;
 
   const LocalPlaylistQueueProvider(this.playlistPath);
 
   @override
   String get id => 'localPlaylist';
+  @override
+  String get queueContextKey => playlistPath().trim();
 
   @override
   bool accepts(PlatformTrack track) => playlistPath().trim().isNotEmpty;

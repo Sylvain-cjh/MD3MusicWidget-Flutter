@@ -179,6 +179,24 @@ class _DynamicBackgroundState extends State<DynamicBackground>
   ImageProvider? _heldCoverProvider;
   String _heldCoverKey = 'fallback';
   Timer? _heldArtworkReleaseTimer;
+  Object? _visualState;
+  Object? _blurredArtworkKey;
+  Widget? _blurredArtwork;
+
+  Object _readVisualState() => (
+    AppState.coverProvider,
+    AppState.bgBlurProvider,
+    AppState.currentCoverVersion,
+    AppState.currentScheme,
+    AppState.themeBrightness,
+    AppState.enableGlow,
+    AppState.glowMode,
+    AppState.enableOledTheme,
+    AppState.widgetLayout,
+    AppState.isPlaying,
+    AppState.corePlayerHeightOf(WidgetLayout.horizontal),
+    AppState.glowHeaderHeight,
+  );
 
   void _releaseHeldArtwork() {
     if (!mounted ||
@@ -193,6 +211,8 @@ class _DynamicBackgroundState extends State<DynamicBackground>
       _heldBackgroundProvider = null;
       _heldCoverProvider = null;
       _heldCoverKey = 'fallback';
+      _blurredArtworkKey = null;
+      _blurredArtwork = null;
     });
   }
 
@@ -201,6 +221,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     super.initState();
     AppState.backgroundRevision.addListener(_handleBackgroundChanged);
     _glowLayerVisible = AppState.enableGlow;
+    _visualState = _readVisualState();
     _revealController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
@@ -219,12 +240,19 @@ class _DynamicBackgroundState extends State<DynamicBackground>
         !AppState.enableGlow &&
         _glowLayerVisible &&
         mounted) {
-      setState(() => _glowLayerVisible = false);
+      setState(() {
+        _glowLayerVisible = false;
+        _blurredArtwork = null;
+        _blurredArtworkKey = null;
+      });
     }
   }
 
   void _handleBackgroundChanged() {
     if (!mounted) return;
+    final visualState = _readVisualState();
+    if (_visualState == visualState) return;
+    _visualState = visualState;
     _heldArtworkReleaseTimer?.cancel();
     if (AppState.coverProvider == null && AppState.bgBlurProvider == null) {
       _heldArtworkReleaseTimer = Timer(
@@ -234,9 +262,15 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     }
     if (AppState.enableGlow) {
       _glowLayerVisible = true;
-      _revealController.forward();
+      if (_revealController.status != AnimationStatus.completed &&
+          _revealController.status != AnimationStatus.forward) {
+        _revealController.forward();
+      }
     } else {
-      _revealController.reverse();
+      if (_revealController.status != AnimationStatus.dismissed &&
+          _revealController.status != AnimationStatus.reverse) {
+        _revealController.reverse();
+      }
     }
     setState(() {});
   }
@@ -355,8 +389,47 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     );
   }
 
+  Widget _buildBlurredArtwork(
+    ImageProvider provider,
+    String coverKey,
+    double headerHeight,
+  ) {
+    final key = (provider, coverKey, AppState.glowMode, headerHeight);
+    if (_blurredArtworkKey != key) {
+      _blurredArtworkKey = key;
+      _blurredArtwork = RepaintBoundary(
+        child: Transform.scale(
+          scale: 1.25,
+          child: ImageFiltered(
+            imageFilter: _glowBlur,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 600),
+              switchInCurve: Curves.easeInOutCubic,
+              switchOutCurve: Curves.easeInOutCubic,
+              layoutBuilder: (currentChild, previousChildren) => Stack(
+                fit: StackFit.expand,
+                children: [...previousChildren, ?currentChild],
+              ),
+              child: AppState.glowMode == GlowMode.waterfall
+                  ? _buildWaterfallGlow(
+                      provider,
+                      coverKey,
+                      AppState.canvasWidth,
+                      AppState.canvasHeight,
+                      headerHeight,
+                    )
+                  : _buildWallpaperGlow(provider, coverKey),
+            ),
+          ),
+        ),
+      );
+    }
+    return _blurredArtwork!;
+  }
+
   @override
   Widget build(BuildContext context) {
+    _visualState = _readVisualState();
     final bool isDark = AppState.themeBrightness == Brightness.dark;
 
     const double canvasW = AppState.canvasWidth;
@@ -447,145 +520,10 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                           child: child,
                         );
                       },
-                      child: RepaintBoundary(
-                        child: Transform.scale(
-                          scale: 1.25,
-                          child: ImageFiltered(
-                            imageFilter: _glowBlur,
-                            child: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 600),
-                              switchInCurve: Curves.easeInOutCubic,
-                              switchOutCurve: Curves.easeInOutCubic,
-                              layoutBuilder: (currentChild, previousChildren) =>
-                                  Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      ...previousChildren,
-                                      ?currentChild,
-                                    ],
-                                  ),
-                              child: AppState.glowMode == GlowMode.waterfall
-                                  ? _buildWaterfallGlow(
-                                      bgProvider,
-                                      coverKey,
-                                      canvasW,
-                                      canvasH,
-                                      headerH,
-                                    )
-                                  : _buildWallpaperGlow(bgProvider, coverKey),
-                               
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                            ),
-                          ),
-                        ),
+                      child: _buildBlurredArtwork(
+                        bgProvider,
+                        coverKey,
+                        headerH,
                       ),
                     ),
                   ),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/system_performance_provider.dart';
 import '../../core/app_state.dart';
 import 'spectrum_glass_surface.dart';
+import 'pixel_aligned_text.dart';
 
 class PerformanceMonitorPanel extends StatefulWidget {
   final Future<SystemPerformanceSample?> Function() readSample;
@@ -105,10 +106,7 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
                         fontSize: 10,
                         height: 1.3,
                         color: colors.onSurface,
-                        fontFamily:
-                            AppState.currentFontFamily == 'System Default'
-                            ? null
-                            : AppState.currentFontFamily,
+                        fontFamily: AppState.effectiveGlobalFontFamily,
                         fontFamilyFallback: AppState.textFontFallback,
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
@@ -119,31 +117,39 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          'FPS ${fps == null ? '—' : fps.toStringAsFixed(0)}',
-                          overflow: TextOverflow.ellipsis,
+                        child: PixelAlignedText(
+                          child: Text(
+                            'FPS ${fps == null ? '—' : fps.toStringAsFixed(0)}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ),
-                      Text(
-                        'CPU ${cpu == null ? '—' : '${cpu.toStringAsFixed(0)}%'}',
+                      PixelAlignedText(
+                        child: Text(
+                          'CPU ${cpu == null ? '—' : '${cpu.toStringAsFixed(0)}%'}',
+                        ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 2),
                   Row(
                     children: [
-                      Text(
-                        'GPU ${gpu == null ? '—' : '${gpu.toStringAsFixed(0)}%'}',
-                        maxLines: 1,
+                      PixelAlignedText(
+                        child: Text(
+                          'GPU ${gpu == null ? '—' : '${gpu.toStringAsFixed(0)}%'}',
+                          maxLines: 1,
+                        ),
                       ),
                       const SizedBox(width: 4),
                       Expanded(
-                        child: Text(
-                          memoryText,
-                          maxLines: 1,
-                          textAlign: TextAlign.end,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: colors.onSurfaceVariant),
+                        child: PixelAlignedText(
+                          child: Text(
+                            memoryText,
+                            maxLines: 1,
+                            textAlign: TextAlign.end,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: colors.onSurfaceVariant),
+                          ),
                         ),
                       ),
                     ],
