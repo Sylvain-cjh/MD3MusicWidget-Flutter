@@ -3,6 +3,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 
 import '../../core/app_state.dart';
+import 'smooth_rounded_clip.dart';
 
 class SpectrumGlassSurface extends StatelessWidget {
   final Widget child;
@@ -16,9 +17,8 @@ class SpectrumGlassSurface extends StatelessWidget {
     final scheme = AppState.currentScheme;
     final radius = BorderRadius.circular(24);
     return ClipRect(
-      child: ClipRRect(
+      child: SmoothRoundedClip(
         borderRadius: radius,
-        clipBehavior: Clip.antiAliasWithSaveLayer,
         child: BackdropFilter(
           filter: _blur,
           child: DecoratedBox(
@@ -34,6 +34,7 @@ class SpectrumGlassSurface extends StatelessWidget {
               ),
               borderRadius: radius,
               border: Border.all(
+                width: RoundedRasterScale.hairline(context),
                 color: scheme.outlineVariant.withValues(alpha: 0.42),
               ),
             ),

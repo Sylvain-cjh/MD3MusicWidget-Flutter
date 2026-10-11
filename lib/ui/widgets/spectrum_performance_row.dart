@@ -131,6 +131,7 @@ class _SpectrumPerformanceRowState extends State<SpectrumPerformanceRow>
                     width: spectrumVisible ? halfWidth : width,
                     child: PerformanceMonitorPanel(
                       isVertical: widget.isVertical,
+                      active: widget.showPerformance,
                     ),
                   ),
               ],

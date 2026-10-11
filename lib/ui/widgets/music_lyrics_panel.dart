@@ -7,6 +7,8 @@ import '../../core/app_state.dart';
 import '../../core/lyrics_coordinator.dart';
 import '../animations/lyrics_content_transition.dart';
 import 'pixel_aligned_text.dart';
+import 'smooth_rounded_clip.dart';
+import 'provider_brand_mark.dart';
 
 class MusicLyricsPanel extends StatefulWidget {
   const MusicLyricsPanel({super.key});
@@ -21,6 +23,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     sigmaY: 13,
   );
   Timer? _timelineTimer;
+  LyricsState? _retainedState;
   late final AnimatedSwitcherTransitionBuilder _lineTransitionBuilder =
       _buildLineTransition;
 
@@ -105,12 +108,12 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     final source = state.providerId.isNotEmpty
         ? state.providerId
         : AppState.lyricsProviderChoice.name;
-    final (label, asset) = switch (source) {
-      'qqMusic' => ('QQ 音乐', 'assets/brand/qq_music.png'),
-      'neteaseCloud' => ('网易云音乐', 'assets/brand/netease_cloud.png'),
-      'lrclib' => ('LRCLIB', 'assets/brand/lrclib.png'),
-      'localLrc' => ('本地 LRC', null),
-      _ => ('歌词', null),
+    final label = switch (source) {
+      'qqMusic' => 'QQ 音乐',
+      'neteaseCloud' => '网易云音乐',
+      'lrclib' => 'LRCLIB',
+      'localLrc' => '本地 LRC',
+      _ => '歌词',
     };
     return Tooltip(
       message: '歌词来源：$label',
@@ -120,30 +123,17 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
           key: ValueKey('lyrics_source_$source'),
           width: 27,
           height: 27,
-          child: asset != null
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(7),
-                  child: Image.asset(asset, width: 27, height: 27),
-                )
-              : DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: scheme.tertiaryContainer,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    source == 'localLrc'
-                        ? Icons.folder_rounded
-                        : Icons.lyrics_rounded,
-                    size: 17,
-                    color: scheme.onTertiaryContainer,
-                  ),
-                ),
+          child: ProviderBrandMark(source: source, scheme: scheme),
         ),
       ),
     );
   }
 
-  Widget _loadingContent(ColorScheme scheme, bool reduceMotion) {
+  Widget _loadingContent(
+    ColorScheme scheme,
+    bool reduceMotion,
+    LyricsState state,
+  ) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -169,7 +159,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
         Flexible(
           child: PixelAlignedText(
             child: Text(
-              _displayText(AppState.lyrics.state),
+              _displayText(state),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: AppState.lyricsTextStyle(scheme.onSurfaceVariant),
@@ -183,13 +173,17 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
   @override
   Widget build(BuildContext context) {
     final scheme = AppState.currentScheme;
-    final state = AppState.lyrics.state;
+    final actual = AppState.lyrics.state;
+    final hiding =
+        AppState.hideUnavailableLyrics &&
+        (actual.status == LyricsStatus.failed ||
+            actual.status == LyricsStatus.unavailable);
+    if (!hiding) _retainedState = actual;
+    final state = hiding ? (_retainedState ?? actual) : actual;
     final radius = BorderRadius.circular(24);
     final displayText = _displayText(state);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final transitionStyle = AppState.lyricsTransitionStyle;
-    final exitTransitionStyle = AppState.effectiveLyricsExitTransitionStyle;
-    return ClipRRect(
+    return SmoothRoundedClip(
       borderRadius: radius,
       child: BackdropFilter(
         filter: _glassBlur,
@@ -206,6 +200,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
             ),
             borderRadius: radius,
             border: Border.all(
+              width: RoundedRasterScale.hairline(context),
               color: scheme.outlineVariant.withValues(alpha: 0.42),
             ),
           ),
@@ -230,19 +225,19 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                 Expanded(
                   child: AnimatedSwitcher(
                     duration: LyricsContentTransition.durationFor(
-                      transitionStyle,
+                      LyricsTransitionStyle.fade,
                       reduceMotion: reduceMotion,
                     ),
                     reverseDuration: LyricsContentTransition.durationFor(
-                      exitTransitionStyle,
+                      LyricsTransitionStyle.fade,
                       reduceMotion: reduceMotion,
                     ),
                     switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeOutCubic.flipped,
                     layoutBuilder: (currentChild, previousChildren) => Stack(
                       alignment: Alignment.centerLeft,
                       clipBehavior: Clip.hardEdge,
-                      children: [?currentChild, ...previousChildren],
+                      children: [...previousChildren, ?currentChild],
                     ),
                     transitionBuilder: _lineTransitionBuilder,
                     child: Align(
@@ -253,7 +248,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                       child:
                           state.status == LyricsStatus.loading &&
                               AppState.currentPlatformTrack != null
-                          ? _loadingContent(scheme, reduceMotion)
+                          ? _loadingContent(scheme, reduceMotion, state)
                           : PixelAlignedText(
                               child: Text(
                                 displayText,

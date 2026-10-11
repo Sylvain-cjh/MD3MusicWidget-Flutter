@@ -1,6 +1,20 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+enum PerformanceMetric {
+  fps(1),
+  cpu(2),
+  gpu(4),
+  memory(8);
+
+  const PerformanceMetric(this.bit);
+  final int bit;
+  static const allMask = 15;
+  bool enabledIn(int mask) => mask & bit != 0;
+  static int validMask(Object? value) =>
+      value is int && value >= 0 && value <= allMask ? value : allMask;
+}
+
 class SystemPerformanceSample {
   final int idleTicks;
   final int kernelTicks;
@@ -12,6 +26,7 @@ class SystemPerformanceSample {
   final String fpsStatus;
   final int processId;
   final int revision;
+  final int metricsMask;
 
   const SystemPerformanceSample({
     required this.idleTicks,
@@ -24,6 +39,7 @@ class SystemPerformanceSample {
     this.fpsStatus = 'selectProcess',
     this.processId = 0,
     this.revision = 0,
+    this.metricsMask = PerformanceMetric.allMask,
   });
 
   factory SystemPerformanceSample.fromMap(Map<Object?, Object?> map) {
@@ -39,6 +55,7 @@ class SystemPerformanceSample {
       fpsStatus: map['fpsStatus'] as String? ?? 'selectProcess',
       processId: (map['processId'] as num?)?.toInt() ?? 0,
       revision: (map['revision'] as num?)?.toInt() ?? 0,
+      metricsMask: PerformanceMetric.validMask(map['metricsMask']),
     );
   }
 }
@@ -66,8 +83,12 @@ class SystemPerformanceTracker {
   SystemPerformanceReading update(SystemPerformanceSample current) {
     final previous = _previous?.revision == current.revision ? _previous : null;
     _previous = current;
-    if (previous == null) _cpuPercent = null;
-    if (previous != null) {
+    if (previous == null ||
+        !PerformanceMetric.cpu.enabledIn(current.metricsMask)) {
+      _cpuPercent = null;
+    }
+    if (previous != null &&
+        PerformanceMetric.cpu.enabledIn(current.metricsMask)) {
       final idleDelta = current.idleTicks - previous.idleTicks;
       final totalDelta =
           current.kernelTicks +
@@ -103,6 +124,9 @@ class PerformanceProcess {
 }
 
 class SystemPerformanceProvider {
+  static bool _fpsEnabled = false;
+  static String _fpsExecutable = '';
+  static int _configuration = 0;
   static final fpsStatus = ValueNotifier<String>('selectProcess');
   static const MethodChannel _channel = MethodChannel(
     'md3_music_widget/system_performance',
@@ -111,14 +135,22 @@ class SystemPerformanceProvider {
   static Future<void> configure({
     required bool enabled,
     required String executable,
+    int metricsMask = PerformanceMetric.allMask,
   }) async {
-    if (enabled) {
+    ++_configuration;
+    final fpsEnabled = enabled && PerformanceMetric.fps.enabledIn(metricsMask);
+    if (!fpsEnabled) {
+      fpsStatus.value = 'disabled';
+    } else if (!_fpsEnabled || _fpsExecutable != executable) {
       fpsStatus.value = executable.isEmpty ? 'selectProcess' : 'starting';
     }
+    _fpsEnabled = fpsEnabled;
+    _fpsExecutable = executable;
     try {
       await _channel.invokeMethod<void>('configure', {
         'enabled': enabled,
         'executable': executable,
+        'metricsMask': metricsMask & PerformanceMetric.allMask,
       });
     } on PlatformException {
       fpsStatus.value = 'captureFailed';
@@ -167,12 +199,18 @@ class SystemPerformanceProvider {
   }
 
   static Future<SystemPerformanceSample?> sample() async {
+    final configuration = _configuration;
     try {
       final data = await _channel.invokeMapMethod<Object?, Object?>('sample');
       if (data == null) return null;
       final sample = SystemPerformanceSample.fromMap(data);
-      fpsStatus.value = sample.fpsStatus;
-      return sample.totalMemoryBytes > 0 ? sample : null;
+      if (configuration == _configuration) {
+        fpsStatus.value = _fpsEnabled ? sample.fpsStatus : 'disabled';
+      }
+      return sample.totalMemoryBytes > 0 ||
+              !PerformanceMetric.memory.enabledIn(sample.metricsMask)
+          ? sample
+          : null;
     } on PlatformException {
       return null;
     } on MissingPluginException {

@@ -22,6 +22,7 @@ import 'system_performance_provider.dart';
 import 'next_up_preview_controller.dart';
 import 'persistent_cache.dart';
 import 'lyrics_disk_cache.dart';
+import 'track_navigation_direction.dart';
 
 
 
@@ -41,7 +42,29 @@ enum SpectrumMode { off, bars, mirror, waveform }
 
 enum LyricsProviderChoice { lrclib, localLrc, qqMusic, neteaseCloud }
 
-enum LyricsTransitionStyle { fade, rise, descend, sideways, zoom, none }
+enum LyricsTransitionStyle {
+  fade,
+  rise,
+  descend,
+  sideways,
+  zoom,
+  none,
+  film,
+  flip,
+  settle,
+  wipe,
+}
+
+enum CoverTransitionStyle {
+  softSlide,
+  fade,
+  filmVertical,
+  filmHorizontal,
+  flipHorizontal,
+  flipVertical,
+  stack,
+  none,
+}
 
 enum TrackTextTransitionStyle {
   particles,
@@ -85,6 +108,7 @@ class AppState {
   static bool? isShuffleActive;
   static String autoRepeatMode = '';
   static PlatformTrack? currentPlatformTrack;
+  static final trackNavigation = TrackNavigationDirection();
   static final LrclibLyricsProvider _lrclibLyrics = LrclibLyricsProvider();
   static final QqMusicPlaylistQueueProvider _qqPlaylist =
       QqMusicPlaylistQueueProvider(playlistInput: () => qqPlaylistLink);
@@ -454,7 +478,19 @@ class AppState {
   static final rightArtworkRevision = ValueNotifier<int>(0);
   static void notifyRightArtworkChanged() => rightArtworkRevision.value++;
   static SpectrumMode spectrumMode = SpectrumMode.off;
+  static const defaultSpectrumThickness = 1.0;
+  static double spectrumThickness = defaultSpectrumThickness;
+  static bool automaticSpectrumColumns = true;
+  static int spectrumColumnCount = 32;
+  static final spectrumStyleRevision = ValueNotifier<int>(0);
+  static void notifySpectrumStyleChanged() => spectrumStyleRevision.value++;
   static bool showLyrics = false;
+  static bool hideUnavailableLyrics = false;
+  static bool get lyricsPanelVisible =>
+      showLyrics &&
+      (!hideUnavailableLyrics ||
+          lyrics.state.status == LyricsStatus.loading ||
+          lyrics.state.status == LyricsStatus.ready);
   static const String defaultFontFamily = 'System Default';
   static const double defaultTitleWeightValue = 700.0;
   static const double defaultArtistWeightValue = 400.0;
@@ -481,6 +517,8 @@ class AppState {
   static bool enableProgressAutoContrast = true;
   static bool enableOledTheme = false;
   static bool enable3DCover = true;
+  static CoverTransitionStyle coverTransitionStyle =
+      CoverTransitionStyle.softSlide;
   static bool showPlaybackControls = true;
   static bool trackTextAnimationsEnabled = true;
   static TrackTextTransitionStyle trackTextTransitionStyle =
@@ -488,6 +526,11 @@ class AppState {
   static bool trackTextAnimationsLinked = true;
   static TrackTextExitStyle trackTextExitStyle = TrackTextExitStyle.fade;
   static bool showPerformanceMonitor = false;
+  static int performanceMetricsMask = PerformanceMetric.allMask;
+  static bool get performanceMonitorVisible =>
+      showPerformanceMonitor && performanceMetricsMask != 0;
+  static bool performanceMetricEnabled(PerformanceMetric metric) =>
+      metric.enabledIn(performanceMetricsMask);
   static String performanceProcessExecutable = '';
   static final performanceRevision = ValueNotifier<int>(0);
   static void notifyPerformanceChanged() => performanceRevision.value++;
@@ -599,7 +642,9 @@ class AppState {
       ? (showPlaybackControls ? 520.0 : 448.0)
       : (showPlaybackControls ? 176.0 : 140.0);
   static double spectrumPanelExtentOf(WidgetLayout l) =>
-      spectrumMode == SpectrumMode.off && !showPerformanceMonitor ? 0.0 : 64.0;
+      spectrumMode == SpectrumMode.off && !performanceMonitorVisible
+      ? 0.0
+      : 64.0;
   static double lyricsPanelExtentOf(WidgetLayout l) => showLyrics ? 64.0 : 0.0;
   static double nextUpPanelExtentOf(WidgetLayout l) =>
       nextUpPanelOccupied ? 64.0 : 0.0;
@@ -737,6 +782,8 @@ class AppState {
     ..maxConnectionsPerHost = 2;
 
   static Future<void> sendCommand(MediaCommand command) async {
+    trackNavigation.observe(currentPlatformTrack);
+    final navigationIntent = trackNavigation.noteCommand(command);
     if (mediaCommandSender?.call(command) == true) return;
     HttpClientRequest? request;
     try {
@@ -751,9 +798,13 @@ class AppState {
       final response = await request.close().timeout(
         const Duration(milliseconds: 500),
       );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        trackNavigation.cancelCommand(navigationIntent);
+      }
       await response.drain<void>().timeout(const Duration(milliseconds: 500));
     } catch (_) {
       request?.abort();
+      trackNavigation.cancelCommand(navigationIntent);
     }
   }
 
@@ -911,6 +962,16 @@ class AppState {
           SpectrumMode.off,
         );
         showLyrics = snapshot['showLyrics'] == true;
+        hideUnavailableLyrics = snapshot['hideUnavailableLyrics'] == true;
+        spectrumThickness = _validSpectrumThickness(
+          snapshot['spectrumThickness'],
+        );
+        automaticSpectrumColumns = snapshot['automaticSpectrumColumns'] is bool
+            ? snapshot['automaticSpectrumColumns'] as bool
+            : true;
+        spectrumColumnCount = _validSpectrumColumns(
+          snapshot['spectrumColumnCount'],
+        );
         lyricsUseThemeFont = snapshot['lyricsUseThemeFont'] is bool
             ? snapshot['lyricsUseThemeFont'] as bool
             : true;
@@ -969,6 +1030,11 @@ class AppState {
             snapshot['trackTextAnimationsEnabled'] is bool
             ? snapshot['trackTextAnimationsEnabled'] as bool
             : true;
+        coverTransitionStyle = _enumFromName(
+          CoverTransitionStyle.values,
+          snapshot['coverTransitionStyle'],
+          CoverTransitionStyle.softSlide,
+        );
         trackTextTransitionStyle = _enumFromName(
           TrackTextTransitionStyle.values,
           snapshot['trackTextTransitionStyle'],
@@ -984,6 +1050,9 @@ class AppState {
           TrackTextExitStyle.fade,
         );
         showPerformanceMonitor = snapshot['showPerformanceMonitor'] == true;
+        performanceMetricsMask = PerformanceMetric.validMask(
+          snapshot['performanceMetricsMask'],
+        );
         performanceProcessExecutable =
             snapshot['performanceProcessExecutable'] as String? ?? '';
         selectedSourceAppId = snapshot['selectedSourceAppId'] is String
@@ -1154,6 +1223,14 @@ class AppState {
       SpectrumMode.off,
     );
     showLyrics = p.getBool('showLyrics') ?? false;
+    hideUnavailableLyrics = p.getBool('hideUnavailableLyrics') ?? false;
+    spectrumThickness = _validSpectrumThickness(
+      p.getDouble('spectrumThickness'),
+    );
+    automaticSpectrumColumns = p.getBool('automaticSpectrumColumns') ?? true;
+    spectrumColumnCount = _validSpectrumColumns(
+      p.getInt('spectrumColumnCount'),
+    );
     lyricsUseThemeFont = p.getBool('lyricsUseThemeFont') ?? true;
     lyricsFontFamily = p.getString('lyricsFontFamily') ?? 'System Default';
     lyricsWeightValue = p.getDouble('lyricsWeightValue') ?? 500.0;
@@ -1190,6 +1267,11 @@ class AppState {
         p.getBool('enableProgressAutoContrast') ?? true;
     enableOledTheme = p.getBool('enableOledTheme') ?? false;
     enable3DCover = p.getBool('enable3DCover') ?? true;
+    coverTransitionStyle = _enumFromIndex(
+      CoverTransitionStyle.values,
+      p.getInt('coverTransitionStyle'),
+      CoverTransitionStyle.softSlide,
+    );
     showPlaybackControls = p.getBool('showPlaybackControls') ?? true;
     trackTextAnimationsEnabled =
         p.getBool('trackTextAnimationsEnabled') ?? true;
@@ -1205,6 +1287,9 @@ class AppState {
       TrackTextExitStyle.fade,
     );
     showPerformanceMonitor = p.getBool('showPerformanceMonitor') ?? false;
+    performanceMetricsMask = PerformanceMetric.validMask(
+      p.getInt('performanceMetricsMask'),
+    );
     performanceProcessExecutable =
         p.getString('performanceProcessExecutable') ?? '';
     selectedSourceAppId = p.getString('selectedSourceAppId') ?? '';
@@ -1282,6 +1367,10 @@ class AppState {
     'rightCoverBlur': rightCoverBlur,
     'spectrumMode': spectrumMode.name,
     'showLyrics': showLyrics,
+    'hideUnavailableLyrics': hideUnavailableLyrics,
+    'spectrumThickness': spectrumThickness,
+    'automaticSpectrumColumns': automaticSpectrumColumns,
+    'spectrumColumnCount': spectrumColumnCount,
     'lyricsUseThemeFont': lyricsUseThemeFont,
     'lyricsFontFamily': lyricsFontFamily,
     'lyricsWeightValue': lyricsWeightValue,
@@ -1297,12 +1386,14 @@ class AppState {
     'enableProgressAutoContrast': enableProgressAutoContrast,
     'enableOledTheme': enableOledTheme,
     'enable3DCover': enable3DCover,
+    'coverTransitionStyle': coverTransitionStyle.name,
     'showPlaybackControls': showPlaybackControls,
     'trackTextAnimationsEnabled': trackTextAnimationsEnabled,
     'trackTextTransitionStyle': trackTextTransitionStyle.name,
     'trackTextAnimationsLinked': trackTextAnimationsLinked,
     'trackTextExitStyle': trackTextExitStyle.name,
     'showPerformanceMonitor': showPerformanceMonitor,
+    'performanceMetricsMask': performanceMetricsMask,
     'performanceProcessExecutable': performanceProcessExecutable,
     'selectedSourceAppId': selectedSourceAppId,
     'playlistFilePath': playlistFilePath,
@@ -1350,6 +1441,12 @@ class AppState {
       value is num && value.isFinite
       ? value.toInt().clamp(0, maximum)
       : fallback;
+  static double _validSpectrumThickness(Object? value) =>
+      value is num && value.isFinite
+      ? value.toDouble().clamp(0.35, 3.0)
+      : defaultSpectrumThickness;
+  static int _validSpectrumColumns(Object? value) =>
+      value is num && value.isFinite ? value.toInt().clamp(1, 128) : 32;
   static Future<void> saveSettings() async {
     if (_prefs == null) return;
     _pendingSettingsSnapshot = jsonEncode(_captureSettingsSnapshot());

@@ -7,6 +7,7 @@ import '../../core/platform_provider.dart';
 import '../../core/next_up_preview_controller.dart';
 import '../animations/next_up_presence_motion.dart';
 import 'pixel_aligned_text.dart';
+import 'smooth_rounded_clip.dart';
 
 class MusicNextUpPanel extends StatefulWidget {
   final Animation<double>? presenceAnimation;
@@ -124,7 +125,7 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
             ).animate(_animation),
             child: !preview
                 ? const SizedBox.shrink(key: ValueKey('next_up_hidden'))
-                : ClipRRect(
+                : SmoothRoundedClip(
                     key: ValueKey('next_up_${next.id}'),
                     borderRadius: BorderRadius.circular(24),
                     child: BackdropFilter(
@@ -136,6 +137,7 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
                           ),
                           borderRadius: BorderRadius.circular(24),
                           border: Border.all(
+                            width: RoundedRasterScale.hairline(context),
                             color: scheme.outlineVariant.withValues(
                               alpha: 0.40,
                             ),

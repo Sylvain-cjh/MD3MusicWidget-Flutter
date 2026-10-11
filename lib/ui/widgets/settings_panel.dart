@@ -16,6 +16,7 @@ import 'settings_section_navigation.dart';
 import 'settings_scroll_viewport.dart';
 import 'adaptive_media_text.dart';
 import 'jelly_slider.dart';
+import 'smooth_rounded_clip.dart';
 
 enum _SettingsSection { window, appearance, playback, lyrics, typography }
 
@@ -76,6 +77,7 @@ class _SettingsPanelState extends State<SettingsPanel>
   Timer? _typographySaveTimer;
   Timer? _rightArtworkSaveTimer;
   Timer? _cacheLimitSaveTimer;
+  Timer? _spectrumStyleSaveTimer;
   List<PerformanceProcess> _performanceProcesses = const [];
   bool _performanceProcessesLoading = false;
 
@@ -120,6 +122,33 @@ class _SettingsPanelState extends State<SettingsPanel>
     }
   }
 
+  void _setPerformanceMetric(PerformanceMetric metric, bool enabled) {
+    final wasVisible = AppState.performanceMonitorVisible;
+    setState(() {
+      AppState.performanceMetricsMask = enabled
+          ? AppState.performanceMetricsMask | metric.bit
+          : AppState.performanceMetricsMask & ~metric.bit;
+    });
+    AppState.notifyPerformanceChanged();
+    unawaited(AppState.saveSettings());
+    if (metric == PerformanceMetric.fps && enabled) {
+      unawaited(_refreshPerformanceProcesses());
+    }
+    if (AppState.spectrumMode == SpectrumMode.off &&
+        wasVisible != AppState.performanceMonitorVisible) {
+      widget.onLayoutChanged();
+    } else {
+      widget.onVisualChanged();
+    }
+  }
+
+  String _performanceMetricLabel(PerformanceMetric metric) => switch (metric) {
+    PerformanceMetric.fps => SettingsLabels.performanceFps,
+    PerformanceMetric.cpu => SettingsLabels.performanceCpu,
+    PerformanceMetric.gpu => SettingsLabels.performanceGpu,
+    PerformanceMetric.memory => SettingsLabels.performanceMemory,
+  };
+
   void _updateTypography(VoidCallback change) {
     setState(change);
     AppState.notifyTypographyChanged();
@@ -128,6 +157,26 @@ class _SettingsPanelState extends State<SettingsPanel>
       const Duration(milliseconds: 450),
       () => unawaited(AppState.saveSettings()),
     );
+  }
+
+  void _updateSpectrumThickness(double value) {
+    _updateSpectrumStyle(() => AppState.spectrumThickness = value);
+  }
+
+  void _updateSpectrumStyle(VoidCallback change) {
+    setState(change);
+    AppState.notifySpectrumStyleChanged();
+    _spectrumStyleSaveTimer?.cancel();
+    _spectrumStyleSaveTimer = Timer(
+      const Duration(milliseconds: 450),
+      _finishSpectrumStyleChange,
+    );
+  }
+
+  void _finishSpectrumStyleChange() {
+    _spectrumStyleSaveTimer?.cancel();
+    _spectrumStyleSaveTimer = null;
+    unawaited(AppState.saveSettings());
   }
 
   void _finishTypographyChange() {
@@ -380,6 +429,7 @@ class _SettingsPanelState extends State<SettingsPanel>
     if (_typographySaveTimer?.isActive == true) _finishTypographyChange();
     if (_rightArtworkSaveTimer?.isActive == true) _finishRightArtworkChange();
     if (_cacheLimitSaveTimer?.isActive == true) _finishCacheLimitChange();
+    if (_spectrumStyleSaveTimer?.isActive == true) _finishSpectrumStyleChange();
     AppState.playbackRevision.removeListener(_handleTimelineAvailability);
     AppState.fontsRevision.removeListener(_handleFontsChanged);
     super.dispose();
@@ -803,6 +853,79 @@ class _SettingsPanelState extends State<SettingsPanel>
                                 },
                                 _spectrumEntries(),
                               ),
+                            _buildOptionalSetting(
+                              visible:
+                                  AppState.spectrumMode != SpectrumMode.off &&
+                                  MediaCapability.supports(
+                                    AppState.mediaCapabilities,
+                                    MediaCapability.spectrum,
+                                  ),
+                              child: _buildContinuousSliderRow(
+                                title: SettingsLabels.spectrumThickness,
+                                subtitle:
+                                    SettingsDescriptions.spectrumThickness,
+                                value: AppState.spectrumThickness,
+                                min: 0.35,
+                                max: 3,
+                                resetValue: AppState.defaultSpectrumThickness,
+                                valueLabel: (value) =>
+                                    '${value.toStringAsFixed(2)}×',
+                                sliderKey: const ValueKey(
+                                  'spectrum_thickness_slider',
+                                ),
+                                onChanged: _updateSpectrumThickness,
+                                onChangeEnd: _finishSpectrumStyleChange,
+                              ),
+                            ),
+                            _buildOptionalSetting(
+                              visible:
+                                  (AppState.spectrumMode == SpectrumMode.bars ||
+                                      AppState.spectrumMode ==
+                                          SpectrumMode.mirror) &&
+                                  MediaCapability.supports(
+                                    AppState.mediaCapabilities,
+                                    MediaCapability.spectrum,
+                                  ),
+                              child: Column(
+                                children: [
+                                  _buildSwitchRow(
+                                    SettingsLabels.automaticSpectrumColumns,
+                                    SettingsDescriptions
+                                        .automaticSpectrumColumns,
+                                    AppState.automaticSpectrumColumns,
+                                    (value) => _updateSpectrumStyle(
+                                      () => AppState.automaticSpectrumColumns =
+                                          value,
+                                    ),
+                                  ),
+                                  _buildOptionalSetting(
+                                    visible: !AppState.automaticSpectrumColumns,
+                                    child: _buildContinuousSliderRow(
+                                      title: SettingsLabels.spectrumColumnCount,
+                                      subtitle: SettingsDescriptions
+                                          .spectrumColumnCount,
+                                      value: AppState.spectrumColumnCount
+                                          .toDouble(),
+                                      min: 1,
+                                      max: 128,
+                                      divisions: 127,
+                                      resetValue: 32,
+                                      valueLabel: (value) =>
+                                          '${value.round()} 根',
+                                      sliderKey: const ValueKey(
+                                        'spectrum_column_count_slider',
+                                      ),
+                                      onChanged: (value) =>
+                                          _updateSpectrumStyle(
+                                            () => AppState.spectrumColumnCount =
+                                                value.round().clamp(1, 128),
+                                          ),
+                                      onChangeEnd: _finishSpectrumStyleChange,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
 
@@ -908,13 +1031,21 @@ class _SettingsPanelState extends State<SettingsPanel>
                               SettingsDescriptions.performanceMonitor,
                               AppState.showPerformanceMonitor,
                               (value) {
+                                final wasVisible =
+                                    AppState.performanceMonitorVisible;
                                 setState(
                                   () => AppState.showPerformanceMonitor = value,
                                 );
-                                if (value) {
+                                AppState.notifyPerformanceChanged();
+                                if (value &&
+                                    AppState.performanceMetricEnabled(
+                                      PerformanceMetric.fps,
+                                    )) {
                                   unawaited(_refreshPerformanceProcesses());
                                 }
-                                if (AppState.spectrumMode == SpectrumMode.off) {
+                                if (AppState.spectrumMode == SpectrumMode.off &&
+                                    wasVisible !=
+                                        AppState.performanceMonitorVisible) {
                                   widget.onLayoutChanged();
                                 } else {
                                   widget.onVisualChanged();
@@ -926,52 +1057,78 @@ class _SettingsPanelState extends State<SettingsPanel>
                               child: Column(
                                 children: [
                                   _buildDivider(),
-                                  ValueListenableBuilder<String>(
-                                    valueListenable:
-                                        SystemPerformanceProvider.fpsStatus,
-                                    builder: (context, status, _) => Column(
-                                      children: [
-                                        _buildDropdownRow<String>(
-                                          SettingsLabels.performanceProcess,
-                                          SettingsDescriptions.performanceFpsStatus(
-                                            status,
-                                          ),
-                                          AppState.performanceProcessExecutable,
-                                          (value) {
-                                            setState(
-                                              () =>
-                                                  AppState.performanceProcessExecutable =
-                                                      value,
-                                            );
-                                            AppState.notifyPerformanceChanged();
-                                            unawaited(AppState.saveSettings());
-                                          },
-                                          _performanceProcessEntries(),
-                                          fullWidth: true,
-                                          actionButton: IconButton(
-                                            tooltip: '刷新程序列表',
-                                            onPressed:
-                                                _performanceProcessesLoading
-                                                ? null
-                                                : _refreshPerformanceProcesses,
-                                            icon: const Icon(
-                                              Icons.refresh_rounded,
-                                            ),
-                                          ),
+                                  for (final metric in PerformanceMetric.values)
+                                    KeyedSubtree(
+                                      key: ValueKey(
+                                        'performance_toggle_${metric.name}',
+                                      ),
+                                      child: _buildSwitchRow(
+                                        _performanceMetricLabel(metric),
+                                        null,
+                                        AppState.performanceMetricEnabled(
+                                          metric,
                                         ),
-                                        if (status == 'permissionDenied')
-                                          TextButton.icon(
-                                            onPressed: _restartMonitorElevated,
-                                            icon: const Icon(
-                                              Icons
-                                                  .admin_panel_settings_outlined,
+                                        (value) => _setPerformanceMetric(
+                                          metric,
+                                          value,
+                                        ),
+                                      ),
+                                    ),
+                                  _buildOptionalSetting(
+                                    visible: AppState.performanceMetricEnabled(
+                                      PerformanceMetric.fps,
+                                    ),
+                                    child: ValueListenableBuilder<String>(
+                                      valueListenable:
+                                          SystemPerformanceProvider.fpsStatus,
+                                      builder: (context, status, _) => Column(
+                                        children: [
+                                          _buildDropdownRow<String>(
+                                            SettingsLabels.performanceProcess,
+                                            SettingsDescriptions.performanceFpsStatus(
+                                              status,
                                             ),
-                                            label: const Text(
-                                              SettingsLabels
-                                                  .performanceAuthorize,
+                                            AppState
+                                                .performanceProcessExecutable,
+                                            (value) {
+                                              setState(
+                                                () =>
+                                                    AppState.performanceProcessExecutable =
+                                                        value,
+                                              );
+                                              AppState.notifyPerformanceChanged();
+                                              unawaited(
+                                                AppState.saveSettings(),
+                                              );
+                                            },
+                                            _performanceProcessEntries(),
+                                            fullWidth: true,
+                                            actionButton: IconButton(
+                                              tooltip: '刷新程序列表',
+                                              onPressed:
+                                                  _performanceProcessesLoading
+                                                  ? null
+                                                  : _refreshPerformanceProcesses,
+                                              icon: const Icon(
+                                                Icons.refresh_rounded,
+                                              ),
                                             ),
                                           ),
-                                      ],
+                                          if (status == 'permissionDenied')
+                                            TextButton.icon(
+                                              onPressed:
+                                                  _restartMonitorElevated,
+                                              icon: const Icon(
+                                                Icons
+                                                    .admin_panel_settings_outlined,
+                                              ),
+                                              label: const Text(
+                                                SettingsLabels
+                                                    .performanceAuthorize,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -1180,6 +1337,19 @@ class _SettingsPanelState extends State<SettingsPanel>
                               ),
                             ),
                             _buildDivider(),
+                            _buildDropdownRow<CoverTransitionStyle>(
+                              SettingsLabels.coverTransition,
+                              SettingsDescriptions.coverTransition,
+                              AppState.coverTransitionStyle,
+                              (value) {
+                                setState(
+                                  () => AppState.coverTransitionStyle = value,
+                                );
+                                widget.onVisualChanged();
+                              },
+                              _coverTransitionEntries(),
+                            ),
+                            _buildDivider(),
                             _buildSwitchRow(
                               SettingsLabels.playbackControls,
                               SettingsDescriptions.playbackControls,
@@ -1350,6 +1520,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                               (value) {
                                 setState(() => AppState.showLyrics = value);
                                 AppState.refreshLyrics();
+                                AppState.notifyLyricsVisualChanged();
                                 widget.onLayoutChanged();
                               },
                             ),
@@ -1357,6 +1528,20 @@ class _SettingsPanelState extends State<SettingsPanel>
                               visible: AppState.showLyrics,
                               child: Column(
                                 children: [
+                                  _buildSwitchRow(
+                                    SettingsLabels.hideUnavailableLyrics,
+                                    SettingsDescriptions.hideUnavailableLyrics,
+                                    AppState.hideUnavailableLyrics,
+                                    (value) {
+                                      setState(
+                                        () => AppState.hideUnavailableLyrics =
+                                            value,
+                                      );
+                                      AppState.notifyLyricsVisualChanged();
+                                      unawaited(AppState.saveSettings());
+                                      widget.onVisualChanged();
+                                    },
+                                  ),
                                   _buildDivider(),
                                   _buildDropdownRow<LyricsProviderChoice>(
                                     SettingsLabels.lyricsProvider,
@@ -1785,7 +1970,8 @@ class _SettingsPanelState extends State<SettingsPanel>
               ),
               borderRadius: BorderRadius.circular(24),
             ),
-            child: ClipRRect(
+            child: SmoothRoundedClip(
+              composite: false,
               borderRadius: BorderRadius.circular(24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2350,59 +2536,90 @@ class _SettingsPanelState extends State<SettingsPanel>
 
   List<DropdownMenuEntry<LyricsTransitionStyle>> _lyricsTransitionEntries({
     bool exiting = false,
-  }) => exiting
-      ? const [
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.fade,
-            label: SettingsLabels.lyricsFadeOut,
-          ),
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.rise,
-            label: SettingsLabels.lyricsRiseOut,
-          ),
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.descend,
-            label: SettingsLabels.lyricsDescendOut,
-          ),
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.sideways,
-            label: SettingsLabels.lyricsSidewaysOut,
-          ),
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.zoom,
-            label: SettingsLabels.lyricsZoomOut,
-          ),
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.none,
-            label: SettingsLabels.lyricsNoExitAnimation,
-          ),
-        ]
-      : const [
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.fade,
-            label: SettingsLabels.lyricsFadeIn,
-          ),
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.rise,
-            label: SettingsLabels.lyricsRiseIn,
-          ),
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.descend,
-            label: SettingsLabels.lyricsDescendIn,
-          ),
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.sideways,
-            label: SettingsLabels.lyricsSidewaysIn,
-          ),
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.zoom,
-            label: SettingsLabels.lyricsZoomIn,
-          ),
-          DropdownMenuEntry(
-            value: LyricsTransitionStyle.none,
-            label: SettingsLabels.lyricsNoEnterAnimation,
-          ),
-        ];
+  }) => [
+    for (final style in LyricsTransitionStyle.values)
+      DropdownMenuEntry(
+        value: style,
+        label: switch (style) {
+          LyricsTransitionStyle.fade =>
+            exiting
+                ? SettingsLabels.lyricsFadeOut
+                : SettingsLabels.lyricsFadeIn,
+          LyricsTransitionStyle.rise =>
+            exiting
+                ? SettingsLabels.lyricsRiseOut
+                : SettingsLabels.lyricsRiseIn,
+          LyricsTransitionStyle.descend =>
+            exiting
+                ? SettingsLabels.lyricsDescendOut
+                : SettingsLabels.lyricsDescendIn,
+          LyricsTransitionStyle.sideways =>
+            exiting
+                ? SettingsLabels.lyricsSidewaysOut
+                : SettingsLabels.lyricsSidewaysIn,
+          LyricsTransitionStyle.zoom =>
+            exiting
+                ? SettingsLabels.lyricsZoomOut
+                : SettingsLabels.lyricsZoomIn,
+          LyricsTransitionStyle.none =>
+            exiting
+                ? SettingsLabels.lyricsNoExitAnimation
+                : SettingsLabels.lyricsNoEnterAnimation,
+          LyricsTransitionStyle.film =>
+            exiting
+                ? SettingsLabels.lyricsFilmOut
+                : SettingsLabels.lyricsFilmIn,
+          LyricsTransitionStyle.flip =>
+            exiting
+                ? SettingsLabels.lyricsFlipOut
+                : SettingsLabels.lyricsFlipIn,
+          LyricsTransitionStyle.settle =>
+            exiting
+                ? SettingsLabels.lyricsSettleOut
+                : SettingsLabels.lyricsSettleIn,
+          LyricsTransitionStyle.wipe =>
+            exiting
+                ? SettingsLabels.lyricsWipeOut
+                : SettingsLabels.lyricsWipeIn,
+        },
+      ),
+  ];
+
+  List<DropdownMenuEntry<CoverTransitionStyle>> _coverTransitionEntries() =>
+      const [
+        DropdownMenuEntry(
+          value: CoverTransitionStyle.softSlide,
+          label: SettingsLabels.coverSoftSlide,
+        ),
+        DropdownMenuEntry(
+          value: CoverTransitionStyle.fade,
+          label: SettingsLabels.coverFade,
+        ),
+        DropdownMenuEntry(
+          value: CoverTransitionStyle.filmVertical,
+          label: SettingsLabels.coverFilmVertical,
+        ),
+        DropdownMenuEntry(
+          value: CoverTransitionStyle.filmHorizontal,
+          label: SettingsLabels.coverFilmHorizontal,
+        ),
+        DropdownMenuEntry(
+          value: CoverTransitionStyle.flipHorizontal,
+          label: SettingsLabels.coverFlipHorizontal,
+        ),
+        DropdownMenuEntry(
+          value: CoverTransitionStyle.flipVertical,
+          label: SettingsLabels.coverFlipVertical,
+        ),
+        DropdownMenuEntry(
+          value: CoverTransitionStyle.stack,
+          label: SettingsLabels.coverStack,
+        ),
+        DropdownMenuEntry(
+          value: CoverTransitionStyle.none,
+          label: SettingsLabels.coverNoAnimation,
+        ),
+      ];
 
   List<DropdownMenuEntry<ComponentSizeMode>> _componentSizeEntries() => const [
     DropdownMenuEntry(

@@ -24,8 +24,13 @@ final class SettingsDescriptions {
   static const rightCoverBlur = '保留轮廓，少一点抢眼的细节';
   static const progressAutoContrast = '保持进度条清晰可见，减少背景干扰';
   static const spectrum = '音频可视化会在组件上方显示';
-  static const performanceMonitor = '采集CPU，GPU和帧率数据';
+  static const spectrumThickness = '细一点轻巧，粗一点醒目';
+  static const automaticSpectrumColumns = '随粗细和空间调整，也可以自己定';
+  static const spectrumColumnCount = '少一点更简洁，多一点更细密';
+  static const hideUnavailableLyrics = '找不到就收起来，有歌词时再回来';
+  static const performanceMonitor = '只看你关心的；一两项时，还能看见变化走势';
   static String performanceFpsStatus(String status) => switch (status) {
+    'disabled' => '帧率采集已关闭',
     'selectProcess' => '选择正在运行的游戏，重启后也会自动匹配',
     'waitingProcess' => '等你打开这个程序，就会继续采集',
     'starting' => '正在连接所选程序',
@@ -44,6 +49,7 @@ final class SettingsDescriptions {
   static const trackTextTransition = '选一个你喜欢的出场方式';
   static const trackTextAnimationsLinked = '打开时，旧歌退场会与新歌进场相呼应';
   static const trackTextExitTransition = '让上一首也好好告别';
+  static const coverTransition = '像换一格胶片，也可以轻轻翻到下一张';
   static const showPlaylist = '只在歌曲快结束时显示下一首';
   static const nextUpLead = '自定义什么时候显示预告';
   static const playlistFileEmpty = '选个歌单文件，让下一首预告有迹可循';

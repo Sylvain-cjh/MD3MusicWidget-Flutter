@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'lyrics_document.dart';
+import 'lyrics_http_client.dart';
 import 'platform_provider.dart';
 
 String _normalize(String value) =>
@@ -81,6 +82,7 @@ final class NeteasePublicClient {
   }
 
   void close() => _client.close(force: true);
+  void useDirectConnection() => directLyricsHttpClient(_client);
 }
 
 final class NeteaseLyricsProvider
@@ -92,7 +94,9 @@ final class NeteaseLyricsProvider
       LinkedHashMap();
   final Map<String, Future<LyricsDocument?>> _pending = {};
   NeteaseLyricsProvider({required this.fallback, NeteasePublicClient? client})
-    : client = client ?? NeteasePublicClient();
+    : client = client ?? NeteasePublicClient() {
+    this.client.useDirectConnection();
+  }
   @override
   String get id => providerId;
   @override

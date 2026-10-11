@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
+import '../widgets/smooth_rounded_clip.dart';
 
 final class ComponentSizeMotion {
   static const Duration _legacyFrameDuration = Duration(milliseconds: 260);
@@ -144,12 +145,8 @@ final class ComponentSizeMotion {
 }
 
 class ComponentSizeStage extends StatelessWidget {
-  final double frameWidth;
-  final double frameHeight;
-  final double designWidth;
-  final double designHeight;
-  final double frameScale;
-  final double contentScale;
+  final double frameWidth, frameHeight, designWidth, designHeight;
+  final double frameScale, contentScale;
   final Alignment alignment;
   final BoxDecoration decoration;
   final Duration frameAnimationDuration;
@@ -157,6 +154,9 @@ class ComponentSizeStage extends StatelessWidget {
   final bool transformOnly;
   final Widget? background;
   final Widget child;
+  final Animation<double>? visualCollapse;
+  final double collapseExtent;
+  final double? canvasWidth, canvasHeight;
 
   const ComponentSizeStage({
     super.key,
@@ -173,50 +173,78 @@ class ComponentSizeStage extends StatelessWidget {
     this.transformOnly = false,
     this.background,
     required this.child,
+    this.visualCollapse,
+    this.collapseExtent = 0,
+    this.canvasWidth,
+    this.canvasHeight,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (visualCollapse == null || collapseExtent <= 0) return _stage(0);
+    return AnimatedBuilder(
+      animation: visualCollapse!,
+      builder: (context, _) =>
+          _stage(collapseExtent * visualCollapse!.value.clamp(0.0, 1.0)),
+    );
+  }
+
+  Widget _foreground() => RoundedRasterScale(
+    scale: contentScale,
+    child: SizedBox(width: designWidth, height: designHeight, child: child),
+  );
+
+  Widget _frame(Widget fullCanvas) => SmoothRoundedClip(
+    borderRadius: decoration.borderRadius ?? BorderRadius.zero,
+    child: DecoratedBox(
+      decoration: decoration,
+      position: DecorationPosition.foreground,
+      child: fullCanvas,
+    ),
+  );
+
+  Widget _stage(double inset) {
     if (transformOnly) {
-      final double foregroundScale = frameScale <= 0
-          ? 1.0
-          : contentScale / frameScale;
+      final visibleHeight = math.max(0.0, designHeight - inset);
+      final ratio = frameScale <= 0 ? 1.0 : contentScale / frameScale;
+      final canvas = SizedBox(
+        width: designWidth,
+        height: designHeight,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (background != null) RepaintBoundary(child: background!),
+            Transform.scale(
+              scale: ratio,
+              alignment: alignment,
+              child: _foreground(),
+            ),
+          ],
+        ),
+      );
       return SizedBox(
         width: frameWidth,
-        height: frameHeight,
+        height: math.max(0.0, frameHeight - inset * frameScale),
         child: OverflowBox(
           alignment: alignment,
           minWidth: designWidth,
           maxWidth: designWidth,
-          minHeight: designHeight,
-          maxHeight: designHeight,
+          minHeight: visibleHeight,
+          maxHeight: visibleHeight,
           child: Transform.scale(
             scale: frameScale,
             alignment: alignment,
             child: SizedBox(
               width: designWidth,
-              height: designHeight,
-              child: DecoratedBox(
-                decoration: decoration,
-                position: DecorationPosition.foreground,
-                child: ClipRRect(
-                  borderRadius: decoration.borderRadius ?? BorderRadius.zero,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (background != null)
-                        RepaintBoundary(child: background!),
-                      Transform.scale(
-                        scale: foregroundScale,
-                        alignment: alignment,
-                        child: SizedBox(
-                          width: designWidth,
-                          height: designHeight,
-                          child: child,
-                        ),
-                      ),
-                    ],
-                  ),
+              height: visibleHeight,
+              child: _frame(
+                OverflowBox(
+                  alignment: alignment,
+                  minWidth: designWidth,
+                  maxWidth: designWidth,
+                  minHeight: designHeight,
+                  maxHeight: designHeight,
+                  child: canvas,
                 ),
               ),
             ),
@@ -225,35 +253,44 @@ class ComponentSizeStage extends StatelessWidget {
       );
     }
 
+    final paintWidth = canvasWidth ?? frameWidth;
+    final paintHeight = canvasHeight ?? frameHeight;
+    final canvas = SizedBox(
+      width: paintWidth,
+      height: paintHeight,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (background != null) RepaintBoundary(child: background!),
+          OverflowBox(
+            alignment: alignment,
+            minWidth: designWidth,
+            maxWidth: designWidth,
+            minHeight: designHeight,
+            maxHeight: designHeight,
+            child: Transform.scale(
+              scale: contentScale,
+              alignment: alignment,
+              child: _foreground(),
+            ),
+          ),
+        ],
+      ),
+    );
     return AnimatedContainer(
+      key: const ValueKey('visible_component_frame'),
       duration: frameAnimationDuration,
       curve: frameAnimationCurve,
       width: frameWidth,
-      height: frameHeight,
-      foregroundDecoration: decoration,
-      child: ClipRRect(
-        borderRadius: decoration.borderRadius ?? BorderRadius.zero,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (background != null) RepaintBoundary(child: background!),
-            OverflowBox(
-              minWidth: designWidth,
-              maxWidth: designWidth,
-              minHeight: designHeight,
-              maxHeight: designHeight,
-              alignment: alignment,
-              child: Transform.scale(
-                scale: contentScale,
-                alignment: alignment,
-                child: SizedBox(
-                  width: designWidth,
-                  height: designHeight,
-                  child: child,
-                ),
-              ),
-            ),
-          ],
+      height: math.max(0.0, frameHeight - inset * contentScale),
+      child: _frame(
+        OverflowBox(
+          alignment: alignment,
+          minWidth: paintWidth,
+          maxWidth: paintWidth,
+          minHeight: paintHeight,
+          maxHeight: paintHeight,
+          child: canvas,
         ),
       ),
     );

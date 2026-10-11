@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'smooth_rounded_clip.dart';
 
 
 
@@ -55,7 +56,8 @@ class _SettingsScrollViewportState extends State<SettingsScrollViewport> {
             if (event.depth == 0) _update(event.metrics);
             return false;
           },
-          child: ClipRRect(
+          child: SmoothRoundedClip(
+            composite: false,
             key: const ValueKey('settings_scroll_clip'),
             borderRadius: BorderRadius.circular(widget.radius),
             child: ValueListenableBuilder<(double, double)>(

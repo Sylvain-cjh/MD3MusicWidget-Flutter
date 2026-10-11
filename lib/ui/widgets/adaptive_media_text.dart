@@ -12,6 +12,8 @@ class AdaptiveMediaText extends StatelessWidget {
   final TextOverflow? overflow;
   final bool? softWrap;
   final TextHeightBehavior? textHeightBehavior;
+  final TextScaler? textScaler;
+  final TextDirection? textDirection;
   const AdaptiveMediaText(
     this.text, {
     super.key,
@@ -21,6 +23,8 @@ class AdaptiveMediaText extends StatelessWidget {
     this.overflow,
     this.softWrap,
     this.textHeightBehavior,
+    this.textScaler,
+    this.textDirection,
   });
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -36,6 +40,8 @@ class AdaptiveMediaText extends StatelessWidget {
         overflow: overflow,
         softWrap: softWrap,
         textHeightBehavior: textHeightBehavior,
+        textScaler: textScaler,
+        textDirection: textDirection,
         style: style.copyWith(
           color: AppState.readableMediaColor(AppState.estimatedMediaBackdrop),
           shadows: const [],

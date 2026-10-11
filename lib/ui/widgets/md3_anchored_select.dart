@@ -269,7 +269,7 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
                     }
                     return ClipPath(
                       key: const ValueKey('md3-select-reveal'),
-                      clipBehavior: Clip.antiAlias,
+                      clipBehavior: Clip.antiAliasWithSaveLayer,
                       clipper: _SelectedItemRevealClipper(
                         progress: progress,
                         selectedCenter: selectedViewportCenter,
@@ -346,7 +346,7 @@ class _Md3SelectMenuState<T> extends State<_Md3SelectMenu<T>> {
       shadowColor: scheme.shadow.withValues(alpha: 0.18),
       surfaceTintColor: Colors.transparent,
       borderRadius: BorderRadius.circular(12 * widget.visualScale),
-      clipBehavior: Clip.antiAlias,
+      clipBehavior: Clip.antiAliasWithSaveLayer,
       child: SingleChildScrollView(
         controller: _scrollController,
         padding: EdgeInsets.symmetric(vertical: 8 * widget.visualScale),

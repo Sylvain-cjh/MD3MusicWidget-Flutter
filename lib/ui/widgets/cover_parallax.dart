@@ -1,8 +1,11 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
+
+import '../animations/cover_parallax_motion.dart';
+import 'smooth_rounded_clip.dart';
 
 class CoverParallax extends StatefulWidget {
   final double size;
@@ -25,227 +28,273 @@ class CoverParallax extends StatefulWidget {
   });
 
   @override
-  State<CoverParallax> createState() => _CoverParallaxState();
+  State<CoverParallax> createState() => CoverParallaxState();
 }
 
-class _CoverParallaxState extends State<CoverParallax>
+class CoverParallaxState extends State<CoverParallax>
     with SingleTickerProviderStateMixin {
-  late final Ticker _ticker;
-  final ValueNotifier<int> _motion = ValueNotifier<int>(0);
-  Duration _lastTick = Duration.zero;
-  Offset _position = Offset.zero;
-  Offset _target = Offset.zero;
-  double _hoverAmount = 0;
-  double _targetHoverAmount = 0;
+  late final CoverParallaxMotion motion;
+  late final _CoverMaterialPainter _material;
+  Offset? _lastPointer;
   bool _hovered = false;
-  bool _reduceMotion = false;
+  bool _reduced = false;
+  int get materialShaderBuilds => _material.shaderBuilds;
 
   @override
   void initState() {
     super.initState();
-    _ticker = createTicker(_advance);
+    motion = CoverParallaxMotion(this);
+    _material = _CoverMaterialPainter(motion);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final reduced = MediaQuery.disableAnimationsOf(context);
-    if (reduced == _reduceMotion) return;
-    _reduceMotion = reduced;
-    if (reduced) {
-      _ticker.stop();
-      _lastTick = Duration.zero;
-      _position = Offset.zero;
-      _target = Offset.zero;
-      _hoverAmount = 0;
-      _targetHoverAmount = 0;
-    }
+    _reduced = MediaQuery.disableAnimationsOf(context);
+    motion.reduceMotion(_reduced);
+    _material.hairline = RoundedRasterScale.hairline(context);
   }
 
   @override
   void didUpdateWidget(covariant CoverParallax oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.enable3D && !widget.enable3D) {
-      _target = Offset.zero;
-      _startMotion();
+    if (oldWidget.size != widget.size ||
+        oldWidget.enable3D != widget.enable3D) {
+      _setTarget();
+    }
+    if (oldWidget.borderRadius != widget.borderRadius ||
+        oldWidget.enable3D != widget.enable3D) {
+      motion.invalidate();
     }
   }
 
-  void _startMotion() {
-    if (_reduceMotion || _ticker.isActive) return;
-    _lastTick = Duration.zero;
-    _ticker.start();
+  bool _pointerSupported(PointerDeviceKind kind) =>
+      kind == PointerDeviceKind.mouse ||
+      kind == PointerDeviceKind.stylus ||
+      kind == PointerDeviceKind.invertedStylus;
+
+  void _enter(PointerEnterEvent event) {
+    if (!_pointerSupported(event.kind)) return;
+    _hovered = true;
+    _lastPointer = event.localPosition;
+    _setTarget();
   }
 
-  void _advance(Duration elapsed) {
-    final dt = _lastTick == Duration.zero
-        ? 1 / 60
-        : ((elapsed - _lastTick).inMicroseconds / 1000000).clamp(0.001, 0.05);
-    _lastTick = elapsed;
-    final response = _hovered ? 0.065 : 0.115;
-    final fraction = 1 - math.exp(-dt / response);
-    _position = Offset.lerp(_position, _target, fraction)!;
-    _hoverAmount += (_targetHoverAmount - _hoverAmount) * fraction;
-    if ((_position - _target).distanceSquared < 0.000004 &&
-        (_hoverAmount - _targetHoverAmount).abs() < 0.002) {
-      _position = _target;
-      _hoverAmount = _targetHoverAmount;
-      _ticker.stop();
-      _lastTick = Duration.zero;
-    }
-    _motion.value++;
+  void _hover(PointerHoverEvent event) {
+    if (!_pointerSupported(event.kind)) return;
+    _lastPointer = event.localPosition;
+    _setTarget();
   }
 
-  void _onEnter(PointerEnterEvent event) {
-    setState(() => _hovered = true);
-    if (_reduceMotion) return;
-    _targetHoverAmount = 1;
-    _updateTarget(event.localPosition);
-    _startMotion();
+  void _exit(PointerExitEvent event) {
+    _hovered = false;
+    _lastPointer = null;
+    _setTarget();
   }
 
-  void _onHover(PointerHoverEvent event) {
-    if (_reduceMotion) return;
-    _updateTarget(event.localPosition);
-  }
-
-  void _updateTarget(Offset localPosition) {
-    final size = context.size;
-    if (size == null || size.isEmpty) return;
-    final next = Offset(
-      ((localPosition.dx - size.width / 2) / (size.width / 2)).clamp(-1.0, 1.0),
-      ((localPosition.dy - size.height / 2) / (size.height / 2)).clamp(
-        -1.0,
-        1.0,
-      ),
-    );
-    if ((next - _target).distanceSquared < 0.0001) return;
-    _target = next;
-    _startMotion();
-  }
-
-  void _onExit(PointerExitEvent event) {
-    setState(() => _hovered = false);
-    _target = Offset.zero;
-    _targetHoverAmount = 0;
-    _startMotion();
-  }
-
-  @override
-  void dispose() {
-    _ticker.dispose();
-    _motion.dispose();
-    super.dispose();
+  void _setTarget() {
+    final point = _lastPointer;
+    final size = math.max(1.0, widget.size);
+    final target = point != null && _hovered
+        ? Offset(
+            ((point.dx - size / 2) / (size / 2)).clamp(-1.0, 1.0),
+            ((point.dy - size / 2) / (size / 2)).clamp(-1.0, 1.0),
+          )
+        : Offset.zero;
+    motion.setTarget(target, hovered: _hovered);
   }
 
   @override
   Widget build(BuildContext context) {
     final size = widget.size;
-    final image = widget.image;
-    final Widget artwork = RepaintBoundary(
-      child: image == null
+    _material.enabled = widget.enable3D && !_reduced;
+    _material.radius = widget.borderRadius;
+    final artwork = RepaintBoundary(
+      child: widget.image == null
           ? ColoredBox(color: widget.backgroundColor)
           : Image(
-              image: image,
+              image: widget.image!,
               fit: BoxFit.cover,
               filterQuality: FilterQuality.medium,
               gaplessPlayback: true,
             ),
     );
-    return MouseRegion(
-      onEnter: _onEnter,
-      onHover: _onHover,
-      onExit: _onExit,
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: AnimatedContainer(
-          duration: _reduceMotion
-              ? Duration.zero
-              : const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          decoration: BoxDecoration(
-            borderRadius: widget.borderRadius,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: _hovered ? 0.30 : 0.18),
-                blurRadius: _hovered ? 16 : 10,
-                offset: Offset(0, _hovered ? 8 : 4),
-              ),
-            ],
-          ),
-          child: AnimatedBuilder(
-            animation: _motion,
+    Widget shadow(double alpha, double blur, double y) => RepaintBoundary(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: widget.borderRadius,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: alpha),
+              blurRadius: blur,
+              offset: Offset(0, y),
+            ),
+          ],
+        ),
+        child: const SizedBox.expand(),
+      ),
+    );
+    final restingShadow = shadow(0.18, 10, 4);
+    final raisedShadow = shadow(0.30, 16, 8);
+    final face = SmoothRoundedClip(
+      borderRadius: widget.borderRadius,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          AnimatedBuilder(
+            animation: motion,
             child: artwork,
-            builder: (context, artwork) {
-              final depth = _reduceMotion ? Offset.zero : _position;
-              final hover = _reduceMotion ? 0.0 : _hoverAmount;
-              final tilt = widget.enable3D ? 0.12 : 0.0;
-              final transform = Matrix4.identity()
-                ..setEntry(3, 2, 0.0011)
-                ..rotateX(depth.dy * tilt)
-                ..rotateY(-depth.dx * tilt)
-                ..scaleByDouble(
-                  1 + hover * (widget.enable3D ? 0.055 : 0.04),
-                  1 + hover * (widget.enable3D ? 0.055 : 0.04),
-                  1,
-                  1,
-                );
-              return Transform(
-                key: const ValueKey('cover_parallax_transform'),
-                transform: transform,
-                alignment: Alignment.center,
-                child: ClipRRect(
-                  borderRadius: widget.borderRadius,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Transform.translate(
-                        key: const ValueKey('cover_artwork_layer'),
-                        offset: depth * (widget.enable3D ? 4.5 : 3.0),
-                        child: Transform.scale(scale: 1.14, child: artwork),
-                      ),
-                      if (image == null)
-                        Transform.translate(
-                          offset: depth * 7.0,
-                          child: Icon(
-                            Icons.music_note_rounded,
-                            size: (size * 0.25).clamp(42.0, 72.0),
-                            color: widget.accentColor.withValues(alpha: 0.5),
-                          ),
-                        ),
-                      if (widget.enable3D && hover > 0.001)
-                        IgnorePointer(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment(-0.9 + depth.dx * 0.45, -1),
-                                end: Alignment(0.9 + depth.dx * 0.45, 1),
-                                colors: [
-                                  Colors.white.withValues(alpha: 0.14 * hover),
-                                  Colors.transparent,
-                                  Colors.black.withValues(alpha: 0.07 * hover),
-                                ],
-                                stops: const [0.0, 0.48, 1.0],
-                              ),
-                            ),
-                          ),
-                        ),
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 500),
-                        curve: Curves.easeOutCubic,
-                        color: Colors.black.withValues(
-                          alpha: widget.isPlaying ? 0.0 : 0.45,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
+            builder: (context, child) => Transform.translate(
+              key: const ValueKey('cover_artwork_layer'),
+              offset:
+                  motion.position *
+                  (widget.enable3D
+                      ? math.max(4.5, size * 0.028).clamp(4.5, 8.0)
+                      : 3),
+              child: Transform.scale(scale: 1.14, child: child),
+            ),
           ),
+          if (widget.image == null)
+            AnimatedBuilder(
+              animation: motion,
+              child: LayoutBuilder(
+                builder: (context, constraints) => Icon(
+                  Icons.music_note_rounded,
+                  size: (constraints.biggest.shortestSide * 0.25).clamp(
+                    42.0,
+                    72.0,
+                  ),
+                  color: widget.accentColor.withValues(alpha: 0.5),
+                ),
+              ),
+              builder: (context, child) => Transform.translate(
+                offset: motion.position * 7,
+                child: child,
+              ),
+            ),
+          IgnorePointer(child: CustomPaint(painter: _material)),
+          RepaintBoundary(
+            child: AnimatedContainer(
+              duration: _reduced
+                  ? Duration.zero
+                  : const Duration(milliseconds: 500),
+              curve: Curves.easeOutCubic,
+              color: Colors.black.withValues(
+                alpha: widget.isPlaying ? 0 : 0.45,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    return MouseRegion(
+      onEnter: _enter,
+      onHover: _hover,
+      onExit: _exit,
+      child: SizedBox.square(
+        dimension: size,
+        child: AnimatedBuilder(
+          animation: motion,
+          child: face,
+          builder: (context, face) {
+            final depth = _reduced ? Offset.zero : motion.position;
+            final hover = _reduced ? 0.0 : motion.hover;
+            final tilt = widget.enable3D ? 0.14 : 0.0;
+            final matrix = Matrix4.identity();
+            if (depth.distanceSquared > 0.000001 && tilt != 0) {
+              matrix
+                ..setEntry(3, 2, 0.18 / math.max(1, size))
+                ..rotateX(depth.dy * tilt)
+                ..rotateY(-depth.dx * tilt);
+            }
+            final scale = 1 + hover * (widget.enable3D ? 0.055 : 0.04);
+            matrix.scaleByDouble(scale, scale, 1, 1);
+            return Stack(
+              clipBehavior: Clip.none,
+              fit: StackFit.expand,
+              children: [
+                Opacity(opacity: 1 - hover, child: restingShadow),
+                Opacity(opacity: hover, child: raisedShadow),
+                Transform(
+                  key: const ValueKey('cover_parallax_transform'),
+                  transform: matrix,
+                  alignment: Alignment.center,
+                  filterQuality: hover > 0.001 ? FilterQuality.medium : null,
+                  child: face,
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _material.disposeShaders();
+    motion.dispose();
+    super.dispose();
+  }
+}
+
+class _CoverMaterialPainter extends CustomPainter {
+  final CoverParallaxMotion motion;
+  bool enabled = true;
+  BorderRadius radius = BorderRadius.zero;
+  double hairline = 1;
+  ui.Shader? _wash, _highlight;
+  final Paint _paint = Paint();
+  int shaderBuilds = 0;
+
+  _CoverMaterialPainter(this.motion) : super(repaint: motion);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (!enabled || motion.hover < 0.001 || size.isEmpty) return;
+    if (_wash == null) {
+      shaderBuilds++;
+      _wash = ui.Gradient.linear(
+        Offset.zero,
+        const Offset(1, 1),
+        const [Color(0x1AFFFFFF), Colors.transparent, Color(0x12000000)],
+        const [0, 0.48, 1],
+      );
+      _highlight = ui.Gradient.radial(const Offset(0.25, 0.16), 0.75, const [
+        Color(0x0DFFFFFF),
+        Colors.transparent,
+      ]);
+    }
+    canvas.save();
+    canvas.scale(size.width, size.height);
+    canvas.translate(motion.position.dx * 0.12, motion.position.dy * 0.10);
+    _paint
+      ..style = PaintingStyle.fill
+      ..shader = _wash
+      ..color = Colors.white.withValues(alpha: motion.hover);
+    canvas.drawRect(const Rect.fromLTWH(-0.25, -0.25, 1.5, 1.5), _paint);
+    _paint.shader = _highlight;
+    canvas.drawRect(const Rect.fromLTWH(-0.25, -0.25, 1.5, 1.5), _paint);
+    canvas.restore();
+    _paint
+      ..shader = null
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = hairline
+      ..color = Colors.white.withValues(alpha: 0.12 * motion.hover);
+    canvas.drawRRect(
+      radius.toRRect((Offset.zero & size).deflate(hairline / 2)),
+      _paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _CoverMaterialPainter old) =>
+      old.motion != motion || old.radius != radius || old.enabled != enabled;
+
+  void disposeShaders() {
+    _paint.shader = null;
+    _wash?.dispose();
+    _highlight?.dispose();
+    _wash = _highlight = null;
   }
 }

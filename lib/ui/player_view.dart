@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show OverflowBoxFit;
+import 'package:flutter/rendering.dart'
+    show OverflowBoxFit, RenderBox, RenderRepaintBoundary;
 import 'package:window_manager/window_manager.dart';
 import 'package:tray_manager/tray_manager.dart' as tm;
 
@@ -17,6 +19,10 @@ import '../core/spectrum_packet.dart';
 import '../core/music_source_service.dart';
 import 'animations/component_size_motion.dart';
 import 'animations/next_up_presence_motion.dart';
+import 'animations/lyrics_visual_motion.dart';
+import 'animations/layout_morph_motion.dart';
+import 'widgets/layout_backdrop_blend.dart';
+import 'widgets/smooth_rounded_clip.dart';
 import 'widgets/dynamic_background.dart';
 import 'widgets/locked_aspect_resize_area.dart';
 import 'widgets/track_controls.dart';
@@ -148,8 +154,22 @@ class _PlayerViewState extends State<PlayerView>
   bool? _nextUpRequestedVisible;
   int _nextUpResizeFailures = 0;
   late final NextUpPresenceMotion _nextUpMotion;
+  late bool _lastLyricsVisible;
+  late final LyricsVisualMotion _lyricsVisualMotion;
+  bool get _lyricsCollapsed =>
+      AppState.showLyrics && !AppState.lyricsPanelVisible;
   double? _backgroundAnchorHeight;
   Widget? _anchoredPlayerBackground;
+  late WidgetLayout _displayLayout;
+  late final LayoutMorphMotion _layoutMotion;
+  final _layoutFrameKey = GlobalKey();
+  final _playerAnchorKey = GlobalKey();
+  final _layoutBackdropKey = GlobalKey();
+  ui.Image? _layoutPreviousBackdrop;
+  bool _layoutPreparing = false;
+  bool _layoutCleanupScheduled = false;
+  Rect? _layoutHeldFrame;
+  double? _layoutPlayerCanvasHeight;
 
   static const String _dotnetRuntimeDownloadUrl =
       'https://aka.ms/dotnet/8.0/dotnet-runtime-win-x64.exe';
@@ -157,6 +177,12 @@ class _PlayerViewState extends State<PlayerView>
   @override
   void initState() {
     super.initState();
+    _displayLayout = AppState.widgetLayout;
+    _layoutMotion = LayoutMorphMotion(
+      vsync: this,
+      duration: AppState.layoutSwitchDuration,
+      curve: AppState.layoutSwitchCurve,
+    );
     _artworkResources = ArtworkResources();
     windowManager.addListener(this);
     tm.trayManager.addListener(this);
@@ -184,7 +210,15 @@ class _PlayerViewState extends State<PlayerView>
     _componentSizeScaleListenable = Listenable.merge([
       _frameScaleController,
       _contentScaleController,
+      _layoutMotion,
     ]);
+    _lastLyricsVisible = AppState.lyricsPanelVisible;
+    _lyricsVisualMotion = LyricsVisualMotion(
+      vsync: this,
+      collapsed: _lyricsCollapsed,
+    );
+    AppState.lyrics.addListener(_onLyricsVisibilityChanged);
+    AppState.lyricsVisualRevision.addListener(_onLyricsVisibilityChanged);
     if (widget.startPlatformServices) {
       unawaited(_initSystemTray());
       unawaited(_bootEngineAndListen());
@@ -194,6 +228,9 @@ class _PlayerViewState extends State<PlayerView>
   @override
   void dispose() {
     _nextUpRetryTimer?.cancel();
+    AppState.lyrics.removeListener(_onLyricsVisibilityChanged);
+    AppState.lyricsVisualRevision.removeListener(_onLyricsVisibilityChanged);
+    _lyricsVisualMotion.dispose();
     _pollingTimer?.cancel();
     _spectrumTimer?.cancel();
     _mediaReconnectTimer?.cancel();
@@ -214,6 +251,8 @@ class _PlayerViewState extends State<PlayerView>
     _menuAnimController.dispose();
     _frameScaleController.dispose();
     _contentScaleController.dispose();
+    _layoutMotion.dispose();
+    _layoutPreviousBackdrop?.dispose();
     super.dispose();
   }
 
@@ -919,6 +958,16 @@ class _PlayerViewState extends State<PlayerView>
     if (snapshot.processId > 0) AppState.fetcherPid = snapshot.processId;
     if (!mounted) return;
 
+    final nextTrack = PlatformTrack.fromSnapshot(snapshot);
+    AppState.trackNavigation.observe(
+      nextTrack,
+      queue: AppState.queue.queue,
+      shuffle: snapshot.isShuffleActive == true,
+      wrap: snapshot.autoRepeatMode == 'list',
+      positionMs: snapshot.positionMs,
+      previousPositionMs: AppState.estimatedPlaybackPositionMs,
+    );
+
     final bool metadataChanged =
         AppState.trackTitle != snapshot.title ||
         AppState.artistName != snapshot.artist ||
@@ -950,7 +999,7 @@ class _PlayerViewState extends State<PlayerView>
       if (playbackStateChanged) AppState.notifyBackgroundChanged();
     }
 
-    AppState.currentPlatformTrack = PlatformTrack.fromSnapshot(snapshot);
+    AppState.currentPlatformTrack = nextTrack;
     AppState.isShuffleActive = snapshot.isShuffleActive;
     AppState.autoRepeatMode = snapshot.autoRepeatMode;
     AppState.updatePlaybackTimeline(
@@ -1252,6 +1301,9 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   int _beginWindowTransition() {
+    if (_layoutMotion.active || AppState.widgetLayout != _displayLayout) {
+      _layoutMotion.freeze();
+    }
     if (_nextUpResizeInFlight) {
       _nextUpResizePending = true;
       _nextUpMotion.cancel();
@@ -1289,6 +1341,82 @@ class _PlayerViewState extends State<PlayerView>
         (first.width - second.width).abs() <= tolerance &&
         (first.height - second.height).abs() <= tolerance;
   }
+
+  void _onLyricsVisibilityChanged() {
+    if (!mounted) return;
+    final visible = AppState.lyricsPanelVisible;
+    if (visible == _lastLyricsVisible &&
+        _lyricsVisualMotion.collapsed == _lyricsCollapsed) {
+      return;
+    }
+    setState(() => _lastLyricsVisible = visible);
+    _lyricsVisualMotion.update(
+      _lyricsCollapsed,
+      reduceMotion: MediaQuery.maybeOf(context)?.disableAnimations ?? false,
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _lyricsVisualMotion.update(
+      _lyricsCollapsed,
+      reduceMotion: MediaQuery.disableAnimationsOf(context),
+    );
+  }
+
+  Widget _followLyrics(
+    Widget child, {
+    bool verticalSettings = false,
+    double? settingsHeight,
+  }) => AnimatedBuilder(
+    animation: _lyricsVisualMotion.animation,
+    child: child,
+    builder: (context, child) {
+      final inset = AppState.showLyrics
+          ? LyricsVisualMotion.reservedExtent *
+                _lyricsVisualMotion.animation.value
+          : 0.0;
+      return Transform.translate(
+        offset: verticalSettings ? Offset.zero : Offset(0, -inset),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            height: verticalSettings
+                ? math.max(0.0, settingsHeight! - inset)
+                : null,
+            child: child,
+          ),
+        ),
+      );
+    },
+  );
+
+  Widget _clipPlayerVisualHeight(Widget child, double fullHeight) =>
+      AnimatedBuilder(
+        animation: _lyricsVisualMotion.animation,
+        child: child,
+        builder: (context, child) {
+          final inset = AppState.showLyrics
+              ? 64 * _lyricsVisualMotion.animation.value
+              : 0.0;
+          final canvasHeight = _layoutPlayerCanvasHeight ?? fullHeight;
+          return Align(
+            alignment: Alignment.topCenter,
+            child: SizedBox(
+              height: math.max(0.0, canvasHeight - inset),
+              child: ClipRect(
+                child: OverflowBox(
+                  alignment: Alignment.topCenter,
+                  minHeight: canvasHeight,
+                  maxHeight: canvasHeight,
+                  child: child,
+                ),
+              ),
+            ),
+          );
+        },
+      );
 
   void _onNextUpVisibilityChanged() {
     if (!mounted) return;
@@ -1511,7 +1639,200 @@ class _PlayerViewState extends State<PlayerView>
     return mounted && serial == _windowTransitionSerial;
   }
 
+  Future<ui.Image?> _captureLayoutBackdrop(Rect frame, Rect bounds) async {
+    ui.Image? image;
+    ui.Picture? picture;
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return null;
+      final render = _layoutBackdropKey.currentContext?.findRenderObject();
+      if (render is! RenderRepaintBoundary || !render.hasSize) return null;
+      final ratio = MediaQuery.devicePixelRatioOf(context);
+      image = await render.toImage(pixelRatio: ratio);
+      final origin = bounds.topLeft + render.localToGlobal(Offset.zero);
+      final offset = (frame.topLeft - origin) * ratio;
+      final size = frame.size * ratio;
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      canvas.drawImageRect(
+        image,
+        offset & size,
+        Offset.zero & size,
+        ui.Paint()..filterQuality = ui.FilterQuality.medium,
+      );
+      picture = recorder.endRecording();
+      final cropped = await picture.toImage(
+        math.max(1, size.width.ceil()),
+        math.max(1, size.height.ceil()),
+      );
+      return cropped;
+    } catch (error) {
+      debugPrint('布局背景过渡画面采集失败，使用连续布局回退: $error');
+      return null;
+    } finally {
+      picture?.dispose();
+      image?.dispose();
+    }
+  }
+
+  void _retireLayoutImage(ui.Image? image) {
+    if (image == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => image.dispose());
+  }
+
+  void _clearLayoutMorph() {
+    if (!mounted) return;
+    final old = _layoutPreviousBackdrop;
+    setState(() {
+      _layoutMotion.finish();
+      _layoutPreviousBackdrop = null;
+      _layoutPlayerCanvasHeight = null;
+      _layoutHeldFrame = null;
+      _layoutPreparing = false;
+    });
+    _retireLayoutImage(old);
+  }
+
+  void _finishLayoutWhenViewportReady() {
+    if (!mounted ||
+        !_layoutMotion.active ||
+        !_layoutMotion.trimRequested ||
+        _layoutCleanupScheduled ||
+        !_layoutMotion.viewportIsTarget(
+          MediaQuery.sizeOf(context),
+          MediaQuery.devicePixelRatioOf(context),
+        )) {
+      return;
+    }
+    _layoutCleanupScheduled = true;
+    final serial = _windowTransitionSerial;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _layoutCleanupScheduled = false;
+      if (!_isCurrentWindowTransition(serial) ||
+          !_layoutMotion.trimRequested ||
+          !_layoutMotion.viewportIsTarget(
+            MediaQuery.sizeOf(context),
+            MediaQuery.devicePixelRatioOf(context),
+          )) {
+        return;
+      }
+      _clearLayoutMorph();
+      if (_nextUpResizePending && !_isTransitioning) {
+        _onNextUpVisibilityChanged();
+      }
+    });
+  }
+
+  Future<void> _morphOrientation(int serial) async {
+    try {
+      final bounds = await windowManager.getBounds();
+      if (!mounted || !_isCurrentWindowTransition(serial)) return;
+      final targetLayout = AppState.widgetLayout;
+      final targetOpen = _isSettingsOpen;
+      final reduced = MediaQuery.disableAnimationsOf(context);
+      final frameRender = _layoutFrameKey.currentContext?.findRenderObject();
+      final playerRender = _playerAnchorKey.currentContext?.findRenderObject();
+      final inset = AppState.showLyrics
+          ? 64 * _lyricsVisualMotion.animation.value * _frameScale
+          : 0.0;
+      final frameOffset = frameRender is RenderBox && frameRender.hasSize
+          ? frameRender.localToGlobal(Offset.zero)
+          : Offset(_leftPadding, 0);
+      final frameSize = frameRender is RenderBox && frameRender.hasSize
+          ? Size(frameRender.size.width, frameRender.size.height + inset)
+          : bounds.size;
+      final source = (bounds.topLeft + frameOffset) & frameSize;
+      final playerLeft = playerRender is RenderBox && playerRender.hasSize
+          ? bounds.left + playerRender.localToGlobal(Offset.zero).dx
+          : bounds.left + _leftPadding;
+      final targetPadding =
+          targetOpen &&
+              targetLayout == WidgetLayout.vertical &&
+              _settingsSide == 'left'
+          ? AppState.innerSettingsSideWidth * _frameScale
+          : 0.0;
+      final design = _designWindowSize(
+        layout: targetLayout,
+        settingsOpen: targetOpen,
+      );
+      final target = Rect.fromLTWH(
+        playerLeft - targetPadding,
+        bounds.top,
+        design.width * _frameScale,
+        design.height * _frameScale,
+      );
+      final stage = bounds.expandToInclude(target);
+      final snapshot = reduced
+          ? null
+          : await _captureLayoutBackdrop(source, bounds);
+      if (!_isCurrentWindowTransition(serial)) {
+        snapshot?.dispose();
+        return;
+      }
+      final oldImage = _layoutPreviousBackdrop;
+      setState(() {
+        _layoutPreviousBackdrop = snapshot;
+        _layoutPreparing = true;
+        _layoutHeldFrame = source.shift(-bounds.topLeft);
+        _layoutMotion.holdCapturedBackdrop();
+      });
+      _retireLayoutImage(oldImage);
+      if (!_rectNearlyEquals(bounds, stage)) {
+        await windowManager.setBounds(stage, animate: false);
+      }
+      if (!_isCurrentWindowTransition(serial)) return;
+      setState(() {
+        _layoutPlayerCanvasHeight = math.max(
+          AppState.innerPlayerHeightOf(_displayLayout),
+          AppState.innerPlayerHeightOf(targetLayout),
+        );
+        _displayLayout = targetLayout;
+        _layoutPreparing = false;
+        _layoutMotion.prepare(
+          source: source,
+          target: target,
+          stage: stage,
+          nativeTarget: target,
+          vertical: targetLayout == WidgetLayout.vertical,
+        );
+      });
+      final completed = await _layoutMotion.play(reduced: reduced);
+      if (!completed || !_isCurrentWindowTransition(serial)) return;
+      await WidgetsBinding.instance.endOfFrame;
+      final current = await windowManager.getBounds();
+      if (!_isCurrentWindowTransition(serial)) return;
+      final moved = current.topLeft - stage.topLeft;
+      final finalBounds = target.shift(moved);
+      _leftPadding = targetPadding;
+      _layoutMotion.requestTrim(stage.shift(moved), finalBounds);
+      if (!_rectNearlyEquals(current, finalBounds)) {
+        await windowManager.setBounds(finalBounds, animate: false);
+      }
+      if (!_isCurrentWindowTransition(serial)) return;
+      await WidgetsBinding.instance.endOfFrame;
+      _finishLayoutWhenViewportReady();
+    } catch (error) {
+      if (!_isCurrentWindowTransition(serial)) return;
+      final old = _layoutPreviousBackdrop;
+      setState(() {
+        AppState.widgetLayout = _displayLayout;
+        _layoutMotion.finish();
+        _layoutPreviousBackdrop = null;
+        _layoutPreparing = false;
+        _layoutHeldFrame = null;
+        _layoutPlayerCanvasHeight = null;
+      });
+      _retireLayoutImage(old);
+      unawaited(AppState.saveSettings());
+      debugPrint('横竖布局过渡失败，保留当前布局: $error');
+    }
+  }
+
   Future<void> _animateToTargetLayout(int serial) async {
+    if (AppState.widgetLayout != _displayLayout || _layoutMotion.active) {
+      await _morphOrientation(serial);
+      return;
+    }
     final bounds = await windowManager.getBounds();
     final double absCardLeft = bounds.left + _leftPadding;
 
@@ -1612,7 +1933,21 @@ class _PlayerViewState extends State<PlayerView>
           (AppState.componentScale - _contentScale).abs() > 0.0001 ||
           _frameScaleController.isAnimating ||
           _contentScaleController.isAnimating;
-      if (componentScaleChanged) {
+      if (AppState.widgetLayout != _displayLayout || _layoutMotion.active) {
+        await _morphOrientation(serial);
+        if (mounted &&
+            componentScaleChanged &&
+            _isCurrentWindowTransition(serial)) {
+          if (_layoutMotion.active &&
+              _layoutMotion.viewportIsTarget(
+                MediaQuery.sizeOf(context),
+                MediaQuery.devicePixelRatioOf(context),
+              )) {
+            _clearLayoutMorph();
+          }
+          await _applyComponentSizeToTarget(serial);
+        }
+      } else if (componentScaleChanged) {
         await _applyComponentSizeToTarget(serial);
       } else {
         await _animateToTargetLayout(serial);
@@ -1839,19 +2174,21 @@ class _PlayerViewState extends State<PlayerView>
 
   @override
   Widget build(BuildContext context) {
-    bool isV = AppState.isVertical;
+    _finishLayoutWhenViewportReady();
+    bool isV = _displayLayout == WidgetLayout.vertical;
     bool isOpen = _isSettingsOpen;
     String side = _settingsSide;
 
     bool anchorRight = isV && side == "left" && (isOpen || _isTransitioning);
 
-    double innerPlayerW = AppState.innerPlayerWidthOf(AppState.widgetLayout);
-    double innerPlayerH = AppState.innerPlayerHeightOf(AppState.widgetLayout);
-    double corePlayerH = AppState.corePlayerHeightOf(AppState.widgetLayout);
+    double innerPlayerW = AppState.innerPlayerWidthOf(_displayLayout);
+    double innerPlayerH = AppState.innerPlayerHeightOf(_displayLayout);
+    double corePlayerH = AppState.corePlayerHeightOf(_displayLayout);
     bool spectrumVisible = AppState.spectrumMode != SpectrumMode.off;
-    bool performanceVisible = AppState.showPerformanceMonitor;
+    bool performanceVisible = AppState.performanceMonitorVisible;
     bool spectrumRowVisible = spectrumVisible || performanceVisible;
-    bool lyricsVisible = AppState.showLyrics;
+    bool lyricsVisible = AppState.lyricsPanelVisible;
+    bool lyricsOccupied = AppState.showLyrics;
     bool nextUpConfigured =
         AppState.showNextUp && AppState.hasPlaylistConfigured;
     bool nextUpVisible =
@@ -1905,7 +2242,10 @@ class _PlayerViewState extends State<PlayerView>
     double containerH = isV
         ? innerPlayerH
         : (isOpen ? innerPlayerH + innerSettingsH : innerPlayerH);
-    final Alignment componentAlignment = anchorRight
+    final Alignment componentAlignment =
+        (_layoutMotion.active || _layoutPreparing)
+        ? Alignment.topLeft
+        : anchorRight
         ? Alignment.topRight
         : Alignment.topLeft;
     double renderFrameScale = _frameScale;
@@ -1913,6 +2253,8 @@ class _PlayerViewState extends State<PlayerView>
     final bool isLiveCustomResize =
         AppState.isCustomComponentSize &&
         !_isTransitioning &&
+        !_layoutMotion.active &&
+        !_layoutPreparing &&
         !_isMenuOpen &&
         !_menuResizeInFlight &&
         !_nextUpResizePending &&
@@ -1945,6 +2287,8 @@ class _PlayerViewState extends State<PlayerView>
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
     final Duration frameAnimationDuration =
         _isTransitioning &&
+            !_layoutMotion.active &&
+            !_layoutPreparing &&
             !_isComponentSizeTransitioning &&
             !isLiveCustomResize &&
             !reduceMotion
@@ -1952,129 +2296,186 @@ class _PlayerViewState extends State<PlayerView>
         : Duration.zero;
 
     final backgroundAnchorHeight =
-        (containerH - AppState.nextUpPanelExtentOf(AppState.widgetLayout)) *
+        (containerH - AppState.nextUpPanelExtentOf(_displayLayout)) *
         (_isComponentSizeTransitioning ? 1.0 : renderFrameScale);
     if (_backgroundAnchorHeight != backgroundAnchorHeight) {
       _backgroundAnchorHeight = backgroundAnchorHeight;
       _anchoredPlayerBackground = RepaintBoundary(
-        child: DynamicBackground(anchorHeight: backgroundAnchorHeight),
+        child: DynamicBackground(
+          anchorHeight: backgroundAnchorHeight,
+          verticalLayout: isV,
+        ),
       );
     }
     final playerBackground = _anchoredPlayerBackground!;
     Widget playerContent = Stack(
+      clipBehavior: Clip.none,
       children: [
-        AnimatedPositioned(
+        MorphPositioned(
+          motion: _layoutMotion,
           duration: frameAnimationDuration,
           curve: AppState.layoutSwitchCurve,
           left: sLeft,
           top: sTop,
           width: innerSettingsW,
           height: innerSettingsH,
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 300),
-            opacity: isOpen ? 1.0 : 0.0,
-            child: IgnorePointer(
-              ignoring: !isOpen,
-              child: TickerMode(
-                enabled: isOpen || _isTransitioning,
-                child: _buildSettingsPanel(),
+          child: _followLyrics(
+            AnimatedOpacity(
+              duration: const Duration(milliseconds: 300),
+              opacity: isOpen ? 1.0 : 0.0,
+              child: IgnorePointer(
+                ignoring: !isOpen,
+                child: TickerMode(
+                  enabled: isOpen || _isTransitioning,
+                  child: _buildSettingsPanel(),
+                ),
               ),
             ),
+            verticalSettings: isV,
+            settingsHeight: innerSettingsH,
           ),
         ),
-        AnimatedPositioned(
+        MorphPositioned(
+          motion: _layoutMotion,
           duration: frameAnimationDuration,
           curve: AppState.layoutSwitchCurve,
           left: pLeft,
           top: pTop,
           width: innerPlayerW,
           height: innerPlayerH,
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onPanStart: (_) => windowManager.startDragging(),
-            onSecondaryTapDown: _handleSecondaryTap,
-            onTapDown: (_) {
-              if (_isMenuOpen) _closeMenu();
-            },
-            child: RepaintBoundary(
-              key: const ValueKey('player_content_surface'),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Positioned(
-                    left: 0,
-                    top: 0,
-                    width: innerPlayerW,
-                    height: corePlayerH,
-                    child: ContinuousTrackControls(isVertical: isV),
-                  ),
-                  AnimatedPositioned(
-                    duration: frameAnimationDuration,
-                    curve: AppState.layoutSwitchCurve,
-                    left: playerHorizontalPadding,
-                    top: corePlayerH + 8.0,
-                    width: innerPlayerW - playerHorizontalPadding * 2,
-                    height: spectrumRowVisible ? 48.0 : 0.0,
-                    child: AnimatedOpacity(
-                      duration: reduceMotion
-                          ? Duration.zero
-                          : const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      opacity: spectrumRowVisible ? 1.0 : 0.0,
-                      child: IgnorePointer(
-                        ignoring: !spectrumRowVisible,
-                        child: SpectrumPerformanceRow(
-                          spectrumMode: AppState.spectrumMode,
-                          isPlaying: AppState.isPlaying,
-                          showPerformance: performanceVisible,
-                          isVertical: isV,
+          child: _clipPlayerVisualHeight(
+            GestureDetector(
+              key: _playerAnchorKey,
+              behavior: HitTestBehavior.translucent,
+              onPanStart: (_) => windowManager.startDragging(),
+              onSecondaryTapDown: _handleSecondaryTap,
+              onTapDown: (_) {
+                if (_isMenuOpen) _closeMenu();
+              },
+              child: RepaintBoundary(
+                key: const ValueKey('player_content_surface'),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    MorphPositioned(
+                      motion: _layoutMotion,
+                      duration: frameAnimationDuration,
+                      curve: AppState.layoutSwitchCurve,
+                      left: 0,
+                      top: 0,
+                      width: innerPlayerW,
+                      height: corePlayerH,
+                      child: ContinuousTrackControls(
+                        isVertical: isV,
+                        layoutMotion: _layoutMotion,
+                      ),
+                    ),
+                    MorphPositioned(
+                      motion: _layoutMotion,
+                      duration: frameAnimationDuration,
+                      curve: AppState.layoutSwitchCurve,
+                      left: playerHorizontalPadding,
+                      top: corePlayerH + 8.0,
+                      width: innerPlayerW - playerHorizontalPadding * 2,
+                      height: spectrumRowVisible ? 48.0 : 0.0,
+                      child: AnimatedOpacity(
+                        duration: reduceMotion
+                            ? Duration.zero
+                            : const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        opacity: spectrumRowVisible ? 1.0 : 0.0,
+                        child: IgnorePointer(
+                          ignoring: !spectrumRowVisible,
+                          child: SpectrumPerformanceRow(
+                            spectrumMode: AppState.spectrumMode,
+                            isPlaying: AppState.isPlaying,
+                            showPerformance: performanceVisible,
+                            isVertical: isV,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  AnimatedPositioned(
-                    duration: frameAnimationDuration,
-                    curve: AppState.layoutSwitchCurve,
-                    left: playerHorizontalPadding,
-                    top:
-                        corePlayerH +
-                        AppState.spectrumPanelExtentOf(AppState.widgetLayout) +
-                        8.0,
-                    width: innerPlayerW - playerHorizontalPadding * 2,
-                    height: lyricsVisible ? 48.0 : 0.0,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      opacity: lyricsVisible ? 1.0 : 0.0,
-                      child: IgnorePointer(
-                        ignoring: !lyricsVisible,
-                        child: const MusicLyricsPanel(),
+                    MorphPositioned(
+                      motion: _layoutMotion,
+                      duration: frameAnimationDuration,
+                      curve: AppState.layoutSwitchCurve,
+                      left: playerHorizontalPadding,
+                      top:
+                          corePlayerH +
+                          AppState.spectrumPanelExtentOf(_displayLayout) +
+                          8.0,
+                      width: innerPlayerW - playerHorizontalPadding * 2,
+                      height: lyricsOccupied ? 48.0 : 0.0,
+                      child: AnimatedBuilder(
+                        animation: _lyricsVisualMotion.animation,
+                        builder: (context, child) => Align(
+                          alignment: Alignment.topCenter,
+                          child: SizedBox(
+                            height: math.max(
+                              0.0,
+                              48 - 64 * _lyricsVisualMotion.animation.value,
+                            ),
+                            child: ClipRect(
+                              child: OverflowBox(
+                                minHeight: 48,
+                                maxHeight: 48,
+                                alignment: Alignment.topCenter,
+                                child: child,
+                              ),
+                            ),
+                          ),
+                        ),
+                        child: IgnorePointer(
+                          ignoring: !lyricsVisible,
+                          child: AnimatedSwitcher(
+                            duration: reduceMotion
+                                ? Duration.zero
+                                : const Duration(milliseconds: 200),
+                            switchInCurve: Curves.easeOutCubic,
+                            switchOutCurve: Curves.easeOutCubic,
+                            layoutBuilder: (child, previous) => Stack(
+                              fit: StackFit.expand,
+                              children: [...previous, ?child],
+                            ),
+                            child: lyricsVisible
+                                ? const MusicLyricsPanel(
+                                    key: ValueKey('visible_lyrics'),
+                                  )
+                                : const SizedBox.shrink(
+                                    key: ValueKey('hidden_lyrics'),
+                                  ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  AnimatedPositioned(
-                    duration: frameAnimationDuration,
-                    curve: AppState.layoutSwitchCurve,
-                    left: playerHorizontalPadding,
-                    top:
-                        corePlayerH +
-                        AppState.spectrumPanelExtentOf(AppState.widgetLayout) +
-                        AppState.lyricsPanelExtentOf(AppState.widgetLayout) +
-                        8.0,
-                    width: innerPlayerW - playerHorizontalPadding * 2,
-                    height: nextUpOccupied ? 48.0 : 0.0,
-                    child: IgnorePointer(
-                      ignoring: !nextUpVisible,
-                      child: nextUpConfigured || nextUpOccupied
-                          ? MusicNextUpPanel(
-                              presenceAnimation: _nextUpMotion.animation,
-                            )
-                          : const SizedBox.shrink(),
+                    MorphPositioned(
+                      motion: _layoutMotion,
+                      duration: frameAnimationDuration,
+                      curve: AppState.layoutSwitchCurve,
+                      left: playerHorizontalPadding,
+                      top:
+                          corePlayerH +
+                          AppState.spectrumPanelExtentOf(_displayLayout) +
+                          AppState.lyricsPanelExtentOf(_displayLayout) +
+                          8.0,
+                      width: innerPlayerW - playerHorizontalPadding * 2,
+                      height: nextUpOccupied ? 48.0 : 0.0,
+                      child: _followLyrics(
+                        IgnorePointer(
+                          ignoring: !nextUpVisible,
+                          child: nextUpConfigured || nextUpOccupied
+                              ? MusicNextUpPanel(
+                                  presenceAnimation: _nextUpMotion.animation,
+                                )
+                              : const SizedBox.shrink(),
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
+            innerPlayerH,
           ),
         ),
       ],
@@ -2091,18 +2492,66 @@ class _PlayerViewState extends State<PlayerView>
         final double animatedContentScale = transformOnly
             ? _contentScale
             : renderContentScale;
+        final morphFrame = _layoutMotion.active
+            ? _layoutMotion.frameInViewport(
+                MediaQuery.sizeOf(context),
+                MediaQuery.devicePixelRatioOf(context),
+              )
+            : _layoutPreparing
+            ? _layoutHeldFrame
+            : null;
+        final visibleW = morphFrame?.width ?? frameWidth;
+        final visibleH = morphFrame?.height ?? frameHeight;
+        final canvasW = _layoutMotion.active
+            ? _layoutMotion.canvas.width
+            : math.max(frameWidth, visibleW);
+        final canvasH = _layoutMotion.active
+            ? _layoutMotion.canvas.height
+            : math.max(frameHeight, visibleH);
+        final targetBackgroundSize = transformOnly
+            ? Size(containerW, containerH)
+            : Size(frameWidth, frameHeight);
+        final backdrop = Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: transformOnly ? containerW : visibleW,
+            height: transformOnly ? containerH : visibleH,
+            child: RepaintBoundary(
+              key: _layoutBackdropKey,
+              child: LayoutBackdropBlend(
+                motion: _layoutMotion,
+                previous: _layoutPreviousBackdrop,
+                targetSize: targetBackgroundSize,
+                child: playerBackground,
+              ),
+            ),
+          ),
+        );
         return ComponentSizeStage(
-          frameWidth: frameWidth,
-          frameHeight: frameHeight,
-          designWidth: containerW,
-          designHeight: containerH,
+          key: _layoutFrameKey,
+          frameWidth: visibleW,
+          visualCollapse: _lyricsVisualMotion.animation,
+          collapseExtent: lyricsOccupied
+              ? LyricsVisualMotion.reservedExtent
+              : 0,
+          frameHeight: visibleH,
+          canvasWidth: canvasW,
+          canvasHeight: canvasH,
+          designWidth:
+              (_layoutMotion.active || _layoutPreparing) && !transformOnly
+              ? canvasW / animatedContentScale
+              : containerW,
+          designHeight:
+              (_layoutMotion.active || _layoutPreparing) && !transformOnly
+              ? canvasH / animatedContentScale
+              : containerH,
           frameScale: animatedFrameScale,
           contentScale: animatedContentScale,
           alignment: componentAlignment,
           frameAnimationDuration: frameAnimationDuration,
           frameAnimationCurve: AppState.layoutSwitchCurve,
           transformOnly: transformOnly,
-          background: playerBackground,
+          background: backdrop,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(
               transformOnly ? 28.0 : 28.0 * animatedFrameScale,
@@ -2111,7 +2560,10 @@ class _PlayerViewState extends State<PlayerView>
               color: AppState.currentScheme.outlineVariant.withValues(
                 alpha: 0.4,
               ),
-              width: transformOnly ? 1.0 : math.max(1.0, animatedFrameScale),
+              width: RoundedRasterScale.hairline(
+                context,
+                scale: transformOnly ? animatedFrameScale : 1,
+              ),
             ),
           ),
           child: child!,
@@ -2157,21 +2609,29 @@ class _PlayerViewState extends State<PlayerView>
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              Positioned(
-                left:
-                    anchorRight ||
-                        (_menuSide == 'left' &&
-                            (_isMenuOpen || _menuResizeInFlight))
-                    ? null
-                    : _leftPadding,
-                right:
-                    anchorRight ||
-                        (_menuSide == 'left' &&
-                            (_isMenuOpen || _menuResizeInFlight))
-                    ? 0.0
-                    : null,
-                top: 0,
+              AnimatedBuilder(
+                animation: _layoutMotion,
                 child: mainStage,
+                builder: (context, child) {
+                  final frame = _layoutMotion.active
+                      ? _layoutMotion.frameInViewport(
+                          MediaQuery.sizeOf(context),
+                          MediaQuery.devicePixelRatioOf(context),
+                        )
+                      : _layoutPreparing
+                      ? _layoutHeldFrame
+                      : null;
+                  final rightAnchor =
+                      anchorRight ||
+                      (_menuSide == 'left' &&
+                          (_isMenuOpen || _menuResizeInFlight));
+                  return Positioned(
+                    left: frame?.left ?? (rightAnchor ? null : _leftPadding),
+                    right: frame == null && rightAnchor ? 0 : null,
+                    top: frame?.top ?? 0,
+                    child: child!,
+                  );
+                },
               ),
               if (_isMenuOpen)
                 Positioned(
@@ -2190,18 +2650,21 @@ class _PlayerViewState extends State<PlayerView>
                       alignment: _menuSide == "left"
                           ? Alignment.topRight
                           : Alignment.topLeft,
-                      child: Align(
-                        alignment: _menuSide == "left"
-                            ? Alignment.topRight
-                            : Alignment.topLeft,
-                        child: SlideMenu(
-                          animation: _menuAnimController,
-                          menuSide: _menuSide,
-                          onSettingsTap: _toggleSettings,
-                          onExitTap: () {
-                            windowManager.hide();
-                            unawaited(_exitApplication());
-                          },
+                      child: RoundedRasterScale(
+                        scale: renderContentScale,
+                        child: Align(
+                          alignment: _menuSide == "left"
+                              ? Alignment.topRight
+                              : Alignment.topLeft,
+                          child: SlideMenu(
+                            animation: _menuAnimController,
+                            menuSide: _menuSide,
+                            onSettingsTap: _toggleSettings,
+                            onExitTap: () {
+                              windowManager.hide();
+                              unawaited(_exitApplication());
+                            },
+                          ),
                         ),
                       ),
                     ),

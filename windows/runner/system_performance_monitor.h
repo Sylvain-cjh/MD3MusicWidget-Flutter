@@ -26,6 +26,7 @@ struct PerformanceSnapshot {
   std::string fps_status = "selectProcess";
   uint32_t process_id = 0;
   uint64_t revision = 0;
+  uint32_t metrics_mask = 15;
 };
 
 class SystemPerformanceMonitor {
@@ -33,7 +34,7 @@ class SystemPerformanceMonitor {
   SystemPerformanceMonitor() = default;
   ~SystemPerformanceMonitor();
   void Shutdown();
-  void Configure(bool enabled, const std::string& executable);
+  void Configure(bool enabled, const std::string& executable, uint32_t metrics_mask = 15);
   PerformanceSnapshot Sample();
   static std::vector<MonitorProcess> Processes();
 
@@ -44,6 +45,7 @@ class SystemPerformanceMonitor {
   std::thread worker_;
   bool enabled_ = false;
   bool stopping_ = false;
+  uint32_t metrics_mask_ = 15;
   std::string executable_;
   uint64_t revision_ = 0;
   PerformanceSnapshot snapshot_;

@@ -55,7 +55,15 @@ final class SettingsLabels {
   static const rightCoverBlur = '柔化程度';
   static const progressAutoContrast = '进度条自动反色';
   static const spectrum = '音乐频谱';
+  static const spectrumThickness = '频谱粗细';
+  static const automaticSpectrumColumns = '自动调整频谱柱数';
+  static const spectrumColumnCount = '频谱柱数量';
+  static const hideUnavailableLyrics = '没有歌词时自动隐藏';
   static const performanceMonitor = '性能监视器';
+  static const performanceFps = 'FPS 帧率';
+  static const performanceCpu = 'CPU 使用率';
+  static const performanceGpu = 'GPU 使用率';
+  static const performanceMemory = '内存占用';
   static const performanceProcess = '帧率采集程序';
   static const performanceProcessNone = '选择游戏或程序';
   static const performanceAuthorize = '以管理员身份重启并授权采集';
@@ -81,6 +89,15 @@ final class SettingsLabels {
   static const trackTextExitDescend = '向下离开';
   static const trackTextExitSideways = '侧向离开';
   static const trackTextExitShrink = '轻轻缩小';
+  static const coverTransition = '主封面切歌动画';
+  static const coverSoftSlide = '柔和滑移';
+  static const coverFade = '交叉淡化';
+  static const coverFilmVertical = '胶片 · 上下推进';
+  static const coverFilmHorizontal = '胶片 · 左右推进';
+  static const coverFlipHorizontal = '翻转 · 左右翻页';
+  static const coverFlipVertical = '翻转 · 上下翻页';
+  static const coverStack = '叠片换场';
+  static const coverNoAnimation = '直接切换';
   static const progressStyle = '进度条样式';
   static const playbackTime = '播放时间';
   static const playButton = '播放按钮';
@@ -154,6 +171,14 @@ final class SettingsLabels {
   static const lyricsRiseIn = '轻轻上浮';
   static const lyricsDescendIn = '轻轻落下';
   static const lyricsSidewaysIn = '侧向滑入';
-  static const lyricsZoomIn = '微微放大';
+  static const lyricsZoomIn = '放大浮现';
   static const lyricsNoEnterAnimation = '关闭动画';
+  static const lyricsFilmIn = '胶片推进';
+  static const lyricsFilmOut = '胶片移出';
+  static const lyricsFlipIn = '翻页浮现';
+  static const lyricsFlipOut = '翻页离开';
+  static const lyricsSettleIn = '放大收拢';
+  static const lyricsSettleOut = '缩小退场';
+  static const lyricsWipeIn = '横向揭幕';
+  static const lyricsWipeOut = '横向收幕';
 }

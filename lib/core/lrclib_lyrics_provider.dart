@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'lyrics_document.dart';
+import 'lyrics_http_client.dart';
 import 'platform_provider.dart';
 
 final class LrclibLyricsProvider
@@ -19,7 +20,7 @@ final class LrclibLyricsProvider
   DateTime _nextRequestAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   LrclibLyricsProvider({HttpClient? client, Uri? endpoint})
-    : _client = client ?? HttpClient(),
+    : _client = directLyricsHttpClient(client),
       _endpoint = endpoint ?? Uri.https('lrclib.net', '/api/get');
 
   @override

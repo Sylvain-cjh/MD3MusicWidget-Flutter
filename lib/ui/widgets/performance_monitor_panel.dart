@@ -3,18 +3,24 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/system_performance_provider.dart';
+import '../../core/performance_history.dart';
 import '../../core/app_state.dart';
 import 'spectrum_glass_surface.dart';
 import 'pixel_aligned_text.dart';
+import 'performance_trend.dart';
 
 class PerformanceMonitorPanel extends StatefulWidget {
   final Future<SystemPerformanceSample?> Function() readSample;
   final bool isVertical;
+  final bool active;
+  final int? metricsMask;
 
   const PerformanceMonitorPanel({
     super.key,
     this.readSample = SystemPerformanceProvider.sample,
     this.isVertical = false,
+    this.active = true,
+    this.metricsMask,
   });
 
   @override
@@ -24,9 +30,26 @@ class PerformanceMonitorPanel extends StatefulWidget {
 
 class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
   final SystemPerformanceTracker _tracker = SystemPerformanceTracker();
+  final PerformanceHistory _history = PerformanceHistory();
   Timer? _timer;
   bool _sampling = false;
   SystemPerformanceReading? _reading;
+  int? _configuredMask;
+  String? _configuredExecutable;
+  bool? _configuredActive;
+  int _generation = 0;
+  int get _mask =>
+      (widget.metricsMask ?? AppState.performanceMetricsMask) &
+      PerformanceMetric.allMask;
+
+  @override
+  void didUpdateWidget(covariant PerformanceMonitorPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active ||
+        oldWidget.metricsMask != widget.metricsMask) {
+      _configure();
+    }
+  }
 
   @override
   void initState() {
@@ -43,29 +66,75 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
   }
 
   void _configure() {
-    if (mounted) setState(() => _reading = null);
+    final mask = _mask;
+    final executable = AppState.performanceProcessExecutable;
+    if (_configuredMask == mask &&
+        _configuredExecutable == executable &&
+        _configuredActive == widget.active) {
+      return;
+    }
+    if (_configuredMask != null) {
+      ++_generation;
+      for (final metric in PerformanceMetric.values) {
+        if (metric.enabledIn(mask) && !metric.enabledIn(_configuredMask!)) {
+          _history.clearMetric(metric);
+        }
+      }
+      if (executable != _configuredExecutable) {
+        _history.clearMetric(PerformanceMetric.fps);
+        final reading = _reading;
+        if (reading != null) {
+          _reading = SystemPerformanceReading(
+            cpuPercent: reading.cpuPercent,
+            framesPerSecond: null,
+            gpuPercent: reading.gpuPercent,
+            usedMemoryGiB: reading.usedMemoryGiB,
+            totalMemoryGiB: reading.totalMemoryGiB,
+          );
+        }
+      }
+    }
+    _configuredMask = mask;
+    _configuredExecutable = executable;
+    _configuredActive = widget.active;
+    if (mounted) setState(() {});
     unawaited(
       SystemPerformanceProvider.configure(
-        enabled: true,
-        executable: AppState.performanceProcessExecutable,
+        enabled: widget.active && mask != 0,
+        executable: executable,
+        metricsMask: mask,
       ),
     );
   }
 
   Future<void> _sample() async {
-    if (_sampling) return;
+    if (_sampling || !widget.active || _mask == 0) return;
     _sampling = true;
+    final generation = _generation;
     try {
       final sample = await widget.readSample();
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       if (sample == null) {
+        _history.add(null, _mask);
         setState(() => _reading = null);
         return;
       }
       final reading = _tracker.update(sample);
-      setState(() => _reading = reading);
+      _history.add(reading, _mask);
+      setState(
+        () => _reading = SystemPerformanceReading(
+          cpuPercent: reading.cpuPercent ?? _reading?.cpuPercent,
+          framesPerSecond: reading.framesPerSecond,
+          gpuPercent: reading.gpuPercent,
+          usedMemoryGiB: reading.usedMemoryGiB,
+          totalMemoryGiB: reading.totalMemoryGiB,
+        ),
+      );
     } catch (_) {
-      if (mounted) setState(() => _reading = null);
+      if (mounted && generation == _generation) {
+        _history.add(null, _mask);
+        setState(() => _reading = null);
+      }
     } finally {
       _sampling = false;
     }
@@ -84,13 +153,14 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
   @override
   Widget build(BuildContext context) {
     final colors = AppState.currentScheme;
+    final metrics = [
+      for (final metric in PerformanceMetric.values)
+        if (metric.enabledIn(_mask)) metric,
+    ];
     final reading = _reading;
-    final fps = reading?.framesPerSecond;
-    final cpu = reading?.cpuPercent;
-    final gpu = reading?.gpuPercent;
     final memoryText = reading == null
         ? '内存 —'
-        : widget.isVertical
+        : widget.isVertical || metrics.length == 2
         ? '内存 ${reading.usedMemoryGiB.toStringAsFixed(1)}G'
         : '内存 ${reading.usedMemoryGiB.toStringAsFixed(1)}/${reading.totalMemoryGiB.toStringAsFixed(0)}G';
     return IgnorePointer(
@@ -110,56 +180,127 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
                         fontFamilyFallback: AppState.textFontFallback,
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: PixelAlignedText(
-                          child: Text(
-                            'FPS ${fps == null ? '—' : fps.toStringAsFixed(0)}',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
+              child: AnimatedSwitcher(
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : const Duration(milliseconds: 180),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: metrics.length <= 2
+                    ? _buildTrends(metrics, memoryText)
+                    : Column(
+                        key: ValueKey('performance_values_$_mask'),
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _valueRow(metrics.take(2).toList(), memoryText),
+                          const SizedBox(height: 2),
+                          _valueRow(metrics.skip(2).toList(), memoryText),
+                        ],
                       ),
-                      PixelAlignedText(
-                        child: Text(
-                          'CPU ${cpu == null ? '—' : '${cpu.toStringAsFixed(0)}%'}',
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      PixelAlignedText(
-                        child: Text(
-                          'GPU ${gpu == null ? '—' : '${gpu.toStringAsFixed(0)}%'}',
-                          maxLines: 1,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: PixelAlignedText(
-                          child: Text(
-                            memoryText,
-                            maxLines: 1,
-                            textAlign: TextAlign.end,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: colors.onSurfaceVariant),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  String _text(PerformanceMetric metric, String memoryText) {
+    final r = _reading;
+    String percent(double? value) =>
+        value == null ? '—' : '${value.toStringAsFixed(0)}%';
+    return switch (metric) {
+      PerformanceMetric.fps =>
+        'FPS ${r?.framesPerSecond?.toStringAsFixed(0) ?? '—'}',
+      PerformanceMetric.cpu => 'CPU ${percent(r?.cpuPercent)}',
+      PerformanceMetric.gpu => 'GPU ${percent(r?.gpuPercent)}',
+      PerformanceMetric.memory => memoryText,
+    };
+  }
+
+  Widget _label(
+    PerformanceMetric metric,
+    String memoryText, {
+    TextAlign? align,
+  }) => PixelAlignedText(
+    child: Text(
+      _text(metric, memoryText),
+      maxLines: 1,
+      textAlign: align,
+      overflow: TextOverflow.ellipsis,
+      style: metric == PerformanceMetric.memory
+          ? TextStyle(color: AppState.currentScheme.onSurfaceVariant)
+          : null,
+    ),
+  );
+
+  Widget _valueRow(List<PerformanceMetric> metrics, String memoryText) {
+    if (metrics.isEmpty) return const SizedBox.shrink();
+    if (metrics.length == 1) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: _label(metrics.first, memoryText),
+      );
+    }
+    final memoryLast = metrics.last == PerformanceMetric.memory;
+    return Row(
+      children: [
+        if (memoryLast)
+          _label(metrics.first, memoryText)
+        else
+          Expanded(child: _label(metrics.first, memoryText)),
+        const SizedBox(width: 4),
+        if (memoryLast)
+          Expanded(
+            child: _label(metrics.last, memoryText, align: TextAlign.end),
+          )
+        else
+          _label(metrics.last, memoryText),
+      ],
+    );
+  }
+
+  Widget _buildTrends(List<PerformanceMetric> metrics, String memoryText) {
+    if (metrics.isEmpty) return const SizedBox.shrink();
+    Widget trend(PerformanceMetric metric) => PerformanceTrend(
+      metric: metric,
+      samples: _history.values(metric),
+      color: switch (metric) {
+        PerformanceMetric.fps ||
+        PerformanceMetric.cpu => AppState.currentScheme.primary,
+        PerformanceMetric.gpu => AppState.currentScheme.secondary,
+        PerformanceMetric.memory => AppState.currentScheme.tertiary,
+      },
+    );
+    return Column(
+      key: ValueKey('performance_trends_$_mask'),
+      children: [
+        if (metrics.length == 1) ...[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _label(metrics.single, memoryText),
+          ),
+          const SizedBox(height: 1),
+          Expanded(
+            child: SizedBox(
+              width: double.infinity,
+              child: trend(metrics.single),
+            ),
+          ),
+        ] else ...[
+          for (final metric in metrics)
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(flex: 5, child: _label(metric, memoryText)),
+                  const SizedBox(width: 4),
+                  Expanded(flex: 6, child: trend(metric)),
+                ],
+              ),
+            ),
+        ],
+      ],
     );
   }
 }

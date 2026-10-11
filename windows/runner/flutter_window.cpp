@@ -66,18 +66,24 @@ bool FlutterWindow::OnCreate() {
         if (call.method_name() == "configure") {
           const auto* args = call.arguments() ? std::get_if<flutter::EncodableMap>(call.arguments()) : nullptr;
           bool enabled = false;
+          uint32_t metrics_mask = 15;
           std::string executable;
           if (args) {
             const auto active = args->find(flutter::EncodableValue("enabled"));
             const auto target = args->find(flutter::EncodableValue("executable"));
+            const auto metrics = args->find(flutter::EncodableValue("metricsMask"));
             if (active != args->end()) {
               if (const auto* value = std::get_if<bool>(&active->second)) enabled = *value;
             }
             if (target != args->end()) {
               if (const auto* value = std::get_if<std::string>(&target->second)) executable = *value;
             }
+            if (metrics != args->end()) {
+              if (const auto* value = std::get_if<int32_t>(&metrics->second)) metrics_mask = static_cast<uint32_t>(*value) & 15;
+              else if (const auto* large_value = std::get_if<int64_t>(&metrics->second)) metrics_mask = static_cast<uint32_t>(*large_value) & 15;
+            }
           }
-          performance_monitor_->Configure(enabled, executable);
+          performance_monitor_->Configure(enabled, executable, metrics_mask);
           result->Success();
           return;
         }
@@ -97,6 +103,7 @@ bool FlutterWindow::OnCreate() {
              flutter::EncodableValue(reading.total_memory_bytes)},
             {flutter::EncodableValue("availableMemoryBytes"),
              flutter::EncodableValue(reading.available_memory_bytes)},
+            {flutter::EncodableValue("metricsMask"), flutter::EncodableValue(static_cast<int32_t>(reading.metrics_mask))},
             {flutter::EncodableValue("fpsStatus"), flutter::EncodableValue(reading.fps_status)},
             {flutter::EncodableValue("processId"), flutter::EncodableValue(static_cast<int64_t>(reading.process_id))},
             {flutter::EncodableValue("revision"), flutter::EncodableValue(static_cast<int64_t>(reading.revision))},

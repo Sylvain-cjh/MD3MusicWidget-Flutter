@@ -160,7 +160,8 @@ class _AnchoredBackgroundCanvas extends StatelessWidget {
 
 class DynamicBackground extends StatefulWidget {
   final double? anchorHeight;
-  const DynamicBackground({super.key, this.anchorHeight});
+  final bool? verticalLayout;
+  const DynamicBackground({super.key, this.anchorHeight, this.verticalLayout});
   @override
   State<DynamicBackground> createState() => _DynamicBackgroundState();
 }
@@ -182,6 +183,11 @@ class _DynamicBackgroundState extends State<DynamicBackground>
   Object? _visualState;
   Object? _blurredArtworkKey;
   Widget? _blurredArtwork;
+  WidgetLayout get _layout => widget.verticalLayout == null
+      ? AppState.widgetLayout
+      : widget.verticalLayout!
+      ? WidgetLayout.vertical
+      : WidgetLayout.horizontal;
 
   Object _readVisualState() => (
     AppState.coverProvider,
@@ -192,10 +198,10 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     AppState.enableGlow,
     AppState.glowMode,
     AppState.enableOledTheme,
-    AppState.widgetLayout,
+    _layout,
     AppState.isPlaying,
     AppState.corePlayerHeightOf(WidgetLayout.horizontal),
-    AppState.glowHeaderHeight,
+    AppState.glowHeaderHeightOf(_layout),
   );
 
   void _releaseHeldArtwork() {
@@ -278,6 +284,9 @@ class _DynamicBackgroundState extends State<DynamicBackground>
   @override
   void didUpdateWidget(DynamicBackground oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.verticalLayout != widget.verticalLayout) {
+      _visualState = _readVisualState();
+    }
     if (AppState.enableGlow &&
         _revealController.status != AnimationStatus.completed &&
         _revealController.status != AnimationStatus.forward) {
@@ -434,7 +443,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
 
     const double canvasW = AppState.canvasWidth;
     const double canvasH = AppState.canvasHeight;
-    final double headerH = AppState.glowHeaderHeight;
+    final double headerH = AppState.glowHeaderHeightOf(_layout);
 
     final double luminance = AppState.currentScheme.surface.computeLuminance();
 
@@ -513,9 +522,12 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                       animation: _revealAnimation,
                       builder: (context, child) {
                         return ClipPath(
+                          clipBehavior: _revealAnimation.value >= 0.99999
+                              ? Clip.none
+                              : Clip.antiAliasWithSaveLayer,
                           clipper: CircularRevealClipper(
                             fraction: _revealAnimation.value,
-                            center: AppState.revealCenter,
+                            center: AppState.revealCenterOf(_layout),
                           ),
                           child: child,
                         );
@@ -564,7 +576,9 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                 height: rightCoverHeight,
                 width: math.min(rightCoverHeight, constraints.maxWidth),
                 child: AnimatedOpacity(
-                  opacity: AppState.isVertical || AppState.coverProvider == null
+                  opacity:
+                      (widget.verticalLayout ?? AppState.isVertical) ||
+                          AppState.coverProvider == null
                       ? 0.0
                       : 1.0,
                   duration: AppState.layoutSwitchDuration,

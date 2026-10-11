@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
+import 'smooth_rounded_clip.dart';
 
 class SlideMenu extends StatelessWidget {
   final Animation<double> animation;
@@ -33,35 +34,39 @@ class SlideMenu extends StatelessWidget {
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 4),
           child: IntrinsicWidth(
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppState.currentScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: AppState.currentScheme.outlineVariant.withValues(
-                    alpha: 0.5,
+            child: SmoothRoundedClip(
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppState.currentScheme.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    width: RoundedRasterScale.hairline(context),
+                    color: AppState.currentScheme.outlineVariant.withValues(
+                      alpha: 0.5,
+                    ),
                   ),
+                  
                 ),
-                
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildMenuItem(
-                    Icons.settings_rounded,
-                    "偏好设置中心",
-                    onSettingsTap,
-                  ),
-                  const SizedBox(height: 2),
-                  _buildMenuItem(
-                    Icons.power_settings_new_rounded,
-                    "完全退出组件",
-                    onExitTap,
-                    isError: true,
-                  ),
-                ],
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildMenuItem(
+                      Icons.settings_rounded,
+                      "偏好设置中心",
+                      onSettingsTap,
+                    ),
+                    const SizedBox(height: 2),
+                    _buildMenuItem(
+                      Icons.power_settings_new_rounded,
+                      "完全退出组件",
+                      onExitTap,
+                      isError: true,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

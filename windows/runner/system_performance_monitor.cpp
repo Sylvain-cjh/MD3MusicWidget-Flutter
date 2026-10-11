@@ -14,6 +14,7 @@
 
 namespace {
 using Clock = std::chrono::steady_clock;
+constexpr uint32_t kFps = 1, kCpu = 2, kGpu = 4, kMemory = 8;
 double Seconds() { return std::chrono::duration<double>(Clock::now().time_since_epoch()).count(); }
 int64_t Ticks(const FILETIME& value) {
   return (static_cast<int64_t>(value.dwHighDateTime) << 32) | value.dwLowDateTime;
@@ -70,7 +71,13 @@ DWORD FindProcess(const std::wstring& executable) {
 
 class GpuCounter {
  public:
-  ~GpuCounter() { if (query_) PdhCloseQuery(query_); }
+  ~GpuCounter() { Reset(); }
+  void Reset() {
+    if (!query_ && buffer_.empty()) return;
+    if (query_) PdhCloseQuery(query_);
+    query_ = nullptr; counter_ = nullptr;
+    std::vector<uint64_t>().swap(buffer_);
+  }
   std::optional<double> Read() {
     if (!query_) {
       if (PdhOpenQueryW(nullptr, 0, &query_) != ERROR_SUCCESS) return std::nullopt;
@@ -210,14 +217,27 @@ void SystemPerformanceMonitor::Shutdown() {
   wake_.notify_one();
   if (worker_.joinable()) worker_.join();
 }
-void SystemPerformanceMonitor::Configure(bool enabled, const std::string& executable) {
+void SystemPerformanceMonitor::Configure(bool enabled, const std::string& executable, uint32_t metrics_mask) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (stopping_) return;
-  if (enabled_ == enabled && executable_ == executable) return;
-  enabled_ = enabled; executable_ = executable; ++revision_;
-  snapshot_ = {};
+  metrics_mask &= 15;
+  enabled = enabled && metrics_mask != 0;
+  if (enabled_ == enabled && executable_ == executable && metrics_mask_ == metrics_mask) return;
+  const bool fps_changed = enabled_ != enabled || executable_ != executable ||
+      ((metrics_mask_ ^ metrics_mask) & kFps) != 0;
+  enabled_ = enabled; executable_ = executable; metrics_mask_ = metrics_mask; ++revision_;
+  if (!enabled) snapshot_ = {};
+  snapshot_.metrics_mask = metrics_mask;
   snapshot_.revision = revision_;
-  snapshot_.fps_status = executable.empty() ? "selectProcess" : "starting";
+  if (!(metrics_mask & kCpu)) snapshot_.idle_ticks = snapshot_.kernel_ticks = snapshot_.user_ticks = 0;
+  if (!(metrics_mask & kMemory)) snapshot_.total_memory_bytes = snapshot_.available_memory_bytes = 0;
+  if (!(metrics_mask & kGpu)) snapshot_.gpu_percent.reset();
+  if (!(metrics_mask & kFps)) {
+    snapshot_.frames_per_second.reset(); snapshot_.process_id = 0; snapshot_.fps_status = "disabled";
+  } else if (fps_changed) {
+    snapshot_.frames_per_second.reset(); snapshot_.process_id = 0;
+    snapshot_.fps_status = executable.empty() ? "selectProcess" : "starting";
+  }
   if (!worker_.joinable() && enabled) worker_ = std::thread(&SystemPerformanceMonitor::Run, this);
   wake_.notify_one();
 }
@@ -246,53 +266,70 @@ std::vector<MonitorProcess> SystemPerformanceMonitor::Processes() {
   return processes;
 }
 void SystemPerformanceMonitor::Run() {
+  GpuCounter gpu;
+  FrameCapture capture;
+  DWORD target = 0;
+  bool capture_enabled = false;
+  std::string capture_executable;
+  double next_lookup = 0, next_sample = 0;
+  uint64_t sampled_revision = 0;
   while (true) {
     std::string executable;
     uint64_t revision;
+    uint32_t metrics_mask;
+    bool enabled;
     {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (stopping_) return;
+      enabled = enabled_; executable = executable_; revision = revision_; metrics_mask = metrics_mask_;
+    }
+    if (!enabled) {
+      capture.Stop(); gpu.Reset(); target = 0; capture_enabled = false;
+      capture.status = "disabled"; capture_executable.clear();
+      next_lookup = next_sample = 0;
       std::unique_lock<std::mutex> lock(mutex_);
       wake_.wait(lock, [this] { return stopping_ || enabled_; });
-      if (stopping_) return;
-      executable = executable_; revision = revision_;
+      continue;
     }
-    GpuCounter gpu;
-    FrameCapture capture;
-    DWORD target = 0;
-    double next_lookup = 0, next_sample = 0;
-    while (true) {
-      {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (stopping_ || !enabled_ || revision != revision_) break;
-      }
-      const double now = Seconds();
-      if (!executable.empty() && now >= next_lookup) {
-        next_lookup = now + 2;
-        const auto found = FindProcess(Wide(executable));
-        if (found != target) {
-          target = found;
-          if (target) capture.Start(target);
-          else { capture.Stop(); capture.status = "waitingProcess"; }
-        } else if (!target) capture.status = "waitingProcess";
-      }
-      capture.Poll();
-      if (now >= next_sample) {
-        next_sample = now + 0.5;
-        FILETIME idle = {}, kernel = {}, user = {};
-        MEMORYSTATUSEX memory = {}; memory.dwLength = sizeof(memory);
-        PerformanceSnapshot next;
-        if (GetSystemTimes(&idle, &kernel, &user) && GlobalMemoryStatusEx(&memory)) {
-          next.idle_ticks = Ticks(idle); next.kernel_ticks = Ticks(kernel); next.user_ticks = Ticks(user);
-          next.total_memory_bytes = static_cast<int64_t>(memory.ullTotalPhys);
-          next.available_memory_bytes = static_cast<int64_t>(memory.ullAvailPhys);
-        }
-        next.gpu_percent = gpu.Read(); next.frames_per_second = capture.Fps();
-        next.fps_status = capture.status; next.process_id = target; next.revision = revision;
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (revision == revision_) snapshot_ = std::move(next);
-      }
-      std::unique_lock<std::mutex> lock(mutex_);
-      wake_.wait_for(lock, std::chrono::milliseconds(target ? 50 : 500),
-        [this, revision] { return stopping_ || !enabled_ || revision != revision_; });
+    const bool fps_enabled = (metrics_mask & kFps) != 0;
+    if (capture_enabled != fps_enabled || capture_executable != executable) {
+      capture.Stop(); target = 0; next_lookup = 0;
+      capture_enabled = fps_enabled; capture_executable = executable;
+      capture.status = !fps_enabled ? "disabled" : executable.empty() ? "selectProcess" : "starting";
     }
+    if (!(metrics_mask & kGpu)) gpu.Reset();
+    const double now = Seconds();
+    if (fps_enabled && !executable.empty() && now >= next_lookup) {
+      next_lookup = now + 2;
+      const auto found = FindProcess(Wide(executable));
+      if (found != target) {
+        target = found;
+        if (target) capture.Start(target);
+        else { capture.Stop(); capture.status = "waitingProcess"; }
+      } else if (!target) capture.status = "waitingProcess";
+    }
+    if (fps_enabled) capture.Poll();
+    if (now >= next_sample || sampled_revision != revision) {
+      next_sample = now + 0.5; sampled_revision = revision;
+      PerformanceSnapshot next;
+      FILETIME idle = {}, kernel = {}, user = {};
+      if ((metrics_mask & kCpu) && GetSystemTimes(&idle, &kernel, &user)) {
+        next.idle_ticks = Ticks(idle); next.kernel_ticks = Ticks(kernel); next.user_ticks = Ticks(user);
+      }
+      MEMORYSTATUSEX memory = {}; memory.dwLength = sizeof(memory);
+      if ((metrics_mask & kMemory) && GlobalMemoryStatusEx(&memory)) {
+        next.total_memory_bytes = static_cast<int64_t>(memory.ullTotalPhys);
+        next.available_memory_bytes = static_cast<int64_t>(memory.ullAvailPhys);
+      }
+      if (metrics_mask & kGpu) next.gpu_percent = gpu.Read();
+      if (fps_enabled) next.frames_per_second = capture.Fps();
+      next.fps_status = capture.status; next.process_id = target;
+      next.revision = revision; next.metrics_mask = metrics_mask;
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (enabled_ && revision == revision_) snapshot_ = std::move(next);
+    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    wake_.wait_for(lock, std::chrono::milliseconds(fps_enabled && target ? 50 : 500),
+      [this, revision] { return stopping_ || !enabled_ || revision != revision_; });
   }
 }

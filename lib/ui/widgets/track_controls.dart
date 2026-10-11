@@ -5,13 +5,17 @@ import 'dart:ui' show PointMode;
 import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
 import '../../core/media_provider.dart';
-import '../../widgets/parallax_button.dart';
+import 'playback_control_button.dart';
+import 'media_geometry.dart';
 import 'cover_parallax.dart';
 import 'spectrum_glass_surface.dart';
 import 'playback_time_label.dart';
 import 'adaptive_media_text.dart';
+import '../animations/cover_artwork_switcher.dart';
+import '../animations/media_motion_tokens.dart';
+import '../animations/layout_morph_motion.dart';
 
-int _globalSlideDirection = 1;
+int get _globalSlideDirection => AppState.trackNavigation.direction;
 String _lastMeasureKey = "";
 double _cachedTitleTargetWidth = 0.0;
 double _cachedTitleTargetHeight = 0.0;
@@ -20,7 +24,12 @@ double _cachedArtistTargetHeight = 0.0;
 
 class ContinuousTrackControls extends StatefulWidget {
   final bool isVertical;
-  const ContinuousTrackControls({super.key, required this.isVertical});
+  final LayoutMorphMotion? layoutMotion;
+  const ContinuousTrackControls({
+    super.key,
+    required this.isVertical,
+    this.layoutMotion,
+  });
 
   @override
   State<ContinuousTrackControls> createState() =>
@@ -28,6 +37,8 @@ class ContinuousTrackControls extends StatefulWidget {
 }
 
 class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
+  String _directionCoverIdentity = '';
+  int _coverDirection = 1;
   late bool _hasTimeline;
   Timer? _timelineHideTimer;
 
@@ -100,12 +111,12 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     if (!AppState.trackTextAnimationsEnabled || !hasTrack) {
       return Duration.zero;
     }
-    if (reduceMotion) return const Duration(milliseconds: 160);
+    if (reduceMotion) return MediaMotionTokens.reduced;
     if (AppState.trackTextTransitionStyle ==
         TrackTextTransitionStyle.particles) {
       return _textTransitionDuration(measuredWidth);
     }
-    return const Duration(milliseconds: 240);
+    return MediaMotionTokens.replacement;
   }
 
   Widget _buildTextTransition(
@@ -334,7 +345,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         final double availableH = AppState.corePlayerHeightOf(targetLayout);
         final double devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
         final double md3ProgressHeight = AppState.showPlaybackTime
-            ? 18.0
+            ? math.max(18.0, PlaybackTimeLabel.preferredHeight(context))
             : switch (AppState.progressStyle) {
                 MD3ProgressStyle.linear => isV ? 5.0 : 4.0,
                 MD3ProgressStyle.pill => isV ? 9.0 : 8.0,
@@ -520,36 +531,32 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         _measureTexts(snappedInfoW, textColor, titleFontSize, artistFontSize);
         final bool hasTrackText = _hasTrackText(AppState.trackTitle);
         final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
-        final Duration titleTransitionDuration =
+        final Duration mediaTextTransitionDuration =
             _effectiveTextTransitionDuration(
-              _cachedTitleTargetWidth,
+              math.max(_cachedTitleTargetWidth, _cachedArtistTargetWidth),
               hasTrack: hasTrackText,
               reduceMotion: reduceMotion,
             );
-        final Duration artistTransitionDuration =
-            _effectiveTextTransitionDuration(
-              _cachedArtistTargetWidth,
-              hasTrack: hasTrackText,
-              reduceMotion: reduceMotion,
-            );
-        final Duration coverTransitionDuration = _textTransitionDuration(
-          math.max(_cachedTitleTargetWidth, _cachedArtistTargetWidth),
-        );
+        final Duration titleTransitionDuration = mediaTextTransitionDuration;
+        final Duration artistTransitionDuration = mediaTextTransitionDuration;
 
         return Stack(
           clipBehavior: Clip.none,
           children: [
-            AnimatedPositioned(
+            MorphPositioned(
+              motion: widget.layoutMotion,
+              cover: true,
               duration: AppState.layoutSwitchDuration,
               curve: AppState.layoutSwitchCurve,
               left: coverL,
               top: coverT,
               width: coverSize,
               height: coverSize,
-              child: _buildCover(coverSize, coverTransitionDuration),
+              child: _buildCover(coverSize),
             ),
 
-            AnimatedPositioned(
+            MorphPositioned(
+              motion: widget.layoutMotion,
               duration: AppState.layoutSwitchDuration,
               curve: AppState.layoutSwitchCurve,
               left: snappedTitleL,
@@ -564,7 +571,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                   duration: titleTransitionDuration,
                   reverseDuration: titleTransitionDuration == Duration.zero
                       ? Duration.zero
-                      : Duration(milliseconds: reduceMotion ? 160 : 220),
+                      : mediaTextTransitionDuration,
                   switchInCurve: Curves.easeOutCubic,
                   switchOutCurve: Curves.easeOutCubic,
                   layoutBuilder: (currentChild, previousChildren) => Stack(
@@ -587,6 +594,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                     isPlaceholder: !hasTrackText,
                     measuredWidth: _cachedTitleTargetWidth,
                     measuredHeight: _cachedTitleTargetHeight,
+                    layoutMotion: widget.layoutMotion,
                     style: TextStyle(
                       fontSize: titleFontSize,
                       fontWeight: AppState.titleWeight,
@@ -604,7 +612,8 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               ),
             ),
 
-            AnimatedPositioned(
+            MorphPositioned(
+              motion: widget.layoutMotion,
               duration: AppState.layoutSwitchDuration,
               curve: AppState.layoutSwitchCurve,
               left: snappedArtistL,
@@ -619,7 +628,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                   duration: artistTransitionDuration,
                   reverseDuration: artistTransitionDuration == Duration.zero
                       ? Duration.zero
-                      : Duration(milliseconds: reduceMotion ? 160 : 220),
+                      : mediaTextTransitionDuration,
                   switchInCurve: Curves.easeOutCubic,
                   switchOutCurve: Curves.easeOutCubic,
                   layoutBuilder: (currentChild, previousChildren) => Stack(
@@ -643,6 +652,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                     isPlaceholder: !hasTrackText,
                     measuredWidth: _cachedArtistTargetWidth,
                     measuredHeight: _cachedArtistTargetHeight,
+                    layoutMotion: widget.layoutMotion,
                     style: TextStyle(
                       fontSize: artistFontSize,
                       fontWeight: AppState.artistWeight,
@@ -660,7 +670,8 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               ),
             ),
 
-            AnimatedPositioned(
+            MorphPositioned(
+              motion: widget.layoutMotion,
               duration: AppState.layoutSwitchDuration,
               curve: AppState.layoutSwitchCurve,
               left: titleL,
@@ -684,24 +695,19 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                       ),
                     ),
                   ),
-                  AnimatedSize(
-                    duration: reduceMotion
-                        ? Duration.zero
-                        : const Duration(milliseconds: 240),
-                    curve: Curves.easeInOutCubicEmphasized,
-                    alignment: Alignment.centerRight,
-                    child: AppState.showPlaybackTime
-                        ? const Padding(
-                            padding: EdgeInsets.only(left: 10),
-                            child: RepaintBoundary(child: PlaybackTimeLabel()),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
+                  if (AppState.showPlaybackTime)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 10),
+                      child: RepaintBoundary(
+                        child: PlaybackTimeLabel(maxWidth: progressW * .58),
+                      ),
+                    ),
                 ],
               ),
             ),
 
-            AnimatedPositioned(
+            MorphPositioned(
+              motion: widget.layoutMotion,
               duration: AppState.layoutSwitchDuration,
               curve: AppState.layoutSwitchCurve,
               left: prevL,
@@ -713,21 +719,21 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                       duration: const Duration(milliseconds: 500),
                       curve: Curves.easeOutCubic,
                       opacity: uiOpacity,
-                      child: WpfParallaxItem(
+                      child: PlaybackControlButton(
+                        key: const ValueKey('transport_previous'),
                         width: prevW,
                         height: btnH,
                         borderRadius: AppState.getShapeRadius(
                           AppState.prevButtonShape,
                           btnH,
                         ),
-                        bgColor: AppState.currentScheme.primaryContainer,
-                        foreground: Icon(
-                          Icons.skip_previous_rounded,
-                          size: btnH * 0.54,
-                          color: AppState.currentScheme.onPrimaryContainer,
-                        ),
-                        onTap: () {
-                          _globalSlideDirection = -1;
+                        background: AppState.currentScheme.primaryContainer,
+                        foreground: AppState.currentScheme.onPrimaryContainer,
+                        icon: Icons.skip_previous_rounded,
+                        iconSize: btnH * 0.54,
+                        label: '上一首',
+                        direction: -1,
+                        onPressed: () {
                           AppState.sendCommand(MediaCommand.previous);
                         },
                       ),
@@ -735,7 +741,8 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                   : const SizedBox.shrink(),
             ),
 
-            AnimatedPositioned(
+            MorphPositioned(
+              motion: widget.layoutMotion,
               duration: AppState.layoutSwitchDuration,
               curve: AppState.layoutSwitchCurve,
               left: playL,
@@ -743,22 +750,21 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               width: playW,
               height: playH,
               child: canPlayPause
-                  ? WpfParallaxItem(
+                  ? PlaybackControlButton(
+                      key: const ValueKey('transport_play_pause'),
                       width: playW,
                       height: playH,
                       borderRadius: AppState.getShapeRadius(
                         AppState.playButtonShape,
                         playH,
                       ),
-                      bgColor: AppState.currentScheme.primary,
-                      foreground: Icon(
-                        AppState.isPlaying
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                        size: playH * 0.59,
-                        color: AppState.currentScheme.onPrimary,
-                      ),
-                      onTap: () {
+                      background: AppState.currentScheme.primary,
+                      foreground: AppState.currentScheme.onPrimary,
+                      icon: Icons.play_arrow_rounded,
+                      iconSize: playH * 0.59,
+                      isPlaying: AppState.isPlaying,
+                      label: AppState.isPlaying ? '暂停' : '播放',
+                      onPressed: () {
                         AppState.sendCommand(MediaCommand.togglePlayPause);
                         setState(
                           () => AppState.isPlaying = !AppState.isPlaying,
@@ -769,7 +775,8 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                   : const SizedBox.shrink(),
             ),
 
-            AnimatedPositioned(
+            MorphPositioned(
+              motion: widget.layoutMotion,
               duration: AppState.layoutSwitchDuration,
               curve: AppState.layoutSwitchCurve,
               left: nextL,
@@ -781,21 +788,21 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                       duration: const Duration(milliseconds: 500),
                       curve: Curves.easeOutCubic,
                       opacity: uiOpacity,
-                      child: WpfParallaxItem(
+                      child: PlaybackControlButton(
+                        key: const ValueKey('transport_next'),
                         width: nextW,
                         height: btnH,
                         borderRadius: AppState.getShapeRadius(
                           AppState.nextButtonShape,
                           btnH,
                         ),
-                        bgColor: AppState.currentScheme.primaryContainer,
-                        foreground: Icon(
-                          Icons.skip_next_rounded,
-                          size: btnH * 0.54,
-                          color: AppState.currentScheme.onPrimaryContainer,
-                        ),
-                        onTap: () {
-                          _globalSlideDirection = 1;
+                        background: AppState.currentScheme.primaryContainer,
+                        foreground: AppState.currentScheme.onPrimaryContainer,
+                        icon: Icons.skip_next_rounded,
+                        iconSize: btnH * 0.54,
+                        label: '下一首',
+                        direction: 1,
+                        onPressed: () {
                           AppState.sendCommand(MediaCommand.next);
                         },
                       ),
@@ -808,40 +815,17 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     );
   }
 
-  Widget _buildCover(double size, Duration transitionDuration) {
-    return AnimatedSwitcher(
-      duration: transitionDuration < const Duration(milliseconds: 520)
-          ? const Duration(milliseconds: 520)
-          : transitionDuration,
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
-      layoutBuilder: (currentChild, previousChildren) => Stack(
-        alignment: Alignment.center,
-        clipBehavior: Clip.none,
-        children: <Widget>[...previousChildren, ?currentChild],
-      ),
-      transitionBuilder: (child, anim) {
-        final isIncoming = child.key == ValueKey(_coverIdentity);
-        final offset = isIncoming
-            ? Tween<Offset>(
-                begin: Offset(_globalSlideDirection * 0.08, 0.0),
-                end: Offset.zero,
-              ).animate(anim)
-            : Tween<Offset>(
-                begin: Offset(_globalSlideDirection * -0.06, 0.0),
-                end: Offset.zero,
-              ).animate(anim);
-        final scale = isIncoming
-            ? Tween<double>(begin: 0.96, end: 1.0).animate(anim)
-            : Tween<double>(begin: 0.985, end: 1.0).animate(anim);
-        return FadeTransition(
-          opacity: anim,
-          child: SlideTransition(
-            position: offset,
-            child: ScaleTransition(scale: scale, child: child),
-          ),
-        );
-      },
+  Widget _buildCover(double size) {
+    if (_directionCoverIdentity != _coverIdentity) {
+      _directionCoverIdentity = _coverIdentity;
+      _coverDirection = _globalSlideDirection;
+    }
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return CoverArtworkSwitcher(
+      style: AppState.coverTransitionStyle,
+      direction: _coverDirection,
+      reduceMotion: reduceMotion,
+      borderRadius: BorderRadius.circular((size * 0.055).clamp(14.0, 20.0)),
       child: IgnorePointer(
         key: ValueKey(_coverIdentity),
         ignoring: !AppState.isPlaying,
@@ -1130,6 +1114,7 @@ class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
   void initState() {
     super.initState();
     AppState.spectrumRevision.addListener(_handleSpectrumChanged);
+    AppState.spectrumStyleRevision.addListener(_handleSpectrumStyleChanged);
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 90),
@@ -1171,9 +1156,14 @@ class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
     }
   }
 
+  void _handleSpectrumStyleChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
     AppState.spectrumRevision.removeListener(_handleSpectrumChanged);
+    AppState.spectrumStyleRevision.removeListener(_handleSpectrumStyleChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -1200,6 +1190,9 @@ class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
                     levels: _displayLevels,
                     color: scheme.primary,
                     autoContrast: AppState.enableProgressAutoContrast,
+                    thickness: AppState.spectrumThickness,
+                    automaticColumns: AppState.automaticSpectrumColumns,
+                    columnCount: AppState.spectrumColumnCount,
                     repaint: _controller,
                   ),
                   child: const SizedBox.expand(),
@@ -1214,32 +1207,34 @@ class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
 }
 
 class _SpectrumPainter extends CustomPainter {
+  late final SpectrumCurveBuffers _curveBuffers = SpectrumCurveBuffers(
+    levels.length,
+  );
   final SpectrumMode mode;
   final Float32List levels;
   final Color color;
   final bool autoContrast;
+  final double thickness;
+  final bool automaticColumns;
+  final int columnCount;
 
   _SpectrumPainter({
     required this.mode,
     required this.levels,
     required this.color,
     required this.autoContrast,
+    required this.thickness,
+    required this.automaticColumns,
+    required this.columnCount,
     required Listenable repaint,
   }) : super(repaint: repaint);
 
-  double _levelAt(double position) {
-    if (levels.isEmpty) return 0;
-    final double index = position.clamp(0.0, 1.0) * (levels.length - 1);
-    final int lower = index.floor();
-    final int upper = math.min(levels.length - 1, lower + 1);
-    final double fraction = index - lower;
-    return levels[lower] + (levels[upper] - levels[lower]) * fraction;
-  }
-
   @override
   void paint(Canvas canvas, Size size) {
-    final int count = levels.length;
-    if (count == 0) return;
+    if (levels.isEmpty || size.isEmpty) return;
+    final int count = automaticColumns
+        ? spectrumDisplayCount(size.width, levels.length, thickness)
+        : columnCount.clamp(1, 128);
     bool hasSignal = false;
     for (final level in levels) {
       if (level > 0.005) {
@@ -1253,57 +1248,38 @@ class _SpectrumPainter extends CustomPainter {
       )
       ..blendMode = autoContrast ? BlendMode.difference : BlendMode.srcOver
       ..isAntiAlias = true;
-    final double slot = size.width / count;
-    final double barWidth = math.max(1.4, slot - 2.0);
+    final layout = spectrumBarLayout(
+      size.width,
+      levels.length,
+      thickness,
+      count,
+    );
+    final double barWidth = layout.width;
 
     if (mode == SpectrumMode.waveform) {
       if (!hasSignal) {
         paint
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.2
+          ..strokeWidth = 1.6 * thickness
           ..strokeCap = StrokeCap.round;
-        final double baselineY =
-            size.height - math.max(1.0, size.height * 0.06);
+        final inset = paint.strokeWidth / 2 + 0.5;
+        final double baselineY = size.height - inset;
         canvas.drawLine(
-          Offset(0, baselineY),
-          Offset(size.width, baselineY),
+          Offset(inset, baselineY),
+          Offset(size.width - inset, baselineY),
           paint,
         );
         return;
       }
-      final Path path = Path();
-      const int points = 64;
-      const double tension = 0.68;
-      double xAt(int index) => size.width * index / (points - 1);
-      double yAt(int index) {
-        final int safeIndex = index.clamp(0, points - 1);
-        final double level = _levelAt(safeIndex / (points - 1));
-        return size.height - size.height * 0.9 * level;
-      }
-
-      path.moveTo(xAt(0), yAt(0));
-      for (int i = 0; i < points - 1; i++) {
-        final double x1 = xAt(i);
-        final double y0 = yAt(i - 1);
-        final double y1 = yAt(i);
-        final double x2 = xAt(i + 1);
-        final double y2 = yAt(i + 1);
-        final double y3 = yAt(i + 2);
-        final double control1X = x1 + (x2 - x1) / 3.0;
-        final double control2X = x2 - (x2 - x1) / 3.0;
-        final double control1Y = (y1 + (y2 - y0) * tension / 6.0).clamp(
-          0.0,
-          size.height,
-        );
-        final double control2Y = (y2 - (y3 - y1) * tension / 6.0).clamp(
-          0.0,
-          size.height,
-        );
-        path.cubicTo(control1X, control1Y, control2X, control2Y, x2, y2);
-      }
+      final Path path = smoothSpectrumPath(
+        levels,
+        size,
+        1.6 * thickness,
+        buffers: _curveBuffers,
+      );
       paint
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.6
+        ..strokeWidth = 1.6 * thickness
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round;
       canvas.drawPath(path, paint);
@@ -1312,23 +1288,25 @@ class _SpectrumPainter extends CustomPainter {
 
     paint.style = PaintingStyle.fill;
     for (int i = 0; i < count; i++) {
-      final double x = i * slot + (slot - barWidth) / 2.0;
-      final double level = hasSignal ? levels[i].clamp(0.0, 1.0) : 0.075;
-      if (hasSignal && level <= 0.005) continue;
+      final double x = layout.left + i * (barWidth + layout.gap);
+      final double level = hasSignal
+          ? displaySpectrumLevel(levels, i, count)
+          : 0.075;
+      if (hasSignal && level <= 0) continue;
       if (mode == SpectrumMode.mirror) {
         final double halfHeight = size.height * 0.46 * level;
         final double center = size.height / 2.0;
         canvas.drawRRect(
-          RRect.fromRectAndRadius(
+          roundedMediaFragment(
             Rect.fromLTWH(x, center - halfHeight - 0.5, barWidth, halfHeight),
-            Radius.circular(barWidth / 2.0),
+            horizontal: false,
           ),
           paint,
         );
         canvas.drawRRect(
-          RRect.fromRectAndRadius(
+          roundedMediaFragment(
             Rect.fromLTWH(x, center + 0.5, barWidth, halfHeight),
-            Radius.circular(barWidth / 2.0),
+            horizontal: false,
           ),
           paint,
         );
@@ -1340,10 +1318,7 @@ class _SpectrumPainter extends CustomPainter {
           barWidth,
           height,
         );
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(rect, Radius.circular(barWidth / 2.0)),
-          paint,
-        );
+        canvas.drawRRect(roundedMediaFragment(rect, horizontal: false), paint);
       }
     }
   }
@@ -1352,7 +1327,10 @@ class _SpectrumPainter extends CustomPainter {
   bool shouldRepaint(covariant _SpectrumPainter oldDelegate) =>
       oldDelegate.mode != mode ||
       oldDelegate.color != color ||
-      oldDelegate.autoContrast != autoContrast;
+      oldDelegate.autoContrast != autoContrast ||
+      oldDelegate.thickness != thickness ||
+      oldDelegate.automaticColumns != automaticColumns ||
+      oldDelegate.columnCount != columnCount;
 }
 
 class _ProgressBarPainter extends CustomPainter {
@@ -1390,24 +1368,24 @@ class _ProgressBarPainter extends CustomPainter {
 
     final double normalized = paintState.progress.clamp(0.0, 1.0);
     if (style == MD3ProgressStyle.segmented) {
-      final int segmentCount = (size.width / 12.0).round().clamp(12, 32);
+      final int segmentCount = (size.width / 12.0).round().clamp(1, 32);
       const double segmentGap = 2.0;
       final double segmentWidth =
           (size.width - segmentGap * (segmentCount - 1)) / segmentCount;
       final double activePosition = normalized * segmentCount;
       for (int i = 0; i < segmentCount; i++) {
         final double x = i * (segmentWidth + segmentGap);
-        final RRect segment = RRect.fromRectAndRadius(
+        final RRect segment = roundedMediaFragment(
           Rect.fromLTWH(x, 0, segmentWidth, size.height),
-          radius,
+          horizontal: true,
         );
         canvas.drawRRect(segment, trackPaint);
         final double fraction = (activePosition - i).clamp(0.0, 1.0);
         if (fraction > 0) {
           canvas.drawRRect(
-            RRect.fromRectAndRadius(
+            roundedMediaFragment(
               Rect.fromLTWH(x, 0, segmentWidth * fraction, size.height),
-              radius,
+              horizontal: true,
             ),
             activePaint,
           );
@@ -1420,9 +1398,9 @@ class _ProgressBarPainter extends CustomPainter {
     canvas.drawRRect(track, trackPaint);
     final double activeWidth = size.width * normalized;
     if (activeWidth > 0) {
-      final RRect active = RRect.fromRectAndRadius(
+      final RRect active = roundedMediaFragment(
         Rect.fromLTWH(0, 0, activeWidth, size.height),
-        radius,
+        horizontal: true,
       );
       canvas.drawRRect(active, activePaint);
       if (paintState.returning) {
@@ -1432,6 +1410,8 @@ class _ProgressBarPainter extends CustomPainter {
             alpha: 0.24,
           )
           ..blendMode = autoContrast ? BlendMode.difference : BlendMode.srcOver;
+        canvas.save();
+        canvas.clipRRect(active);
         canvas.drawCircle(
           Offset(
             activeWidth.clamp(size.height / 2.0, size.width),
@@ -1440,6 +1420,7 @@ class _ProgressBarPainter extends CustomPainter {
           size.height * 0.42,
           returnHighlight,
         );
+        canvas.restore();
       }
     }
 
@@ -1474,6 +1455,7 @@ class _TextInfoWidget extends StatelessWidget {
   final TextStyle style;
   final double measuredWidth;
   final double measuredHeight;
+  final LayoutMorphMotion? layoutMotion;
   const _TextInfoWidget({
     required super.key,
     required this.text,
@@ -1481,15 +1463,20 @@ class _TextInfoWidget extends StatelessWidget {
     required this.style,
     required this.measuredWidth,
     required this.measuredHeight,
+    this.layoutMotion,
   });
   @override
-  Widget build(BuildContext context) => AdaptiveMediaText(
-    text,
-    maxLines: 1,
-    softWrap: false,
-    overflow: TextOverflow.ellipsis,
-    textHeightBehavior: AppState.crispTextHeightBehavior,
+  Widget build(BuildContext context) => MorphTextStyle(
+    motion: layoutMotion,
     style: style,
+    builder: (style) => AdaptiveMediaText(
+      text,
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.ellipsis,
+      textHeightBehavior: AppState.crispTextHeightBehavior,
+      style: style,
+    ),
   );
 }
 

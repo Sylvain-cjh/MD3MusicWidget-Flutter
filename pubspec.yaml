@@ -17,7 +17,7 @@ publish_to: 'none'
 
 
 
-version: 0.12.7+1
+version: 0.12.8+1
 
 environment:
   sdk: ^3.12.2
@@ -73,6 +73,7 @@ flutter:
     - assets/brand/qq_music.png
     - assets/brand/netease_cloud.png
     - assets/brand/lrclib.png
+    - assets/brand/lawnicons/
 
   
   

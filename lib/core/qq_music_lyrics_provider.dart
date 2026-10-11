@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'lyrics_document.dart';
+import 'lyrics_http_client.dart';
 import 'lrclib_lyrics_provider.dart';
 import 'platform_provider.dart';
 
@@ -23,7 +24,7 @@ final class QqMusicLyricsProvider
     required this._fallback,
     Uri? searchEndpoint,
     Uri? lyricEndpoint,
-  }) : _client = client ?? HttpClient(),
+  }) : _client = directLyricsHttpClient(client),
        _searchEndpoint =
            searchEndpoint ??
            Uri.https('c.y.qq.com', '/soso/fcgi-bin/client_search_cp'),
