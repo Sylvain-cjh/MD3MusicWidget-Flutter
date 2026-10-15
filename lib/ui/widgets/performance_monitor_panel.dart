@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -173,8 +174,13 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
               style:
                   (Theme.of(context).textTheme.labelSmall ?? const TextStyle())
                       .copyWith(
-                        fontSize: 10,
-                        height: 1.3,
+                        fontSize: 11,
+                        height: 1.25,
+                        fontWeight: FontWeight.w500,
+                        fontVariations: AppState.variationsFor(
+                          500,
+                          fontSize: 11,
+                        ),
                         color: colors.onSurface,
                         fontFamily: AppState.effectiveGlobalFontFamily,
                         fontFamilyFallback: AppState.textFontFallback,
@@ -227,6 +233,7 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
     child: Text(
       _text(metric, memoryText),
       maxLines: 1,
+      textHeightBehavior: AppState.crispTextHeightBehavior,
       textAlign: align,
       overflow: TextOverflow.ellipsis,
       style: metric == PerformanceMetric.memory
@@ -273,34 +280,62 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
         PerformanceMetric.memory => AppState.currentScheme.tertiary,
       },
     );
-    return Column(
-      key: ValueKey('performance_trends_$_mask'),
-      children: [
-        if (metrics.length == 1) ...[
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _label(metrics.single, memoryText),
-          ),
-          const SizedBox(height: 1),
-          Expanded(
-            child: SizedBox(
-              width: double.infinity,
-              child: trend(metrics.single),
-            ),
-          ),
-        ] else ...[
-          for (final metric in metrics)
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(flex: 5, child: _label(metric, memoryText)),
-                  const SizedBox(width: 4),
-                  Expanded(flex: 6, child: trend(metric)),
-                ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final style = DefaultTextStyle.of(context).style;
+        final measure = TextPainter(
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        );
+        var labelWidth = 0.0;
+        for (final metric in metrics) {
+          final reserved = switch (metric) {
+            PerformanceMetric.cpu => 'CPU 100%',
+            PerformanceMetric.gpu => 'GPU 100%',
+            PerformanceMetric.fps => 'FPS 9999',
+            PerformanceMetric.memory => '内存 999.9G',
+          };
+          for (final text in [_text(metric, memoryText), reserved]) {
+            measure.text = TextSpan(text: text, style: style);
+            measure.layout();
+            labelWidth = math.max(labelWidth, measure.width.ceilToDouble());
+          }
+        }
+        measure.dispose();
+        labelWidth = math.min(labelWidth, constraints.maxWidth * .5);
+        return Column(
+          key: ValueKey('performance_trends_$_mask'),
+          children: [
+            if (metrics.length == 1) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _label(metrics.single, memoryText),
               ),
-            ),
-        ],
-      ],
+              const SizedBox(height: 1),
+              Expanded(
+                child: SizedBox(
+                  width: double.infinity,
+                  child: trend(metrics.single),
+                ),
+              ),
+            ] else ...[
+              for (final metric in metrics)
+                Expanded(
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: labelWidth,
+                        child: _label(metric, memoryText),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(child: trend(metric)),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        );
+      },
     );
   }
 }

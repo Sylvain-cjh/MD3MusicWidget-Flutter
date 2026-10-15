@@ -16,11 +16,6 @@ import '../animations/media_motion_tokens.dart';
 import '../animations/layout_morph_motion.dart';
 
 int get _globalSlideDirection => AppState.trackNavigation.direction;
-String _lastMeasureKey = "";
-double _cachedTitleTargetWidth = 0.0;
-double _cachedTitleTargetHeight = 0.0;
-double _cachedArtistTargetWidth = 0.0;
-double _cachedArtistTargetHeight = 0.0;
 
 class ContinuousTrackControls extends StatefulWidget {
   final bool isVertical;
@@ -37,6 +32,9 @@ class ContinuousTrackControls extends StatefulWidget {
 }
 
 class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
+  String _lastMeasureKey = '';
+  double _cachedTitleTargetWidth = 0, _cachedTitleTargetHeight = 0;
+  double _cachedArtistTargetWidth = 0, _cachedArtistTargetHeight = 0;
   String _directionCoverIdentity = '';
   int _coverDirection = 1;
   late bool _hasTimeline;
@@ -48,6 +46,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     _hasTimeline = _timelineAvailable;
     AppState.playbackRevision.addListener(_handleTimelineAvailability);
     AppState.typographyRevision.addListener(_handleTypographyChanged);
+    AppState.fontsRevision.addListener(_handleTypographyChanged);
   }
 
   void _handleTypographyChanged() {
@@ -84,6 +83,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     _timelineHideTimer?.cancel();
     AppState.playbackRevision.removeListener(_handleTimelineAvailability);
     AppState.typographyRevision.removeListener(_handleTypographyChanged);
+    AppState.fontsRevision.removeListener(_handleTypographyChanged);
     super.dispose();
   }
 
@@ -255,20 +255,27 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
   }
 
   void _measureTexts(
+    BuildContext context,
     double w,
     Color textColor,
     double titleFontSize,
     double artistFontSize,
   ) {
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    final locale = Localizations.maybeLocaleOf(context);
     final String key =
-        "${AppState.trackTitle}|${AppState.artistName}|$w|$titleFontSize|$artistFontSize|${AppState.titleWeightValue}|${AppState.artistWeightValue}|${AppState.currentFontFamily}";
+        "${AppState.trackTitle}|${AppState.artistName}|$w|$titleFontSize|$artistFontSize|${AppState.titleWeightValue}|${AppState.artistWeightValue}|${AppState.currentFontFamily}|${AppState.fontsRevision.value}|${AppState.componentScale}|${scaler.scale(titleFontSize)}|${scaler.scale(artistFontSize)}|$direction|$locale";
     if (key == _lastMeasureKey) return;
     _lastMeasureKey = key;
 
     final titleStyle = TextStyle(
       fontSize: titleFontSize,
       fontWeight: AppState.titleWeight,
-      fontVariations: AppState.variationsFor(AppState.titleWeightValue),
+      fontVariations: AppState.variationsFor(
+        AppState.titleWeightValue,
+        fontSize: titleFontSize,
+      ),
       fontFamily: AppState.effectiveGlobalFontFamily,
       color: textColor,
       fontFamilyFallback: AppState.textFontFallback,
@@ -278,7 +285,10 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     final artistStyle = TextStyle(
       fontSize: artistFontSize,
       fontWeight: AppState.artistWeight,
-      fontVariations: AppState.variationsFor(AppState.artistWeightValue),
+      fontVariations: AppState.variationsFor(
+        AppState.artistWeightValue,
+        fontSize: artistFontSize,
+      ),
       fontFamily: AppState.effectiveGlobalFontFamily,
       color: textColor.withValues(alpha: 0.7),
       fontFamilyFallback: AppState.textFontFallback,
@@ -287,12 +297,16 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
 
     final titlePainter = TextPainter(
       text: TextSpan(text: AppState.trackTitle, style: titleStyle),
-      textDirection: TextDirection.ltr,
+      textDirection: direction,
+      textScaler: scaler,
+      locale: locale,
       textHeightBehavior: AppState.crispTextHeightBehavior,
     )..layout(maxWidth: w);
     final artistPainter = TextPainter(
       text: TextSpan(text: AppState.artistName, style: artistStyle),
-      textDirection: TextDirection.ltr,
+      textDirection: direction,
+      textScaler: scaler,
+      locale: locale,
       textHeightBehavior: AppState.crispTextHeightBehavior,
     )..layout(maxWidth: w);
 
@@ -528,7 +542,13 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
           devicePixelRatio,
         );
 
-        _measureTexts(snappedInfoW, textColor, titleFontSize, artistFontSize);
+        _measureTexts(
+          context,
+          snappedInfoW,
+          textColor,
+          titleFontSize,
+          artistFontSize,
+        );
         final bool hasTrackText = _hasTrackText(AppState.trackTitle);
         final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
         final Duration mediaTextTransitionDuration =
@@ -600,6 +620,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                       fontWeight: AppState.titleWeight,
                       fontVariations: AppState.variationsFor(
                         AppState.titleWeightValue,
+                        fontSize: titleFontSize,
                       ),
                       color: textColor.withValues(alpha: uiOpacity),
                       fontFamily: AppState.effectiveGlobalFontFamily,
@@ -658,6 +679,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                       fontWeight: AppState.artistWeight,
                       fontVariations: AppState.variationsFor(
                         AppState.artistWeightValue,
+                        fontSize: artistFontSize,
                       ),
                       color: subTextColor.withValues(alpha: uiOpacity),
                       fontFamily: AppState.effectiveGlobalFontFamily,
@@ -840,6 +862,8 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
             image: AppState.coverProvider,
             isPlaying: AppState.isPlaying,
             enable3D: AppState.enable3DCover,
+            layered: AppState.enableCoverLayers,
+            layerIdentity: _coverIdentity,
           ),
         ),
       ),

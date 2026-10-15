@@ -10,6 +10,7 @@
 
 #include "win32_window.h"
 #include "system_performance_monitor.h"
+#include "system_fonts.h"
 
 
 class FlutterWindow : public Win32Window {
@@ -26,6 +27,9 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  void RefreshFonts();
+  SystemFontCatalog font_catalog_;
+  bool font_refresh_pending_ = false;
   
   flutter::DartProject project_;
 
@@ -33,6 +37,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       system_performance_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> system_fonts_channel_;
   
   
   std::unique_ptr<SystemPerformanceMonitor> performance_monitor_;

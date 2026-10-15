@@ -16,7 +16,10 @@ class PlaybackTimeLabel extends StatefulWidget {
   static TextStyle get geometryStyle => TextStyle(
     fontSize: 11,
     fontWeight: AppState.artistWeight,
-    fontVariations: AppState.variationsFor(AppState.artistWeightValue),
+    fontVariations: AppState.variationsFor(
+      AppState.artistWeightValue,
+      fontSize: 11,
+    ),
     height: 1.2,
     fontFamily: AppState.effectiveGlobalFontFamily,
     fontFamilyFallback: AppState.textFontFallback,
@@ -82,12 +85,18 @@ class _PlaybackTimeLabelState extends State<PlaybackTimeLabel> {
     super.initState();
     AppState.playbackRevision.addListener(_refresh);
     AppState.typographyRevision.addListener(_styleChanged);
+    AppState.fontsRevision.addListener(_fontsChanged);
     AppState.backgroundRevision.addListener(_styleChanged);
     _refresh();
   }
 
   void _styleChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _fontsChanged() {
+    PlaybackTimeLabel._metrics.clear();
+    _styleChanged();
   }
 
   void _refresh() {
@@ -131,6 +140,7 @@ class _PlaybackTimeLabelState extends State<PlaybackTimeLabel> {
     _timer?.cancel();
     AppState.playbackRevision.removeListener(_refresh);
     AppState.typographyRevision.removeListener(_styleChanged);
+    AppState.fontsRevision.removeListener(_fontsChanged);
     AppState.backgroundRevision.removeListener(_styleChanged);
     super.dispose();
   }

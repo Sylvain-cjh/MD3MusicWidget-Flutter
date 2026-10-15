@@ -253,6 +253,8 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                               child: Text(
                                 displayText,
                                 maxLines: 2,
+                                textHeightBehavior:
+                                    AppState.crispTextHeightBehavior,
                                 overflow: TextOverflow.ellipsis,
                                 style: AppState.lyricsTextStyle(
                                   scheme.onSurface,

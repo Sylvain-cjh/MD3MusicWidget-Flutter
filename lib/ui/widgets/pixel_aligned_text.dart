@@ -18,11 +18,15 @@ class PixelAlignedText extends SingleChildRenderObjectWidget {
 }
 
 class PixelAlignedTextRenderBox extends RenderProxyBox {
-  PixelAlignedTextRenderBox(this._devicePixelRatio);
+  PixelAlignedTextRenderBox(double devicePixelRatio)
+    : _devicePixelRatio = _validRatio(devicePixelRatio);
+  static double _validRatio(double value) =>
+      value.isFinite && value > 0 ? value : 1;
   double _devicePixelRatio;
   Offset _paintCorrection = Offset.zero;
   bool _alignmentDirty = true;
   set devicePixelRatio(double value) {
+    value = _validRatio(value);
     if (value == _devicePixelRatio) return;
     _devicePixelRatio = value;
     _alignmentDirty = true;
@@ -38,15 +42,22 @@ class PixelAlignedTextRenderBox extends RenderProxyBox {
   @override
   void paint(PaintingContext context, Offset offset) {
     if (_alignmentDirty) {
+      
+      _paintCorrection = Offset.zero;
       final matrix = getTransformTo(null);
       final values = matrix.storage;
-      if (_devicePixelRatio > 0 &&
+      if (values.every((value) => value.isFinite) &&
+          values[0] > 0.000001 &&
           values[1].abs() < 0.000001 &&
           values[4].abs() < 0.000001 &&
           values[3].abs() < 0.000001 &&
           values[7].abs() < 0.000001 &&
-          values[5] > 0.000001) {
-        final baseline = child?.getDistanceToBaseline(TextBaseline.alphabetic);
+          values[5] > 0.000001 &&
+          (values[15] - 1).abs() < 0.000001) {
+        final baseline = child?.getDistanceToBaseline(
+          TextBaseline.alphabetic,
+          onlyReal: true,
+        );
         if (baseline != null) {
           final y = MatrixUtils.transformPoint(matrix, Offset(0, baseline)).dy;
           final correction =

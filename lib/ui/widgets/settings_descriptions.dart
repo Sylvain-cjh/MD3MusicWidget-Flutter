@@ -18,6 +18,7 @@ final class SettingsDescriptions {
   static const glow = '让封面铺满整个组件';
   static const glowMode = '选择你的色彩引擎';
   static const coverParallax = '3D大封面，用过都说好';
+  static const coverLayers = '自研分层模型，效果一般';
   static const rightCoverDarkening = '让它安静一点，把主角留给左边';
   static const rightCoverFadeLength = '拉长一点，更自然地融进背景';
   static const rightCoverFadeLinked = '一起调，或给横向、纵向各留一条滑块';

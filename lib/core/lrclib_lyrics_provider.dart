@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'lyrics_document.dart';
 import 'lyrics_http_client.dart';
+import 'lyrics_disk_cache.dart';
 import 'platform_provider.dart';
 
 final class LrclibLyricsProvider
@@ -14,12 +15,14 @@ final class LrclibLyricsProvider
   static const int _maximumResponseBytes = 2 * 1024 * 1024;
   final HttpClient _client;
   final Uri _endpoint;
+  final LyricsDiskCache? cache;
+  final Map<String, Future<LyricsDocument?>> _pending = {};
   final LinkedHashMap<String, (LyricsDocument?, DateTime)> _cache =
       LinkedHashMap<String, (LyricsDocument?, DateTime)>();
   Future<void> _tail = Future<void>.value();
   DateTime _nextRequestAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-  LrclibLyricsProvider({HttpClient? client, Uri? endpoint})
+  LrclibLyricsProvider({HttpClient? client, Uri? endpoint, this.cache})
     : _client = directLyricsHttpClient(client),
       _endpoint = endpoint ?? Uri.https('lrclib.net', '/api/get');
 
@@ -46,14 +49,26 @@ final class LrclibLyricsProvider
     if (cached != null && DateTime.now().isBefore(cached.$2)) {
       return Future<LyricsDocument?>.value(cached.$1);
     }
-    final request = _tail.then((_) async {
-      return _load(track, key);
+    return _pending.putIfAbsent(key, () {
+      final request = _tail
+          .then((_) async {
+            final stored = await cache?.get(track, providerId);
+            if (stored != null) {
+              _remember(key, stored, const Duration(hours: 2));
+              return stored;
+            }
+            final result = await _load(track, key);
+            if (result != null && !result.isEmpty && cache != null) {
+              unawaited(cache!.put(track, providerId, result));
+            }
+            return result;
+          })
+          .whenComplete(() {
+            _pending.remove(key);
+          });
+      _tail = request.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+      return request;
     });
-    _tail = request.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace stack) {},
-    );
-    return request;
   }
 
   Future<LyricsDocument?> _load(PlatformTrack track, String key) async {

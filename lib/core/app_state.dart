@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
+import 'app_typography.dart';
 
 import 'media_provider.dart';
 import 'lyrics_coordinator.dart';
@@ -109,7 +110,9 @@ class AppState {
   static String autoRepeatMode = '';
   static PlatformTrack? currentPlatformTrack;
   static final trackNavigation = TrackNavigationDirection();
-  static final LrclibLyricsProvider _lrclibLyrics = LrclibLyricsProvider();
+  static final LrclibLyricsProvider _lrclibLyrics = LrclibLyricsProvider(
+    cache: LyricsDiskCache(lyricsCacheStore),
+  );
   static final QqMusicPlaylistQueueProvider _qqPlaylist =
       QqMusicPlaylistQueueProvider(playlistInput: () => qqPlaylistLink);
   static final NeteasePlaylistQueueProvider _neteasePlaylist =
@@ -492,6 +495,7 @@ class AppState {
           lyrics.state.status == LyricsStatus.loading ||
           lyrics.state.status == LyricsStatus.ready);
   static const String defaultFontFamily = 'System Default';
+  static const String bundledFontFamily = 'MiSans';
   static const double defaultTitleWeightValue = 700.0;
   static const double defaultArtistWeightValue = 400.0;
   static const double defaultLyricsWeightValue = 500.0;
@@ -517,6 +521,7 @@ class AppState {
   static bool enableProgressAutoContrast = true;
   static bool enableOledTheme = false;
   static bool enable3DCover = true;
+  static bool enableCoverLayers = true;
   static CoverTransitionStyle coverTransitionStyle =
       CoverTransitionStyle.softSlide;
   static bool showPlaybackControls = true;
@@ -540,15 +545,15 @@ class AppState {
   static String currentFontFamily = defaultFontFamily;
   static String get effectiveGlobalFontFamily =>
       currentFontFamily == defaultFontFamily
-      ? 'Segoe UI Variable Text'
+      ? bundledFontFamily
       : currentFontFamily;
   static List<String> loadedSystemFonts = ['System Default'];
   static List<String> customFontPaths = [];
 
   
   
-  
   static const List<String> textFontFallback = [
+    bundledFontFamily,
     'Segoe UI Variable Text',
     'Segoe UI',
     'Microsoft YaHei UI',
@@ -576,9 +581,46 @@ class AppState {
 
   static FontWeight weightFor(double value) =>
       FontWeight.values[((value / 100).round() - 1).clamp(0, 8)];
-  static List<FontVariation> variationsFor(double value) => [
-    FontVariation('wght', value.clamp(100.0, 900.0)),
-  ];
+  static List<FontVariation> variationsFor(
+    double value, {
+    double? fontSize,
+    String? fontFamily,
+  }) => AppTypography.variations(
+    weight: value,
+    family: fontFamily ?? effectiveGlobalFontFamily,
+    fontSize: fontSize,
+    displayScale: componentScale,
+  );
+  static (ColorScheme, String, double)? _typographyThemeKey;
+  static ThemeData? _typographyTheme;
+  static ThemeData buildTheme() {
+    final key = (currentScheme, effectiveGlobalFontFamily, componentScale);
+    if (key == _typographyThemeKey && _typographyTheme != null) {
+      return _typographyTheme!;
+    }
+    final base = ThemeData(
+      useMaterial3: true,
+      colorScheme: currentScheme,
+      fontFamily: effectiveGlobalFontFamily,
+      fontFamilyFallback: textFontFallback,
+    );
+    _typographyThemeKey = key;
+    return _typographyTheme = base.copyWith(
+      textTheme: AppTypography.refineTheme(
+        base.textTheme,
+        family: effectiveGlobalFontFamily,
+        fallback: textFontFallback,
+        displayScale: componentScale,
+      ),
+      primaryTextTheme: AppTypography.refineTheme(
+        base.primaryTextTheme,
+        family: effectiveGlobalFontFamily,
+        fallback: textFontFallback,
+        displayScale: componentScale,
+      ),
+    );
+  }
+
   static FontWeight get titleWeight => weightFor(titleWeightValue);
   static FontWeight get artistWeight => weightFor(artistWeightValue);
   static FontWeight get lyricsWeight => weightFor(lyricsWeightValue);
@@ -586,15 +628,19 @@ class AppState {
       value.isFinite ? value.clamp(100.0, 900.0) : fallback;
   static String? get effectiveLyricsFontFamily {
     final family = lyricsUseThemeFont ? currentFontFamily : lyricsFontFamily;
-    if (family != 'System Default') return family;
-    return 'Segoe UI Variable Text';
+    if (family != defaultFontFamily) return family;
+    return bundledFontFamily;
   }
 
   static TextStyle lyricsTextStyle(Color color) => TextStyle(
     color: color,
     fontSize: lyricsFontSize,
     fontWeight: lyricsWeight,
-    fontVariations: variationsFor(lyricsWeightValue),
+    fontVariations: variationsFor(
+      lyricsWeightValue,
+      fontSize: lyricsFontSize,
+      fontFamily: effectiveLyricsFontFamily,
+    ),
     fontFamily: effectiveLyricsFontFamily,
     fontFamilyFallback: textFontFallback,
     height: 1.2,
@@ -831,27 +877,40 @@ class AppState {
     return fallback;
   }
 
-  static Future<void> loadSystemFonts() async {
+  static const _systemFontsChannel = MethodChannel(
+    'md3_music_widget/system_fonts',
+  );
+  static Future<void> loadSystemFonts({bool invalidateMetrics = false}) async {
     if (Platform.isWindows) {
+      _systemFontsChannel.setMethodCallHandler((call) async {
+        if (call.method == 'changed') {
+          await loadSystemFonts(invalidateMetrics: true);
+        }
+      });
       try {
-        final result = await Process.run('reg', [
-          'query',
-          r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts',
-        ]);
-        final lines = result.stdout.toString().split('\n');
-        bool changed = false;
-        for (var line in lines) {
-          if (line.contains('REG_SZ')) {
-            var name = line.split('REG_SZ')[0].trim();
-            name = name.replaceAll(RegExp(r'\s*\(.*\)$'), '');
-            if (name.isNotEmpty && !loadedSystemFonts.contains(name)) {
-              loadedSystemFonts.add(name);
-              changed = true;
-            }
+        final result = await _systemFontsChannel.invokeMethod<Object?>(
+          'families',
+        );
+        final families = result is List
+            ? result.whereType<String>()
+            : const <String>[];
+        var changed = false;
+        final known = loadedSystemFonts.toSet();
+        for (final family in families) {
+          final name = family.trim();
+          if (name.isNotEmpty && known.add(name)) {
+            loadedSystemFonts.add(name);
+            changed = true;
           }
         }
-        if (changed) fontsRevision.value++;
-      } catch (_) {}
+        if (changed || invalidateMetrics) fontsRevision.value++;
+      } on MissingPluginException {
+        
+      } on PlatformException catch (error) {
+        if (error.code != 'fonts_loading') {
+          debugPrint('System font enumeration unavailable: ${error.code}');
+        }
+      }
     }
   }
 
@@ -1088,6 +1147,9 @@ class AppState {
         enable3DCover = snapshot['enable3DCover'] is bool
             ? snapshot['enable3DCover'] as bool
             : true;
+        enableCoverLayers = snapshot['enableCoverLayers'] is bool
+            ? snapshot['enableCoverLayers'] as bool
+            : true;
         currentFontFamily = snapshot['currentFontFamily'] is String
             ? snapshot['currentFontFamily'] as String
             : 'System Default';
@@ -1267,6 +1329,7 @@ class AppState {
         p.getBool('enableProgressAutoContrast') ?? true;
     enableOledTheme = p.getBool('enableOledTheme') ?? false;
     enable3DCover = p.getBool('enable3DCover') ?? true;
+    enableCoverLayers = p.getBool('enableCoverLayers') ?? true;
     coverTransitionStyle = _enumFromIndex(
       CoverTransitionStyle.values,
       p.getInt('coverTransitionStyle'),
@@ -1386,6 +1449,7 @@ class AppState {
     'enableProgressAutoContrast': enableProgressAutoContrast,
     'enableOledTheme': enableOledTheme,
     'enable3DCover': enable3DCover,
+    'enableCoverLayers': enableCoverLayers,
     'coverTransitionStyle': coverTransitionStyle.name,
     'showPlaybackControls': showPlaybackControls,
     'trackTextAnimationsEnabled': trackTextAnimationsEnabled,

@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'lyrics_document.dart';
 import 'lyrics_http_client.dart';
+import 'lyrics_primary_attempt.dart';
 import 'platform_provider.dart';
 
 String _normalize(String value) =>
@@ -43,7 +44,11 @@ final class NeteasePublicClient {
             ..connectionTimeout = const Duration(seconds: 5)
             ..maxConnectionsPerHost = 2);
 
-  Future<Object?> get(String path, Map<String, String> query) async {
+  Future<Object?> get(
+    String path,
+    Map<String, String> query, {
+    LyricsPrimaryAttempt? attempt,
+  }) async {
     final uri = Uri.https('music.163.com', path, query);
     if (fetchJson != null) return fetchJson!(uri);
     HttpClientRequest? request;
@@ -52,7 +57,9 @@ final class NeteasePublicClient {
       () => request?.abort(TimeoutException('网易云歌词请求超时')),
     );
     try {
-      request = await _client.getUrl(uri).timeout(const Duration(seconds: 5));
+      request = attempt == null
+          ? await _client.getUrl(uri).timeout(const Duration(seconds: 5))
+          : await attempt.open(_client, uri);
       request.followRedirects = false;
       request.headers.set(HttpHeaders.refererHeader, 'https://music.163.com/');
       request.headers.set(
@@ -60,14 +67,16 @@ final class NeteasePublicClient {
         'Mozilla/5.0 MD3MusicWidget',
       );
       final response = await request.close().timeout(
-        const Duration(seconds: 5),
+        attempt?.remaining ?? const Duration(seconds: 5),
       );
       if (response.statusCode != HttpStatus.ok) {
         throw HttpException('网易云公开接口不可用：${response.statusCode}');
       }
       final bytes = BytesBuilder(copy: false);
       var size = 0;
-      await for (final chunk in response.timeout(const Duration(seconds: 5))) {
+      await for (final chunk in response.timeout(
+        attempt?.remaining ?? const Duration(seconds: 5),
+      )) {
         size += chunk.length;
         if (size > 4 * 1024 * 1024) throw const FormatException('网易云响应过大');
         bytes.add(chunk);
@@ -78,6 +87,7 @@ final class NeteasePublicClient {
       rethrow;
     } finally {
       deadline.cancel();
+      if (request != null) attempt?.release(request);
     }
   }
 
@@ -93,8 +103,12 @@ final class NeteaseLyricsProvider
   final LinkedHashMap<String, (LyricsDocument?, DateTime)> _cache =
       LinkedHashMap();
   final Map<String, Future<LyricsDocument?>> _pending = {};
-  NeteaseLyricsProvider({required this.fallback, NeteasePublicClient? client})
-    : client = client ?? NeteasePublicClient() {
+  final Duration primaryBudget;
+  NeteaseLyricsProvider({
+    required this.fallback,
+    NeteasePublicClient? client,
+    this.primaryBudget = const Duration(seconds: 4),
+  }) : client = client ?? NeteasePublicClient() {
     this.client.useDirectConnection();
   }
   @override
@@ -135,7 +149,8 @@ final class NeteaseLyricsProvider
       LyricsDocument? document;
       var failed = false;
       try {
-        document = await _loadPublic(track);
+        final attempt = LyricsPrimaryAttempt(primaryBudget);
+        document = await attempt.run(() => _loadPublic(track, attempt));
       } catch (_) {
         failed = true;
       }
@@ -155,12 +170,24 @@ final class NeteaseLyricsProvider
       }
       if (document != null) return document;
     }
-    return (await fallback.loadLyrics(
+    final resolved = (await fallback.loadLyrics(
       track,
     ))?.withSourceProviderId(fallback.id);
+    if (resolved != null && !resolved.isEmpty) {
+      _cache.remove(key);
+      _cache[key] = (resolved, DateTime.now().add(const Duration(hours: 2)));
+      while (_cache.length > 8) {
+        _cache.remove(_cache.keys.first);
+      }
+      return resolved;
+    }
+    return null;
   }
 
-  Future<LyricsDocument?> _loadPublic(PlatformTrack track) async {
+  Future<LyricsDocument?> _loadPublic(
+    PlatformTrack track,
+    LyricsPrimaryAttempt attempt,
+  ) async {
     final query = track.artist.isEmpty || track.artist == '未知歌手'
         ? track.title
         : '${track.title} ${track.artist}';
@@ -169,7 +196,7 @@ final class NeteaseLyricsProvider
       'type': '1',
       'limit': '20',
       'offset': '0',
-    });
+    }, attempt: attempt);
     if (json is! Map || json['code'] != 200 || json['result'] is! Map) {
       return null;
     }
@@ -210,7 +237,7 @@ final class NeteaseLyricsProvider
       'lv': '-1',
       'kv': '-1',
       'tv': '-1',
-    });
+    }, attempt: attempt);
     if (lyric is! Map || lyric['code'] != 200 || lyric['lrc'] is! Map) {
       return null;
     }

@@ -18,6 +18,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   flutter::DartProject project(L"data");
+  project.set_gpu_preference(flutter::GpuPreference::LowPowerPreference);
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();

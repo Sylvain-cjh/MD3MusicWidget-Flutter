@@ -17,7 +17,7 @@ publish_to: 'none'
 
 
 
-version: 0.12.8+1
+version: 1.0.0+1
 
 environment:
   sdk: ^3.12.2
@@ -67,6 +67,9 @@ flutter:
   
   uses-material-design: true
 
+  shaders:
+    - shaders/cover_layers.frag
+
   assets:
     - images/tray_icon.ico
     - images/tray_icon.png
@@ -74,6 +77,12 @@ flutter:
     - assets/brand/netease_cloud.png
     - assets/brand/lrclib.png
     - assets/brand/lawnicons/
+    - assets/fonts/MiSans-NOTICE.txt
+
+  fonts:
+    - family: MiSans
+      fonts:
+        - asset: assets/fonts/MiSansVF.ttf
 
   
   

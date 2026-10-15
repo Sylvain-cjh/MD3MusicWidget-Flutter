@@ -7,14 +7,42 @@ import 'platform_provider.dart';
 final class LyricsDiskCache {
   final PersistentCache store;
   LyricsDiskCache(this.store);
-  String _key(PlatformTrack track, String source) => jsonEncode([
+  String _legacyKey(PlatformTrack track, String source) => jsonEncode([
     source,
     track.title.trim().toLowerCase(),
     track.artist.trim().toLowerCase(),
   ]);
 
+  static String _text(String value) => value
+      .toLowerCase()
+      .replaceAll('（', '(')
+      .replaceAll('）', ')')
+      .replaceAll('［', '[')
+      .replaceAll('］', ']')
+      .replaceAll('：', ':')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  static String _artist(String value) {
+    final artists = value.split(RegExp(r'[/&、]')).map(_text).toList()..sort();
+    return jsonEncode(artists);
+  }
+
+  
+  
+  
+  static String keyFor(PlatformTrack track, String source) => jsonEncode([
+    'lyrics-v2',
+    source,
+    _text(track.title),
+    _artist(track.artist),
+  ]);
+
   Future<LyricsDocument?> get(PlatformTrack track, String source) async {
-    final bytes = await store.get(_key(track, source));
+    final key = keyFor(track, source);
+    var bytes = await store.get(key);
+    final legacy = bytes == null;
+    bytes ??= await store.get(_legacyKey(track, source));
     if (bytes == null) return null;
     try {
       final json = jsonDecode(utf8.decode(bytes));
@@ -50,31 +78,49 @@ final class LyricsDiskCache {
         artist: json['artist'] as String? ?? '',
         sourceProviderId: json['source'] as String? ?? source,
       );
-      return doc.isEmpty ? null : doc;
+      if (doc.isEmpty) return null;
+      if (legacy) await put(track, source, doc);
+      return doc;
     } catch (_) {
       return null;
     }
   }
 
-  Future<void> put(PlatformTrack track, String source, LyricsDocument doc) =>
-      store.put(
-        _key(track, source),
-        Uint8List.fromList(
-          utf8.encode(
-            jsonEncode({
-              'version': 1,
-              'durationMs': track.durationMs.isFinite ? track.durationMs : 0,
-              'lines': [
-                for (final line in doc.lines) [line.startMs, line.text],
-              ],
-              'plainText': doc.plainText,
-              'title': doc.title,
-              'artist': doc.artist,
-              'source': doc.sourceProviderId.isEmpty
-                  ? source
-                  : doc.sourceProviderId,
-            }),
-          ),
-        ),
-      );
+  Future<void> put(
+    PlatformTrack track,
+    String source,
+    LyricsDocument doc,
+  ) async {
+    if (doc.isEmpty) return;
+    final bytes = Uint8List.fromList(
+      utf8.encode(
+        jsonEncode({
+          'version': 1,
+          'cacheKeyVersion': 2,
+          'lookupTitle': track.title,
+          'lookupArtist': track.artist,
+          'durationMs': track.durationMs.isFinite ? track.durationMs : 0,
+          'lines': [
+            for (final line in doc.lines) [line.startMs, line.text],
+          ],
+          'plainText': doc.plainText,
+          'title': doc.title,
+          'artist': doc.artist,
+          'source': doc.sourceProviderId.isEmpty
+              ? source
+              : doc.sourceProviderId,
+        }),
+      ),
+    );
+    final writes = [store.put(keyFor(track, source), bytes)];
+    final actual = doc.sourceProviderId;
+    
+    
+    if (actual.isNotEmpty && actual != source) {
+      writes.add(store.put(keyFor(track, actual), bytes));
+    }
+    
+    
+    await Future.wait(writes);
+  }
 }

@@ -4,7 +4,9 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
+import '../../core/blurred_artwork_provider.dart';
 import 'right_artwork_surface.dart';
+import 'stable_artwork_surface.dart';
 
 class CircularRevealClipper extends CustomClipper<Path> {
   final double fraction;
@@ -168,11 +170,6 @@ class DynamicBackground extends StatefulWidget {
 
 class _DynamicBackgroundState extends State<DynamicBackground>
     with SingleTickerProviderStateMixin {
-  static final ImageFilter _glowBlur = ImageFilter.blur(
-    sigmaX: 80,
-    sigmaY: 80,
-    tileMode: TileMode.clamp,
-  );
   late AnimationController _revealController;
   late CurvedAnimation _revealAnimation;
   late bool _glowLayerVisible;
@@ -180,6 +177,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
   ImageProvider? _heldCoverProvider;
   String _heldCoverKey = 'fallback';
   Timer? _heldArtworkReleaseTimer;
+  bool _artworkAbsent = false;
   Object? _visualState;
   Object? _blurredArtworkKey;
   Widget? _blurredArtwork;
@@ -202,10 +200,12 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     AppState.isPlaying,
     AppState.corePlayerHeightOf(WidgetLayout.horizontal),
     AppState.glowHeaderHeightOf(_layout),
+    AppState.componentScale,
   );
 
   void _releaseHeldArtwork() {
     if (!mounted ||
+        !_artworkAbsent ||
         AppState.coverProvider != null ||
         AppState.bgBlurProvider != null) {
       return;
@@ -220,6 +220,16 @@ class _DynamicBackgroundState extends State<DynamicBackground>
       _blurredArtworkKey = null;
       _blurredArtwork = null;
     });
+  }
+
+  void _beginArtworkRelease() {
+    _heldArtworkReleaseTimer = null;
+    if (!mounted ||
+        AppState.coverProvider != null ||
+        AppState.bgBlurProvider != null) {
+      return;
+    }
+    setState(() => _artworkAbsent = true);
   }
 
   @override
@@ -263,8 +273,10 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     if (AppState.coverProvider == null && AppState.bgBlurProvider == null) {
       _heldArtworkReleaseTimer = Timer(
         const Duration(milliseconds: 500),
-        _releaseHeldArtwork,
+        _beginArtworkRelease,
       );
+    } else {
+      _artworkAbsent = false;
     }
     if (AppState.enableGlow) {
       _glowLayerVisible = true;
@@ -314,122 +326,59 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     double canvasH,
     double headerH,
   ) {
-    final double seamOverlap = (headerH * 0.16).clamp(24.0, 48.0);
-    final double headerBottom = (canvasH / 2) + (headerH / 2);
-    return Stack(
-      key: const ValueKey('waterfall-glow'),
-      fit: StackFit.expand,
-      children: [
-        Positioned(
-          
-          
-          
-          top: headerBottom - seamOverlap,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: FittedBox(
-            fit: BoxFit.fill,
-            clipBehavior: Clip.hardEdge,
-            child: SizedBox(
-              width: canvasW,
-              height: 1,
-              child: OverflowBox(
-                maxHeight: headerH,
-                minHeight: headerH,
-                alignment: Alignment.bottomCenter,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 800),
-                  child: Image(
-                    key: ValueKey('${coverKey}_stretch'),
-                    image: bgProvider,
-                    fit: BoxFit.cover,
-                    alignment: Alignment.topCenter,
-                    width: canvasW,
-                    filterQuality: FilterQuality.medium,
-                    gaplessPlayback: true,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          top: (canvasH / 2) - (headerH / 2),
-          left: 0,
-          right: 0,
-          height: headerH,
-          child: ShaderMask(
-            blendMode: BlendMode.dstIn,
-            shaderCallback: (bounds) => const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Colors.white, Colors.white, Colors.transparent],
-              stops: [0.0, 0.85, 1.0],
-            ).createShader(bounds),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 800),
-              child: Image(
-                key: ValueKey('${coverKey}_glow'),
-                image: bgProvider,
-                fit: BoxFit.cover,
-                alignment: Alignment.topCenter,
-                filterQuality: FilterQuality.medium,
-                gaplessPlayback: true,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
+    return _preparedGlow(bgProvider, coverKey, headerH, true);
   }
 
   Widget _buildWallpaperGlow(ImageProvider bgProvider, String coverKey) {
-    return AnimatedSwitcher(
-      key: const ValueKey('wallpaper-glow'),
-      duration: const Duration(milliseconds: 800),
-      child: Image(
-        key: ValueKey('${coverKey}_wallpaper'),
-        image: bgProvider,
-        fit: BoxFit.cover,
-        filterQuality: FilterQuality.medium,
-        gaplessPlayback: true,
-      ),
-    );
+    return _preparedGlow(bgProvider, coverKey, 0, false);
   }
+
+  Widget _preparedGlow(
+    ImageProvider source,
+    String identity,
+    double headerH,
+    bool waterfall,
+  ) => StableArtworkSurface(
+    fit: BoxFit.fill,
+    provider: BlurredArtworkProvider(
+      source: source,
+      identity: identity,
+      waterfall: waterfall,
+      headerHeight: headerH,
+      pixelScale:
+          MediaQuery.devicePixelRatioOf(context) *
+          AppState.componentScale *
+          1.25,
+    ),
+  );
 
   Widget _buildBlurredArtwork(
     ImageProvider provider,
     String coverKey,
     double headerHeight,
   ) {
-    final key = (provider, coverKey, AppState.glowMode, headerHeight);
+    final key = (
+      provider,
+      coverKey,
+      AppState.glowMode,
+      headerHeight,
+      MediaQuery.devicePixelRatioOf(context),
+      AppState.componentScale,
+    );
     if (_blurredArtworkKey != key) {
       _blurredArtworkKey = key;
       _blurredArtwork = RepaintBoundary(
         child: Transform.scale(
           scale: 1.25,
-          child: ImageFiltered(
-            imageFilter: _glowBlur,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 600),
-              switchInCurve: Curves.easeInOutCubic,
-              switchOutCurve: Curves.easeInOutCubic,
-              layoutBuilder: (currentChild, previousChildren) => Stack(
-                fit: StackFit.expand,
-                children: [...previousChildren, ?currentChild],
-              ),
-              child: AppState.glowMode == GlowMode.waterfall
-                  ? _buildWaterfallGlow(
-                      provider,
-                      coverKey,
-                      AppState.canvasWidth,
-                      AppState.canvasHeight,
-                      headerHeight,
-                    )
-                  : _buildWallpaperGlow(provider, coverKey),
-            ),
-          ),
+          child: AppState.glowMode == GlowMode.waterfall
+              ? _buildWaterfallGlow(
+                  provider,
+                  coverKey,
+                  AppState.canvasWidth,
+                  AppState.canvasHeight,
+                  headerHeight,
+                )
+              : _buildWallpaperGlow(provider, coverKey),
         ),
       );
     }
@@ -512,7 +461,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                 child: AnimatedOpacity(
                   duration: AppState.layoutSwitchDuration,
                   curve: Curves.easeOutCubic,
-                  opacity: activeBackground == null ? 0.0 : 1.0,
+                  opacity: _artworkAbsent ? 0.0 : 1.0,
                   onEnd: _releaseHeldArtwork,
                   child: _AnchoredBackgroundCanvas(
                     width: canvasW,
@@ -578,7 +527,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                 child: AnimatedOpacity(
                   opacity:
                       (widget.verticalLayout ?? AppState.isVertical) ||
-                          AppState.coverProvider == null
+                          _artworkAbsent
                       ? 0.0
                       : 1.0,
                   duration: AppState.layoutSwitchDuration,

@@ -39,7 +39,8 @@ class AdaptiveMediaText extends StatelessWidget {
         maxLines: maxLines,
         overflow: overflow,
         softWrap: softWrap,
-        textHeightBehavior: textHeightBehavior,
+        textHeightBehavior:
+            textHeightBehavior ?? AppState.crispTextHeightBehavior,
         textScaler: textScaler,
         textDirection: textDirection,
         style: style.copyWith(

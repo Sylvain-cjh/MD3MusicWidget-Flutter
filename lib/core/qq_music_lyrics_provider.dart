@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'lyrics_document.dart';
 import 'lyrics_http_client.dart';
+import 'lyrics_primary_attempt.dart';
 import 'lrclib_lyrics_provider.dart';
 import 'platform_provider.dart';
 
@@ -16,6 +17,8 @@ final class QqMusicLyricsProvider
   final LrclibLyricsProvider _fallback;
   final Uri _searchEndpoint;
   final Uri _lyricEndpoint;
+  final Duration primaryBudget;
+  final Map<String, Future<LyricsDocument?>> _pending = {};
   final LinkedHashMap<String, (LyricsDocument?, DateTime)> _cache =
       LinkedHashMap<String, (LyricsDocument?, DateTime)>();
 
@@ -24,6 +27,7 @@ final class QqMusicLyricsProvider
     required this._fallback,
     Uri? searchEndpoint,
     Uri? lyricEndpoint,
+    this.primaryBudget = const Duration(seconds: 4),
   }) : _client = directLyricsHttpClient(client),
        _searchEndpoint =
            searchEndpoint ??
@@ -47,18 +51,30 @@ final class QqMusicLyricsProvider
   }
 
   @override
-  Future<LyricsDocument?> loadLyrics(PlatformTrack track) async {
-    if (!accepts(track)) return null;
+  Future<LyricsDocument?> loadLyrics(PlatformTrack track) {
+    if (!accepts(track)) return Future.value(null);
     final key =
         '${_key(track.title)}|${_key(track.artist)}|${(track.durationMs / 1000).round()}';
+    return _pending.putIfAbsent(
+      key,
+      () => _load(track, key).whenComplete(() {
+        _pending.remove(key);
+      }),
+    );
+  }
+
+  Future<LyricsDocument?> _load(PlatformTrack track, String key) async {
     final cached = _cache[key];
     if (cached != null && DateTime.now().isBefore(cached.$2)) {
       if (cached.$1 != null) {
-        return cached.$1!.withSourceProviderId(providerId);
+        return cached.$1;
       }
     } else {
       try {
-        final fromQq = await _loadFromQq(track);
+        final attempt = LyricsPrimaryAttempt(primaryBudget);
+        final fromQq = (await attempt.run(
+          () => _loadFromQq(track, attempt),
+        ))?.withSourceProviderId(providerId);
         _remember(
           key,
           fromQq,
@@ -66,13 +82,19 @@ final class QqMusicLyricsProvider
               ? const Duration(minutes: 5)
               : const Duration(hours: 2),
         );
-        if (fromQq != null) return fromQq.withSourceProviderId(providerId);
+        if (fromQq != null) return fromQq;
       } catch (_) {
         _remember(key, null, const Duration(minutes: 1));
       }
     }
-    final fallback = await _fallback.loadLyrics(track);
-    return fallback?.withSourceProviderId(_fallback.id);
+    final fallback = (await _fallback.loadLyrics(
+      track,
+    ))?.withSourceProviderId(_fallback.id);
+    if (fallback != null && !fallback.isEmpty) {
+      _remember(key, fallback, const Duration(hours: 2));
+      return fallback;
+    }
+    return null;
   }
 
   void _remember(String key, LyricsDocument? document, Duration duration) {
@@ -81,7 +103,10 @@ final class QqMusicLyricsProvider
     if (_cache.length > 8) _cache.remove(_cache.keys.first);
   }
 
-  Future<LyricsDocument?> _loadFromQq(PlatformTrack track) async {
+  Future<LyricsDocument?> _loadFromQq(
+    PlatformTrack track,
+    LyricsPrimaryAttempt attempt,
+  ) async {
     final title = track.title.trim();
     final artist = track.artist.trim();
     final query = artist.isEmpty || artist == '未知歌手' ? title : '$title $artist';
@@ -89,6 +114,7 @@ final class QqMusicLyricsProvider
       _searchEndpoint.replace(
         queryParameters: {'format': 'json', 'p': '1', 'n': '20', 'w': query},
       ),
+      attempt,
     );
     if (search is! Map) return null;
     final data = search['data'];
@@ -133,6 +159,7 @@ final class QqMusicLyricsProvider
           'g_tk': '5381',
         },
       ),
+      attempt,
     );
     if (lyric is! Map || lyric['retcode'] != 0) return null;
     final lrc = lyric['lyric']?.toString() ?? '';
@@ -141,30 +168,35 @@ final class QqMusicLyricsProvider
     return document.isEmpty ? null : document;
   }
 
-  Future<dynamic> _getJson(Uri uri) async {
-    final request = await _client
-        .getUrl(uri)
-        .timeout(const Duration(seconds: 4));
-    request.headers.set(
-      HttpHeaders.userAgentHeader,
-      'Mozilla/5.0 MD3MusicWidget/0.10.1',
-    );
-    request.headers.set(HttpHeaders.refererHeader, 'https://y.qq.com/');
-    final response = await request.close().timeout(const Duration(seconds: 4));
-    if (response.statusCode != HttpStatus.ok) {
-      await response.drain<void>().timeout(const Duration(seconds: 2));
-      return null;
-    }
-    final builder = BytesBuilder(copy: false);
-    var total = 0;
-    await for (final chunk in response.timeout(const Duration(seconds: 5))) {
-      total += chunk.length;
-      if (total > _maxBytes) {
-        throw const FormatException('QQ lyric response is too large');
+  Future<dynamic> _getJson(Uri uri, LyricsPrimaryAttempt attempt) async {
+    final request = await attempt.open(_client, uri);
+    try {
+      request.headers.set(
+        HttpHeaders.userAgentHeader,
+        'Mozilla/5.0 MD3MusicWidget/0.10.1',
+      );
+      request.headers.set(HttpHeaders.refererHeader, 'https://y.qq.com/');
+      final response = await request.close().timeout(attempt.remaining);
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<void>().timeout(attempt.remaining);
+        return null;
       }
-      builder.add(chunk);
+      final builder = BytesBuilder(copy: false);
+      var total = 0;
+      await for (final chunk in response.timeout(attempt.remaining)) {
+        total += chunk.length;
+        if (total > _maxBytes) {
+          throw const FormatException('QQ lyric response is too large');
+        }
+        builder.add(chunk);
+      }
+      return jsonDecode(utf8.decode(builder.takeBytes()));
+    } catch (_) {
+      request.abort();
+      rethrow;
+    } finally {
+      attempt.release(request);
     }
-    return jsonDecode(utf8.decode(builder.takeBytes()));
   }
 
   static String _key(String value) => value.toLowerCase().replaceAll(

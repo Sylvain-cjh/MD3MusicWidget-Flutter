@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -5,6 +6,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../animations/cover_parallax_motion.dart';
+import '../animations/cover_layer_handoff.dart';
+import '../animations/media_motion_tokens.dart';
+import '../../core/cover_layers.dart';
 import 'smooth_rounded_clip.dart';
 
 class CoverParallax extends StatefulWidget {
@@ -15,6 +19,9 @@ class CoverParallax extends StatefulWidget {
   final ImageProvider? image;
   final bool isPlaying;
   final bool enable3D;
+  final bool layered;
+  final Object? layerIdentity;
+  final CoverLayerService? layerService;
 
   const CoverParallax({
     super.key,
@@ -25,6 +32,9 @@ class CoverParallax extends StatefulWidget {
     required this.image,
     required this.isPlaying,
     required this.enable3D,
+    this.layered = false,
+    this.layerIdentity,
+    this.layerService,
   });
 
   @override
@@ -32,19 +42,37 @@ class CoverParallax extends StatefulWidget {
 }
 
 class CoverParallaxState extends State<CoverParallax>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final CoverParallaxMotion motion;
-  late final _CoverMaterialPainter _material;
+  ui.FragmentShader? _sceneShader;
+  _CoverRaster? _raster;
+  late final AnimationController _layerReveal;
+  late final Listenable _layerSignal;
+  CoverLayerLease? _layers;
+  Object? _requestedLayer;
+  int _layerSerial = 0;
+  Timer? _layerRetry;
   Offset? _lastPointer;
   bool _hovered = false;
   bool _reduced = false;
-  int get materialShaderBuilds => _material.shaderBuilds;
+  int get materialShaderBuilds => 0;
+  @visibleForTesting
+  double get layerDepth => CoverLayerHandoff.depth(_layerReveal.value);
+  @visibleForTesting
+  double get layerSurfaceMix =>
+      CoverLayerHandoff.surfaceMix(_layerReveal.value);
+  @visibleForTesting
+  bool get layerHandoffAnimating => _layerReveal.isAnimating;
 
   @override
   void initState() {
     super.initState();
     motion = CoverParallaxMotion(this);
-    _material = _CoverMaterialPainter(motion);
+    _layerReveal = AnimationController(
+      vsync: this,
+      duration: MediaMotionTokens.layerHandoff,
+    );
+    _layerSignal = Listenable.merge([motion, _layerReveal]);
   }
 
   @override
@@ -52,12 +80,21 @@ class CoverParallaxState extends State<CoverParallax>
     super.didChangeDependencies();
     _reduced = MediaQuery.disableAnimationsOf(context);
     motion.reduceMotion(_reduced);
-    _material.hairline = RoundedRasterScale.hairline(context);
+    if (_reduced) _releaseLayers();
+    if (!_reduced && _hovered) _ensureLayers();
   }
 
   @override
   void didUpdateWidget(covariant CoverParallax oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.image != widget.image ||
+        oldWidget.layerIdentity != widget.layerIdentity ||
+        oldWidget.layered != widget.layered ||
+        oldWidget.enable3D != widget.enable3D ||
+        oldWidget.layerService != widget.layerService) {
+      _releaseLayers();
+      if (_hovered) _ensureLayers();
+    }
     if (oldWidget.size != widget.size ||
         oldWidget.enable3D != widget.enable3D) {
       _setTarget();
@@ -78,6 +115,88 @@ class CoverParallaxState extends State<CoverParallax>
     _hovered = true;
     _lastPointer = event.localPosition;
     _setTarget();
+    _ensureLayers();
+  }
+
+  void _releaseLayers() {
+    _layerRetry?.cancel();
+    _layerRetry = null;
+    _layerSerial++;
+    _requestedLayer = null;
+    _layerReveal.value = 0;
+    _sceneShader?.dispose();
+    _sceneShader = null;
+    _raster?.dispose();
+    _raster = null;
+    _layers?.dispose();
+    _layers = null;
+  }
+
+  void _ensureLayers() {
+    final image = widget.image;
+    if (!widget.layered || !widget.enable3D || _reduced || image == null) {
+      return;
+    }
+    final identity = widget.layerIdentity ?? image;
+    if (_requestedLayer == identity) return;
+    _requestedLayer = identity;
+    final serial = ++_layerSerial;
+    final service = widget.layerService ?? CoverLayerService.instance;
+    
+    
+    unawaited(
+      service.acquire(identity, image).then((lease) {
+        if (!mounted || serial != _layerSerial) {
+          lease?.dispose();
+          return;
+        }
+        if (lease == null) {
+          if (!service.hasResult(identity)) {
+            _requestedLayer = null;
+            _layerRetry?.cancel();
+            _layerRetry = Timer(const Duration(milliseconds: 300), () {
+              _layerRetry = null;
+              if (mounted && _hovered) _ensureLayers();
+            });
+          }
+          return;
+        }
+        _CoverRaster? raster;
+        ui.FragmentShader? shader;
+        try {
+          final program = lease.layers.program;
+          if (program == null) {
+            lease.dispose();
+            return;
+          }
+          shader = program.fragmentShader();
+          raster = _CoverRaster.borrow(lease.layers);
+        } catch (_) {
+          shader?.dispose();
+          raster?.dispose();
+          lease.dispose();
+          return;
+        }
+        setState(() {
+          _sceneShader?.dispose();
+          _sceneShader = shader;
+          _raster?.dispose();
+          _raster = raster;
+          _layers?.dispose();
+          _layers = lease;
+        });
+        
+        
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || serial != _layerSerial || _reduced) return;
+          if (!_hovered && motion.position.distanceSquared < .000001) {
+            _layerReveal.value = 1;
+          } else {
+            _layerReveal.forward(from: 0);
+          }
+        });
+      }, onError: (Object _) {}),
+    );
   }
 
   void _hover(PointerHoverEvent event) {
@@ -87,6 +206,8 @@ class CoverParallaxState extends State<CoverParallax>
   }
 
   void _exit(PointerExitEvent event) {
+    _layerRetry?.cancel();
+    _layerRetry = null;
     _hovered = false;
     _lastPointer = null;
     _setTarget();
@@ -107,17 +228,45 @@ class CoverParallaxState extends State<CoverParallax>
   @override
   Widget build(BuildContext context) {
     final size = widget.size;
-    _material.enabled = widget.enable3D && !_reduced;
-    _material.radius = widget.borderRadius;
     final artwork = RepaintBoundary(
       child: widget.image == null
           ? ColoredBox(color: widget.backgroundColor)
           : Image(
+              key: const ValueKey('cover_source_artwork'),
               image: widget.image!,
               fit: BoxFit.cover,
               filterQuality: FilterQuality.medium,
               gaplessPlayback: true,
             ),
+    );
+    final hasScene =
+        _layers != null &&
+        _sceneShader != null &&
+        _raster != null &&
+        widget.layered &&
+        widget.enable3D &&
+        !_reduced;
+    final layeredArtwork = Stack(
+      fit: StackFit.expand,
+      children: [
+        
+        
+        Offstage(offstage: hasScene, child: artwork),
+        if (hasScene)
+          IgnorePointer(
+            child: CustomPaint(
+              key: const ValueKey('cover_separated_layers'),
+              painter: _CoverLayersPainter(
+                _raster!,
+                motion,
+                _layerReveal,
+                _layerSignal,
+                _sceneShader!,
+                MediaQuery.devicePixelRatioOf(context),
+              ),
+            ),
+          ),
+      ],
     );
     Widget shadow(double alpha, double blur, double y) => RepaintBoundary(
       child: DecoratedBox(
@@ -143,7 +292,7 @@ class CoverParallaxState extends State<CoverParallax>
         children: [
           AnimatedBuilder(
             animation: motion,
-            child: artwork,
+            child: layeredArtwork,
             builder: (context, child) => Transform.translate(
               key: const ValueKey('cover_artwork_layer'),
               offset:
@@ -172,7 +321,6 @@ class CoverParallaxState extends State<CoverParallax>
                 child: child,
               ),
             ),
-          IgnorePointer(child: CustomPaint(painter: _material)),
           RepaintBoundary(
             child: AnimatedContainer(
               duration: _reduced
@@ -188,6 +336,7 @@ class CoverParallaxState extends State<CoverParallax>
       ),
     );
     return MouseRegion(
+      hitTestBehavior: HitTestBehavior.opaque,
       onEnter: _enter,
       onHover: _hover,
       onExit: _exit,
@@ -219,7 +368,9 @@ class CoverParallaxState extends State<CoverParallax>
                   key: const ValueKey('cover_parallax_transform'),
                   transform: matrix,
                   alignment: Alignment.center,
-                  filterQuality: hover > 0.001 ? FilterQuality.medium : null,
+                  
+                  
+                  filterQuality: null,
                   child: face,
                 ),
               ],
@@ -232,69 +383,134 @@ class CoverParallaxState extends State<CoverParallax>
 
   @override
   void dispose() {
-    _material.disposeShaders();
+    _layerRetry?.cancel();
+    _layerSerial++;
+    _layers?.dispose();
+    _layerReveal.dispose();
+    _sceneShader?.dispose();
+    _raster?.dispose();
     motion.dispose();
     super.dispose();
   }
 }
 
-class _CoverMaterialPainter extends CustomPainter {
-  final CoverParallaxMotion motion;
-  bool enabled = true;
-  BorderRadius radius = BorderRadius.zero;
-  double hairline = 1;
-  ui.Shader? _wash, _highlight;
-  final Paint _paint = Paint();
-  int shaderBuilds = 0;
 
-  _CoverMaterialPainter(this.motion) : super(repaint: motion);
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (!enabled || motion.hover < 0.001 || size.isEmpty) return;
-    if (_wash == null) {
-      shaderBuilds++;
-      _wash = ui.Gradient.linear(
-        Offset.zero,
-        const Offset(1, 1),
-        const [Color(0x1AFFFFFF), Colors.transparent, Color(0x12000000)],
-        const [0, 0.48, 1],
-      );
-      _highlight = ui.Gradient.radial(const Offset(0.25, 0.16), 0.75, const [
-        Color(0x0DFFFFFF),
-        Colors.transparent,
-      ]);
-    }
-    canvas.save();
-    canvas.scale(size.width, size.height);
-    canvas.translate(motion.position.dx * 0.12, motion.position.dy * 0.10);
-    _paint
-      ..style = PaintingStyle.fill
-      ..shader = _wash
-      ..color = Colors.white.withValues(alpha: motion.hover);
-    canvas.drawRect(const Rect.fromLTWH(-0.25, -0.25, 1.5, 1.5), _paint);
-    _paint.shader = _highlight;
-    canvas.drawRect(const Rect.fromLTWH(-0.25, -0.25, 1.5, 1.5), _paint);
-    canvas.restore();
-    _paint
-      ..shader = null
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = hairline
-      ..color = Colors.white.withValues(alpha: 0.12 * motion.hover);
-    canvas.drawRRect(
-      radius.toRRect((Offset.zero & size).deflate(hairline / 2)),
-      _paint,
+class _CoverRaster {
+  final ui.Image original, mask, background;
+  final ui.Image? priority, textRepair;
+  _CoverRaster(
+    this.original,
+    this.mask,
+    this.background, {
+    this.priority,
+    this.textRepair,
+  });
+  static _CoverRaster borrow(CoverLayers layers) {
+    return _CoverRaster(
+      layers.original.clone(),
+      layers.mask.clone(),
+      layers.background.clone(),
+      priority: layers.priority?.clone(),
+      textRepair: layers.textRepair?.clone(),
     );
   }
 
-  @override
-  bool shouldRepaint(covariant _CoverMaterialPainter old) =>
-      old.motion != motion || old.radius != radius || old.enabled != enabled;
-
-  void disposeShaders() {
-    _paint.shader = null;
-    _wash?.dispose();
-    _highlight?.dispose();
-    _wash = _highlight = null;
+  void dispose() {
+    original.dispose();
+    mask.dispose();
+    background.dispose();
+    priority?.dispose();
+    textRepair?.dispose();
   }
+}
+
+class _CoverLayersPainter extends CustomPainter {
+  final _CoverRaster layers;
+  final CoverParallaxMotion motion;
+  final Animation<double> reveal;
+  final ui.FragmentShader shader;
+  final double pixelRatio;
+  final Paint _paint = Paint()..filterQuality = FilterQuality.medium;
+  final Paint _sourcePaint = Paint()..filterQuality = FilterQuality.medium;
+  final Paint _mixPaint = Paint()..blendMode = BlendMode.plus;
+  _CoverLayersPainter(
+    this.layers,
+    this.motion,
+    this.reveal,
+    Listenable signal,
+    this.shader,
+    this.pixelRatio,
+  ) : super(repaint: signal) {
+    shader.setImageSampler(0, layers.original);
+    shader.setImageSampler(1, layers.mask);
+    shader.setImageSampler(2, layers.background);
+    shader.setImageSampler(3, layers.priority ?? layers.mask);
+    shader.setImageSampler(4, layers.textRepair ?? layers.background);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final input = Size(
+      layers.original.width.toDouble(),
+      layers.original.height.toDouble(),
+    );
+    final fit = applyBoxFit(BoxFit.cover, input, size);
+    final source = Alignment.center.inscribe(fit.source, Offset.zero & input);
+    final bounds = Offset.zero & size;
+    final mix = CoverLayerHandoff.surfaceMix(reveal.value);
+    if (mix == 0) {
+      
+      _sourcePaint.color = Colors.white;
+      canvas.drawImageRect(layers.original, source, bounds, _sourcePaint);
+      return;
+    }
+    shader
+      ..setFloat(0, size.width)
+      ..setFloat(1, size.height)
+      ..setFloat(2, source.left / input.width)
+      ..setFloat(3, source.top / input.height)
+      ..setFloat(4, source.width / input.width)
+      ..setFloat(5, source.height / input.height)
+      ..setFloat(6, motion.position.dx)
+      ..setFloat(7, motion.position.dy)
+      ..setFloat(8, CoverLayerHandoff.depth(reveal.value));
+    shader
+      ..setFloat(9, layers.original.width.toDouble())
+      ..setFloat(10, layers.original.height.toDouble())
+      ..setFloat(11, layers.mask.width.toDouble())
+      ..setFloat(12, layers.mask.height.toDouble())
+      ..setFloat(13, layers.background.width.toDouble())
+      ..setFloat(14, layers.background.height.toDouble())
+      ..setFloat(
+        15,
+        layers.priority != null && layers.textRepair != null ? 1 : 0,
+      )
+      ..setFloat(16, pixelRatio * 1.14 * (1.0 + motion.hover * 0.055));
+    _paint.shader = shader;
+    if (mix < 1) {
+      
+      
+      
+      canvas.saveLayer(bounds, Paint());
+      _sourcePaint.color = Colors.white.withValues(alpha: 1 - mix);
+      canvas.drawImageRect(layers.original, source, bounds, _sourcePaint);
+      _mixPaint.color = Colors.white.withValues(alpha: mix);
+      canvas.saveLayer(bounds, _mixPaint);
+      canvas.drawRect(bounds, _paint);
+      canvas.restore();
+      canvas.restore();
+    } else {
+      canvas.drawRect(bounds, _paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CoverLayersPainter old) =>
+      old.layers != layers ||
+      old.motion != motion ||
+      old.reveal != reveal ||
+      old.shader != shader ||
+      old.pixelRatio != pixelRatio;
 }

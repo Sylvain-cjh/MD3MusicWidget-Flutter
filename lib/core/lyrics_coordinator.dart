@@ -54,6 +54,7 @@ final class LyricsCoordinator extends ChangeNotifier {
   int _providerRevision = -1;
   String? _selectedProviderId;
   int _generation = 0;
+  int? _cacheLookupGeneration;
   double _positionMs = 0;
   bool _disposed = false;
   final LyricsDiskCache? cache;
@@ -132,22 +133,31 @@ final class LyricsCoordinator extends ChangeNotifier {
       );
       return;
     }
-    _setState(
-      LyricsState(
-        status: LyricsStatus.loading,
-        providerId: provider.id,
-        maximumAttempts: maximumAttempts,
-      ),
-    );
     try {
       LyricsDocument? document;
       final useDisk = provider.id != 'localLrc';
       if (!force && useDisk && cache != null) {
-        document = await cache!.get(track!, provider.id);
+        _cacheLookupGeneration = generation;
+        try {
+          document = await cache!.get(track!, provider.id);
+        } finally {
+          if (_cacheLookupGeneration == generation) {
+            _cacheLookupGeneration = null;
+          }
+        }
       }
       final restoredFromDisk = document != null;
       if (_disposed || generation != _generation) return;
       if (document == null) {
+        
+        
+        _setState(
+          LyricsState(
+            status: LyricsStatus.loading,
+            providerId: provider.id,
+            maximumAttempts: maximumAttempts,
+          ),
+        );
         for (var attempt = 1; attempt <= maximumAttempts; attempt++) {
           if (_disposed || generation != _generation) return;
           if (attempt > 1) {
@@ -240,6 +250,7 @@ final class LyricsCoordinator extends ChangeNotifier {
   void setPositionMs(double positionMs) {
     if (!positionMs.isFinite) return;
     _positionMs = positionMs < 0 ? 0 : positionMs;
+    if (_cacheLookupGeneration == _generation) return;
     final document = _state.document;
     if (document == null) return;
     final index = document.lineIndexAt(_positionMs);

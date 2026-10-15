@@ -1,4 +1,5 @@
 #include "flutter_window.h"
+#include "system_fonts.h"
 
 #include <optional>
 #include <cstdint>
@@ -7,6 +8,14 @@
 #include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
+
+namespace { constexpr UINT kFontsReady = WM_APP + 83; }
+void FlutterWindow::RefreshFonts() {
+  const HWND handle = GetHandle();
+  if (!font_catalog_.Refresh([handle] { PostMessageW(handle, kFontsReady, 0, 0); })) {
+    font_refresh_pending_ = true;
+  }
+}
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -30,6 +39,22 @@ bool FlutterWindow::OnCreate() {
   }
   performance_monitor_ = std::make_unique<SystemPerformanceMonitor>();
   RegisterPlugins(flutter_controller_->engine());
+  system_fonts_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "md3_music_widget/system_fonts",
+          &flutter::StandardMethodCodec::GetInstance());
+  system_fonts_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() != "families") { result->NotImplemented(); return; }
+        bool ready = false;
+        const auto families = font_catalog_.Snapshot(&ready);
+        if (!ready) { result->Error("fonts_loading", "System families are loading in the background"); return; }
+        flutter::EncodableList names;
+        for (const auto& family : families) names.emplace_back(family);
+        result->Success(flutter::EncodableValue(names));
+      });
+  RefreshFonts();
   system_performance_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(),
@@ -127,6 +152,12 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  font_catalog_.Wait();
+  font_refresh_pending_ = false;
+  if (system_fonts_channel_) {
+    system_fonts_channel_->SetMethodCallHandler(nullptr);
+    system_fonts_channel_.reset();
+  }
   if (performance_monitor_) {
     performance_monitor_->Shutdown();
     performance_monitor_.reset();
@@ -157,8 +188,17 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case kFontsReady:
+      if (font_refresh_pending_ && system_fonts_channel_) {
+        font_refresh_pending_ = false;
+        RefreshFonts();
+      } else if (system_fonts_channel_) {
+        system_fonts_channel_->InvokeMethod("changed", nullptr);
+      }
+      return 0;
     case WM_FONTCHANGE:
-      flutter_controller_->engine()->ReloadSystemFonts();
+      if (flutter_controller_) flutter_controller_->engine()->ReloadSystemFonts();
+      if (system_fonts_channel_) RefreshFonts();
       break;
   }
 

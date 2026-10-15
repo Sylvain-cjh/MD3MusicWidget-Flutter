@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../core/app_typography.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -570,24 +571,14 @@ class _PlayerViewState extends State<PlayerView>
     final coverReady = await _precacheArtwork(entry.cover);
     if (!mounted || version != _latestCoverVersion || !coverReady) {
       unawaited(_artworkResources.retire(entry.cover));
-      if (mounted &&
-          version == _latestCoverVersion &&
-          version != AppState.currentCoverVersion &&
-          !coverReady) {
-        await _clearCover();
-      }
+      
+      
       return;
     }
     final backgroundReady = await _precacheArtwork(entry.background);
     if (!mounted || version != _latestCoverVersion || !backgroundReady) {
       unawaited(_artworkResources.retire(entry.cover));
       unawaited(_artworkResources.retire(entry.background));
-      if (mounted &&
-          version == _latestCoverVersion &&
-          version != AppState.currentCoverVersion &&
-          !backgroundReady) {
-        await _clearCover();
-      }
       return;
     }
     _artworkResources.rememberPreparedArtwork(version, entry);
@@ -2593,84 +2584,84 @@ class _PlayerViewState extends State<PlayerView>
     );
 
     return AnimatedTheme(
-      data: ThemeData(
-        useMaterial3: true,
-        colorScheme: AppState.currentScheme,
-        fontFamily: AppState.effectiveGlobalFontFamily,
-        fontFamilyFallback: AppState.textFontFallback,
-      ),
+      data: ThemeData(useMaterial3: true, colorScheme: AppState.currentScheme),
       duration: const Duration(milliseconds: 600),
       curve: Curves.easeInOutCubic,
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: SizedBox(
-          width: double.infinity,
-          height: double.infinity,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              AnimatedBuilder(
-                animation: _layoutMotion,
-                child: mainStage,
-                builder: (context, child) {
-                  final frame = _layoutMotion.active
-                      ? _layoutMotion.frameInViewport(
-                          MediaQuery.sizeOf(context),
-                          MediaQuery.devicePixelRatioOf(context),
-                        )
-                      : _layoutPreparing
-                      ? _layoutHeldFrame
-                      : null;
-                  final rightAnchor =
-                      anchorRight ||
-                      (_menuSide == 'left' &&
-                          (_isMenuOpen || _menuResizeInFlight));
-                  return Positioned(
-                    left: frame?.left ?? (rightAnchor ? null : _leftPadding),
-                    right: frame == null && rightAnchor ? 0 : null,
-                    top: frame?.top ?? 0,
-                    child: child!,
-                  );
-                },
-              ),
-              if (_isMenuOpen)
-                Positioned(
-                  left: _menuSide == "left" ? 0 : AppState.baseWindowWidth,
-                  top: _menuTop,
-                  width: AppState.menuExtraSpace,
-                  child: OverflowBox(
-                    fit: OverflowBoxFit.deferToChild,
-                    minWidth: AppState.unscaledMenuExtraSpace,
-                    maxWidth: AppState.unscaledMenuExtraSpace,
-                    alignment: _menuSide == 'left'
-                        ? Alignment.topRight
-                        : Alignment.topLeft,
-                    child: Transform.scale(
-                      scale: renderContentScale,
-                      alignment: _menuSide == "left"
+      child: AppTypographyTheme(
+        family: AppState.effectiveGlobalFontFamily,
+        fallback: AppState.textFontFallback,
+        displayScale: AppState.componentScale,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: SizedBox(
+            width: double.infinity,
+            height: double.infinity,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                AnimatedBuilder(
+                  animation: _layoutMotion,
+                  child: mainStage,
+                  builder: (context, child) {
+                    final frame = _layoutMotion.active
+                        ? _layoutMotion.frameInViewport(
+                            MediaQuery.sizeOf(context),
+                            MediaQuery.devicePixelRatioOf(context),
+                          )
+                        : _layoutPreparing
+                        ? _layoutHeldFrame
+                        : null;
+                    final rightAnchor =
+                        anchorRight ||
+                        (_menuSide == 'left' &&
+                            (_isMenuOpen || _menuResizeInFlight));
+                    return Positioned(
+                      left: frame?.left ?? (rightAnchor ? null : _leftPadding),
+                      right: frame == null && rightAnchor ? 0 : null,
+                      top: frame?.top ?? 0,
+                      child: child!,
+                    );
+                  },
+                ),
+                if (_isMenuOpen)
+                  Positioned(
+                    left: _menuSide == "left" ? 0 : AppState.baseWindowWidth,
+                    top: _menuTop,
+                    width: AppState.menuExtraSpace,
+                    child: OverflowBox(
+                      fit: OverflowBoxFit.deferToChild,
+                      minWidth: AppState.unscaledMenuExtraSpace,
+                      maxWidth: AppState.unscaledMenuExtraSpace,
+                      alignment: _menuSide == 'left'
                           ? Alignment.topRight
                           : Alignment.topLeft,
-                      child: RoundedRasterScale(
+                      child: Transform.scale(
                         scale: renderContentScale,
-                        child: Align(
-                          alignment: _menuSide == "left"
-                              ? Alignment.topRight
-                              : Alignment.topLeft,
-                          child: SlideMenu(
-                            animation: _menuAnimController,
-                            menuSide: _menuSide,
-                            onSettingsTap: _toggleSettings,
-                            onExitTap: () {
-                              windowManager.hide();
-                              unawaited(_exitApplication());
-                            },
+                        alignment: _menuSide == "left"
+                            ? Alignment.topRight
+                            : Alignment.topLeft,
+                        child: RoundedRasterScale(
+                          scale: renderContentScale,
+                          child: Align(
+                            alignment: _menuSide == "left"
+                                ? Alignment.topRight
+                                : Alignment.topLeft,
+                            child: SlideMenu(
+                              animation: _menuAnimController,
+                              menuSide: _menuSide,
+                              onSettingsTap: _toggleSettings,
+                              onExitTap: () {
+                                windowManager.hide();
+                                unawaited(_exitApplication());
+                              },
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

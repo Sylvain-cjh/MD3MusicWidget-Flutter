@@ -46,6 +46,8 @@ final class SettingsLabels {
   static const glowWaterfall = '瀑布';
   static const glowWallpaper = '全屏';
   static const coverParallax = '3D 悬浮封面';
+  static const coverLayers = '封面分层视差 beta';
+  static const coverLayerStatus = '最近分层结果';
   static const rightCoverGroup = '右侧渐变封面';
   static const rightCoverDarkening = '压暗程度';
   static const rightCoverFadeLength = '渐隐长度';
@@ -141,7 +143,8 @@ final class SettingsLabels {
 
   
   static const globalFont = '全局文本字体';
-  static const systemDefaultFont = '系统默认';
+  static const systemDefaultFont = '默认 · MiSans（内置）';
+  static const fontCredits = '本应用使用 MiSans · 字体许可';
   static const titleWeight = '歌曲名字重';
   static const artistWeight = '歌手名字重';
   static const playbackPreview = '播放信息实时预览';

@@ -17,6 +17,7 @@ import 'settings_scroll_viewport.dart';
 import 'adaptive_media_text.dart';
 import 'jelly_slider.dart';
 import 'smooth_rounded_clip.dart';
+import '../../core/cover_layers.dart';
 
 enum _SettingsSection { window, appearance, playback, lyrics, typography }
 
@@ -812,6 +813,39 @@ class _SettingsPanelState extends State<SettingsPanel>
                                 widget.onVisualChanged();
                               },
                             ),
+                            if (AppState.enable3DCover) ...[
+                              _buildDivider(),
+                              _buildSwitchRow(
+                                SettingsLabels.coverLayers,
+                                SettingsDescriptions.coverLayers,
+                                AppState.enableCoverLayers,
+                                (val) {
+                                  setState(
+                                    () => AppState.enableCoverLayers = val,
+                                  );
+                                  widget.onVisualChanged();
+                                },
+                              ),
+                              if (AppState.enableCoverLayers) ...[
+                                _buildDivider(),
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    0,
+                                    16,
+                                    12,
+                                  ),
+                                  child: ValueListenableBuilder<String>(
+                                    valueListenable:
+                                        CoverLayerService.instance.status,
+                                    builder: (context, status, _) => Text(
+                                      '${SettingsLabels.coverLayerStatus}：$status',
+                                      style: _settingSubtitleStyle(),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
                             if (_hasTimeline) _buildDivider(),
                             if (_hasTimeline)
                               _buildSwitchRow(
@@ -1800,7 +1834,10 @@ class _SettingsPanelState extends State<SettingsPanel>
                                   .map(
                                     (fontName) => DropdownMenuEntry<String>(
                                       value: fontName,
-                                      label: fontName,
+                                      label:
+                                          fontName == AppState.defaultFontFamily
+                                          ? SettingsLabels.systemDefaultFont
+                                          : fontName,
                                     ),
                                   )
                                   .toList(),
@@ -1864,29 +1901,39 @@ class _SettingsPanelState extends State<SettingsPanel>
                               title: SettingsLabels.playbackPreview,
                               sample: '歌曲名称',
                               style: TextStyle(
-                                fontFamily:
-                                    AppState.currentFontFamily ==
-                                        'System Default'
-                                    ? null
-                                    : AppState.currentFontFamily,
+                                fontFamily: AppState.effectiveGlobalFontFamily,
+                                fontSize: 18,
                                 fontFamilyFallback: AppState.textFontFallback,
                                 color: AppState.currentScheme.onSurface,
                                 fontWeight: AppState.titleWeight,
                                 fontVariations: AppState.variationsFor(
                                   AppState.titleWeightValue,
+                                  fontSize: 18,
                                 ),
                               ),
                               secondaryStyle: TextStyle(
-                                fontFamily:
-                                    AppState.currentFontFamily ==
-                                        'System Default'
-                                    ? null
-                                    : AppState.currentFontFamily,
+                                fontFamily: AppState.effectiveGlobalFontFamily,
+                                fontSize: 13,
                                 fontFamilyFallback: AppState.textFontFallback,
                                 color: AppState.currentScheme.onSurfaceVariant,
                                 fontWeight: AppState.artistWeight,
                                 fontVariations: AppState.variationsFor(
                                   AppState.artistWeightValue,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                icon: const Icon(
+                                  Icons.info_outline_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text(SettingsLabels.fontCredits),
+                                onPressed: () => showLicensePage(
+                                  context: context,
+                                  applicationName: 'MD3 Music Widget',
                                 ),
                               ),
                             ),
@@ -2678,7 +2725,7 @@ class _SettingsPanelState extends State<SettingsPanel>
     return (Theme.of(context).textTheme.bodySmall ?? const TextStyle())
         .copyWith(
           color: AppState.currentScheme.onSurfaceVariant.withValues(
-            alpha: disabled ? 0.38 : 0.88,
+            alpha: disabled ? 0.38 : 1.0,
           ),
           fontFamilyFallback: AppState.textFontFallback,
           letterSpacing: 0.0,

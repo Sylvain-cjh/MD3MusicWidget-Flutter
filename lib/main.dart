@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'core/app_state.dart';
+import 'core/font_credits.dart';
 import 'ui/player_view.dart';
 
 const Size _maximumWindowSize = Size(16384, 16384);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FontCredits.register();
   await windowManager.ensureInitialized();
 
   await AppState.loadSettings();
@@ -59,11 +61,7 @@ class MusicWidgetApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        fontFamily: AppState.effectiveGlobalFontFamily,
-        fontFamilyFallback: AppState.textFontFallback,
-      ),
+      theme: AppState.buildTheme(),
       home: PlayerView(windowReady: windowReady),
     );
   }

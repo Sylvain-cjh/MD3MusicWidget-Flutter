@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../../core/app_state.dart';
+import 'stable_artwork_surface.dart';
 
 
 
@@ -89,19 +90,7 @@ class _RightArtworkSurfaceState extends State<RightArtworkSurface> {
     if (_imageKey != imageKey) {
       _imageKey = imageKey;
       _imageChild = RepaintBoundary(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 800),
-          layoutBuilder: (current, previous) =>
-              Stack(fit: StackFit.expand, children: [...previous, ?current]),
-          child: Image(
-            key: ValueKey('${widget.coverKey}_clear'),
-            image: widget.provider,
-            fit: BoxFit.cover,
-            width: double.infinity,
-            height: double.infinity,
-            gaplessPlayback: true,
-          ),
-        ),
+        child: StableArtworkSurface(provider: widget.provider),
       );
     }
     return RepaintBoundary(

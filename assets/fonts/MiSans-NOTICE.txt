@@ -1,0 +1,9 @@
+本应用使用 MiSans 字体。
+
+字体来源：用户提供的 MiSans VF 4.009 原始文件；未修改字形或字体组件。
+Copyright © 2020-2025 Beijing Xiaomi Mobile Software Co.,Ltd. All Rights Reserved.
+
+MiSans 按小米发布的《MiSans 字体知识产权许可协议》使用。
+完整许可协议：https://hyperos.mi.com/font/zh/download/
+
+此说明不是对字体的重新许可。应用中的字体不得被当作独立字体商品或独立字体包重新分发。

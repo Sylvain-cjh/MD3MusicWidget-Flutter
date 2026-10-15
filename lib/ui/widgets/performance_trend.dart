@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import '../../core/performance_history.dart';
 import '../../core/system_performance_provider.dart';
 
 class PerformanceTrend extends StatelessWidget {
@@ -90,8 +89,12 @@ class PerformanceTrendPainter extends CustomPainter {
       points.clear();
     }
 
-    final firstIndex = PerformanceHistory.capacity - samples.length;
-    for (var i = 0; i < samples.length; i++) {
+    
+    
+    final first = samples.indexWhere((v) => v != null && v.isFinite);
+    if (first < 0) return;
+    final intervals = math.max(1, samples.length - 1 - first);
+    for (var i = first; i < samples.length; i++) {
       final value = samples[i];
       if (value == null || !value.isFinite) {
         drawSegment();
@@ -99,10 +102,7 @@ class PerformanceTrendPainter extends CustomPainter {
       }
       points.add(
         Offset(
-          bounds.left +
-              bounds.width *
-                  (firstIndex + i) /
-                  (PerformanceHistory.capacity - 1),
+          bounds.left + bounds.width * (i - first) / intervals,
           bounds.bottom - bounds.height * (value / ceiling).clamp(0.0, 1.0),
         ),
       );
