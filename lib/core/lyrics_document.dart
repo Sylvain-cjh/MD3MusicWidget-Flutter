@@ -1,8 +1,27 @@
+import 'package:xml/xml.dart';
+import 'dart:isolate';
+
+part 'lyrics_formats.dart';
+
+final class LyricWord {
+  final int startMs;
+  final int endMs;
+  final String text;
+  const LyricWord(this.startMs, this.endMs, this.text);
+
+  double progressAt(num positionMs) => !positionMs.isFinite || endMs <= startMs
+      ? 0
+      : ((positionMs - startMs) / (endMs - startMs)).clamp(0.0, 1.0);
+}
+
 final class LyricLine {
   final int startMs;
   final String text;
+  final int? endMs;
+  final List<LyricWord> words;
 
-  const LyricLine(this.startMs, this.text);
+  const LyricLine(this.startMs, this.text, {this.endMs, this.words = const []});
+  bool get isWordTimed => words.isNotEmpty;
 }
 
 final class LyricsDocument {
@@ -11,6 +30,7 @@ final class LyricsDocument {
   final String title;
   final String artist;
   final String sourceProviderId;
+  final bool wordTimingChecked;
 
   LyricsDocument({
     required List<LyricLine> lines,
@@ -18,6 +38,7 @@ final class LyricsDocument {
     this.title = '',
     this.artist = '',
     this.sourceProviderId = '',
+    this.wordTimingChecked = true,
   }) : lines = List.unmodifiable(lines);
 
   LyricsDocument withSourceProviderId(String id) => LyricsDocument(
@@ -26,9 +47,20 @@ final class LyricsDocument {
     title: title,
     artist: artist,
     sourceProviderId: id,
+    wordTimingChecked: wordTimingChecked,
+  );
+
+  LyricsDocument withWordTimingChecked() => LyricsDocument(
+    lines: lines,
+    plainText: plainText,
+    title: title,
+    artist: artist,
+    sourceProviderId: sourceProviderId,
+    wordTimingChecked: true,
   );
 
   bool get isTimed => lines.isNotEmpty;
+  bool get isWordTimed => lines.any((line) => line.isWordTimed);
   bool get isEmpty => lines.isEmpty && plainText.isEmpty;
 
   int lineIndexAt(num positionMs) {
@@ -56,6 +88,9 @@ final class LyricsDocument {
   }
 
   static LyricsDocument parseLrc(String source) {
+    if (RegExp(r'<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>').hasMatch(source)) {
+      return _parseEnhancedLrc(source);
+    }
     if (source.length > 2 * 1024 * 1024) {
       throw const FormatException('Lyrics are too large');
     }
@@ -118,4 +153,31 @@ final class LyricsDocument {
       artist: artist,
     );
   }
+
+  
+  
+  static LyricsDocument parse(String source, {String format = ''}) {
+    if (source.length > 2 * 1024 * 1024) {
+      throw const FormatException('Lyrics are too large');
+    }
+    final text = source.replaceFirst('\ufeff', '').trim();
+    final kind = format.toLowerCase().replaceFirst('.', '');
+    if (kind == 'ttml' || RegExp(r'<(?:\w+:)?tt[\s>]').hasMatch(text)) {
+      return _parseTtml(text);
+    }
+    if (kind == 'qrc' ||
+        kind == 'yrc' ||
+        RegExp(r'^\[\d+,\d+\]', multiLine: true).hasMatch(text) ||
+        text.contains('LyricContent=')) {
+      return _parsePlatformWords(text, yrc: kind == 'yrc');
+    }
+    return parseLrc(text);
+  }
+
+  static Future<LyricsDocument> parseAsync(
+    String source, {
+    String format = '',
+  }) => source.length > 16384
+      ? Isolate.run(() => parse(source, format: format))
+      : Future.value(parse(source, format: format));
 }

@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
 project(runner LANGUAGES CXX)
+enable_language(C)
+add_subdirectory("${CMAKE_SOURCE_DIR}/../third_party/qrc_codec" "${CMAKE_CURRENT_BINARY_DIR}/qrc_codec")
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/../tooling/system_fonts_probe.cpp")
   add_executable(system_fonts_probe EXCLUDE_FROM_ALL

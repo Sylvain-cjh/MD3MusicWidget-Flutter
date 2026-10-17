@@ -11,6 +11,7 @@
 
 namespace { constexpr UINT kFontsReady = WM_APP + 83; }
 void FlutterWindow::RefreshFonts() {
+  font_catalog_started_ = true;
   const HWND handle = GetHandle();
   if (!font_catalog_.Refresh([handle] { PostMessageW(handle, kFontsReady, 0, 0); })) {
     font_refresh_pending_ = true;
@@ -49,12 +50,18 @@ bool FlutterWindow::OnCreate() {
         if (call.method_name() != "families") { result->NotImplemented(); return; }
         bool ready = false;
         const auto families = font_catalog_.Snapshot(&ready);
-        if (!ready) { result->Error("fonts_loading", "System families are loading in the background"); return; }
+        if (!ready) {
+          if (!font_catalog_started_) RefreshFonts();
+          result->Error("fonts_loading", "System families are loading in the background");
+          return;
+        }
         flutter::EncodableList names;
         for (const auto& family : families) names.emplace_back(family);
         result->Success(flutter::EncodableValue(names));
       });
-  RefreshFonts();
+  
+  
+  
   system_performance_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(),
@@ -139,11 +146,6 @@ bool FlutterWindow::OnCreate() {
       });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
-  });
-
-  
   
   
   flutter_controller_->ForceRedraw();
@@ -154,6 +156,7 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   font_catalog_.Wait();
   font_refresh_pending_ = false;
+  font_catalog_started_ = false;
   if (system_fonts_channel_) {
     system_fonts_channel_->SetMethodCallHandler(nullptr);
     system_fonts_channel_.reset();

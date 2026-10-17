@@ -6,12 +6,13 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart'
-    show OverflowBoxFit, RenderBox, RenderRepaintBoundary;
+import 'package:flutter/rendering.dart' show OverflowBoxFit, RenderBox;
 import 'package:window_manager/window_manager.dart';
 import 'package:tray_manager/tray_manager.dart' as tm;
 
 import '../core/app_state.dart';
+import '../core/widget_diagnostics.dart';
+import '../core/native_window_geometry.dart';
 import '../core/artwork_resources.dart';
 import '../core/media_provider.dart';
 import '../core/music_fetcher_provider.dart';
@@ -23,10 +24,12 @@ import 'animations/next_up_presence_motion.dart';
 import 'animations/lyrics_visual_motion.dart';
 import 'animations/layout_morph_motion.dart';
 import 'widgets/layout_backdrop_blend.dart';
+import 'widgets/backdrop_capture_boundary.dart';
 import 'widgets/smooth_rounded_clip.dart';
 import 'widgets/dynamic_background.dart';
 import 'widgets/locked_aspect_resize_area.dart';
 import 'widgets/track_controls.dart';
+import 'widgets/playback_pause_shade.dart';
 import 'widgets/music_lyrics_panel.dart';
 import 'widgets/music_next_up_panel.dart';
 import 'widgets/spectrum_performance_row.dart';
@@ -159,7 +162,7 @@ class _PlayerViewState extends State<PlayerView>
   late final LyricsVisualMotion _lyricsVisualMotion;
   bool get _lyricsCollapsed =>
       AppState.showLyrics && !AppState.lyricsPanelVisible;
-  double? _backgroundAnchorHeight;
+  Object? _backgroundAnchor;
   Widget? _anchoredPlayerBackground;
   late WidgetLayout _displayLayout;
   late final LayoutMorphMotion _layoutMotion;
@@ -171,6 +174,8 @@ class _PlayerViewState extends State<PlayerView>
   bool _layoutCleanupScheduled = false;
   Rect? _layoutHeldFrame;
   double? _layoutPlayerCanvasHeight;
+  double? _menuBaseViewportWidth;
+  double _menuNativeExtra = 0;
 
   static const String _dotnetRuntimeDownloadUrl =
       'https://aka.ms/dotnet/8.0/dotnet-runtime-win-x64.exe';
@@ -223,6 +228,26 @@ class _PlayerViewState extends State<PlayerView>
     if (widget.startPlatformServices) {
       unawaited(_initSystemTray());
       unawaited(_bootEngineAndListen());
+    }
+    if (WidgetDiagnostics.enabled) {
+      WidgetDiagnostics.actions.addAll({
+        'menuOpen': (value) => _openMenu(value == true),
+        'menuClose': (_) => _closeMenu(),
+        'settings': (_) => _toggleSettings(),
+        'layout': (value) async {
+          AppState.widgetLayout = value as WidgetLayout;
+          await _handleLayoutChanged();
+        },
+        'artwork': (value) async {
+          final data = value as (String, Uint8List);
+          _latestCoverVersion = data.$1;
+          await _applyCoverBytes(data.$1, data.$2);
+        },
+        'track': (value) async => _applyMediaSnapshot(value as MediaSnapshot),
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        WidgetDiagnostics.mark('playerFirstFrame');
+      });
     }
   }
 
@@ -1006,7 +1031,7 @@ class _PlayerViewState extends State<PlayerView>
     if (playbackStateChanged) _syncSpectrumPolling();
     AppState.refreshLyrics();
     if (AppState.showLyrics) {
-      AppState.lyrics.setPositionMs(AppState.estimatedPlaybackPositionMs);
+      AppState.lyrics.setPositionMs(AppState.lyricsPlaybackPositionMs);
     }
 
     _latestCoverVersion = snapshot.coverVersion;
@@ -1292,6 +1317,14 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   int _beginWindowTransition() {
+    if (!_layoutMotion.active &&
+        !_layoutPreparing &&
+        _layoutMotion.holding &&
+        AppState.widgetLayout == _displayLayout) {
+      
+      
+      _layoutMotion.finish();
+    }
     if (_layoutMotion.active || AppState.widgetLayout != _displayLayout) {
       _layoutMotion.freeze();
     }
@@ -1326,11 +1359,11 @@ class _PlayerViewState extends State<PlayerView>
   );
 
   bool _rectNearlyEquals(Rect first, Rect second) {
-    const double tolerance = 0.5;
-    return (first.left - second.left).abs() <= tolerance &&
-        (first.top - second.top).abs() <= tolerance &&
-        (first.width - second.width).abs() <= tolerance &&
-        (first.height - second.height).abs() <= tolerance;
+    return NativeWindowGeometry.sameBounds(
+      first,
+      second,
+      pixelRatio: MediaQuery.devicePixelRatioOf(context),
+    );
   }
 
   void _onLyricsVisibilityChanged() {
@@ -1631,38 +1664,24 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   Future<ui.Image?> _captureLayoutBackdrop(Rect frame, Rect bounds) async {
-    ui.Image? image;
-    ui.Picture? picture;
     try {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return null;
       final render = _layoutBackdropKey.currentContext?.findRenderObject();
-      if (render is! RenderRepaintBoundary || !render.hasSize) return null;
+      if (render is! RenderBackdropCaptureBoundary || !render.hasSize) {
+        return null;
+      }
       final ratio = MediaQuery.devicePixelRatioOf(context);
-      image = await render.toImage(pixelRatio: ratio);
       final origin = bounds.topLeft + render.localToGlobal(Offset.zero);
-      final offset = (frame.topLeft - origin) * ratio;
-      final size = frame.size * ratio;
-      final recorder = ui.PictureRecorder();
-      final canvas = ui.Canvas(recorder);
-      canvas.drawImageRect(
-        image,
-        offset & size,
-        Offset.zero & size,
-        ui.Paint()..filterQuality = ui.FilterQuality.medium,
+      
+      
+      return await render.capture(
+        (frame.topLeft - origin) & frame.size,
+        pixelRatio: ratio,
       );
-      picture = recorder.endRecording();
-      final cropped = await picture.toImage(
-        math.max(1, size.width.ceil()),
-        math.max(1, size.height.ceil()),
-      );
-      return cropped;
     } catch (error) {
       debugPrint('布局背景过渡画面采集失败，使用连续布局回退: $error');
       return null;
-    } finally {
-      picture?.dispose();
-      image?.dispose();
     }
   }
 
@@ -1753,6 +1772,10 @@ class _PlayerViewState extends State<PlayerView>
         design.height * _frameScale,
       );
       final stage = bounds.expandToInclude(target);
+      if (!reduced) {
+        await DynamicBackground.prepareLayout(context, targetLayout);
+        if (!_isCurrentWindowTransition(serial)) return;
+      }
       final snapshot = reduced
           ? null
           : await _captureLayoutBackdrop(source, bounds);
@@ -1787,6 +1810,15 @@ class _PlayerViewState extends State<PlayerView>
           vertical: targetLayout == WidgetLayout.vertical,
         );
       });
+      
+      
+      
+      if (!reduced) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!_isCurrentWindowTransition(serial)) return;
+        await WidgetsBinding.instance.endOfFrame;
+        if (!_isCurrentWindowTransition(serial)) return;
+      }
       final completed = await _layoutMotion.play(reduced: reduced);
       if (!completed || !_isCurrentWindowTransition(serial)) return;
       await WidgetsBinding.instance.endOfFrame;
@@ -1859,7 +1891,9 @@ class _PlayerViewState extends State<PlayerView>
     final Rect stage = bounds.expandToInclude(targetRect);
 
     _leftPadding = absCardLeft - stage.left;
-    await windowManager.setBounds(stage, animate: false);
+    if (!_rectNearlyEquals(bounds, stage)) {
+      await windowManager.setBounds(stage, animate: false);
+    }
     if (!_isCurrentWindowTransition(serial)) return;
     setState(() {});
     await Future.delayed(
@@ -1873,15 +1907,15 @@ class _PlayerViewState extends State<PlayerView>
     _leftPadding = targetLeftPadding;
 
     if (mounted) setState(() {});
-    await windowManager.setBounds(
-      Rect.fromLTWH(
-        currentAbsCardLeft - _leftPadding,
-        b2.top,
-        targetW,
-        targetH,
-      ),
-      animate: false,
+    final finalBounds = Rect.fromLTWH(
+      currentAbsCardLeft - _leftPadding,
+      b2.top,
+      targetW,
+      targetH,
     );
+    if (!_rectNearlyEquals(b2, finalBounds)) {
+      await windowManager.setBounds(finalBounds, animate: false);
+    }
   }
 
   Future<void> _toggleSettings() async {
@@ -2032,18 +2066,21 @@ class _PlayerViewState extends State<PlayerView>
       await WidgetsBinding.instance.endOfFrame;
       final bounds = await windowManager.getBounds();
       if (!mounted) return;
+      final ratio = MediaQuery.devicePixelRatioOf(context);
+      _menuBaseViewportWidth = bounds.width;
+      _menuNativeExtra = (AppState.menuExtraSpace * ratio).round() / ratio;
       await windowManager.setBounds(
         Rect.fromLTWH(
-          bounds.left - (toLeft ? AppState.menuExtraSpace : 0),
+          bounds.left - (toLeft ? _menuNativeExtra : 0),
           bounds.top,
-          bounds.width + AppState.menuExtraSpace,
+          bounds.width + _menuNativeExtra,
           bounds.height,
         ),
         animate: false,
       );
       if (!mounted) return;
       setState(() {
-        _leftPadding = toLeft ? AppState.menuExtraSpace : 0;
+        _leftPadding = toLeft ? _menuNativeExtra : 0;
         _isMenuOpen = true;
       });
       await WidgetsBinding.instance.endOfFrame;
@@ -2089,7 +2126,7 @@ class _PlayerViewState extends State<PlayerView>
         Rect.fromLTWH(
           resetLeft,
           bounds.top,
-          bounds.width - AppState.menuExtraSpace,
+          bounds.width - _menuNativeExtra,
           bounds.height,
         ),
         animate: false,
@@ -2099,7 +2136,10 @@ class _PlayerViewState extends State<PlayerView>
       debugPrint('右键菜单收起失败: $error');
     } finally {
       if (mounted) {
-        setState(() => _menuResizeInFlight = false);
+        setState(() {
+          _menuResizeInFlight = false;
+          if (!_isMenuOpen) _menuBaseViewportWidth = null;
+        });
         if (_nextUpResizePending) _onNextUpVisibilityChanged();
       }
     }
@@ -2287,14 +2327,29 @@ class _PlayerViewState extends State<PlayerView>
         : Duration.zero;
 
     final backgroundAnchorHeight =
-        (containerH - AppState.nextUpPanelExtentOf(_displayLayout)) *
+        (innerPlayerH - AppState.nextUpPanelExtentOf(_displayLayout)) *
         (_isComponentSizeTransitioning ? 1.0 : renderFrameScale);
-    if (_backgroundAnchorHeight != backgroundAnchorHeight) {
-      _backgroundAnchorHeight = backgroundAnchorHeight;
+    final backgroundAnchorWidth =
+        innerPlayerW * (_isComponentSizeTransitioning ? 1.0 : renderFrameScale);
+    final backgroundAnchorLeft =
+        pLeft * (_isComponentSizeTransitioning ? 1.0 : renderFrameScale);
+    final backgroundAnchor = (
+      backgroundAnchorWidth,
+      backgroundAnchorHeight,
+      backgroundAnchorLeft,
+      isV,
+      _layoutMotion.active || _layoutPreparing,
+    );
+    if (_backgroundAnchor != backgroundAnchor) {
+      _backgroundAnchor = backgroundAnchor;
       _anchoredPlayerBackground = RepaintBoundary(
         child: DynamicBackground(
           anchorHeight: backgroundAnchorHeight,
+          anchorWidth: backgroundAnchorWidth,
+          anchorLeft: backgroundAnchorLeft,
           verticalLayout: isV,
+          animateArtworkReplacement:
+              !(_layoutMotion.active || _layoutPreparing),
         ),
       );
     }
@@ -2462,6 +2517,23 @@ class _PlayerViewState extends State<PlayerView>
                         ),
                       ),
                     ),
+                    MorphPositioned(
+                      motion: _layoutMotion,
+                      duration: frameAnimationDuration,
+                      curve: AppState.layoutSwitchCurve,
+                      left: 0,
+                      top: corePlayerH,
+                      width: innerPlayerW,
+                      height: math.max(0, innerPlayerH - corePlayerH),
+                      child: ValueListenableBuilder<int>(
+                        valueListenable: AppState.backgroundRevision,
+                        builder: (context, revision, child) =>
+                            PlaybackPauseShade(
+                              key: const ValueKey('auxiliary_pause_shade'),
+                              paused: !AppState.isPlaying,
+                            ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -2507,7 +2579,7 @@ class _PlayerViewState extends State<PlayerView>
           child: SizedBox(
             width: transformOnly ? containerW : visibleW,
             height: transformOnly ? containerH : visibleH,
-            child: RepaintBoundary(
+            child: BackdropCaptureBoundary(
               key: _layoutBackdropKey,
               child: LayoutBackdropBlend(
                 motion: _layoutMotion,
@@ -2611,13 +2683,25 @@ class _PlayerViewState extends State<PlayerView>
                         : _layoutPreparing
                         ? _layoutHeldFrame
                         : null;
-                    final rightAnchor =
-                        anchorRight ||
-                        (_menuSide == 'left' &&
-                            (_isMenuOpen || _menuResizeInFlight));
+                    final menuAnchored =
+                        _menuSide == 'left' &&
+                        (_isMenuOpen || _menuResizeInFlight);
+                    final menuLeft = menuAnchored
+                        ? math.max(
+                            0.0,
+                            MediaQuery.sizeOf(context).width -
+                                (_menuBaseViewportWidth ??
+                                    MediaQuery.sizeOf(context).width),
+                          )
+                        : null;
                     return Positioned(
-                      left: frame?.left ?? (rightAnchor ? null : _leftPadding),
-                      right: frame == null && rightAnchor ? 0 : null,
+                      left:
+                          frame?.left ??
+                          menuLeft ??
+                          (anchorRight ? null : _leftPadding),
+                      right: frame == null && !menuAnchored && anchorRight
+                          ? 0
+                          : null,
                       top: frame?.top ?? 0,
                       child: child!,
                     );

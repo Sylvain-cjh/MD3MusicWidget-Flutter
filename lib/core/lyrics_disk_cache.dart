@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:isolate';
 import 'lyrics_document.dart';
 import 'persistent_cache.dart';
 import 'platform_provider.dart';
@@ -44,9 +45,24 @@ final class LyricsDiskCache {
     final legacy = bytes == null;
     bytes ??= await store.get(_legacyKey(track, source));
     if (bytes == null) return null;
+    final payload = bytes;
+    final doc = bytes.length > 16384
+        ? await Isolate.run(() => _decodeCached(payload, track, source))
+        : _decodeCached(payload, track, source);
+    if (doc != null && legacy) await put(track, source, doc);
+    return doc;
+  }
+
+  static LyricsDocument? _decodeCached(
+    Uint8List bytes,
+    PlatformTrack track,
+    String source,
+  ) {
     try {
       final json = jsonDecode(utf8.decode(bytes));
-      if (json is! Map || json['version'] != 1 || json['lines'] is! List) {
+      if (json is! Map ||
+          !const [1, 2].contains(json['version']) ||
+          json['lines'] is! List) {
         return null;
       }
       final duration = json['durationMs'];
@@ -59,9 +75,10 @@ final class LyricsDiskCache {
       final lines = json['lines'] as List;
       if (lines.length > 10000) return null;
       final parsed = <LyricLine>[];
+      var totalWords = 0;
       for (final line in lines) {
         if (line is! List ||
-            line.length != 2 ||
+            (line.length != 2 && line.length != 4) ||
             line[0] is! int ||
             line[0] < 0 ||
             line[0] > 60000000 ||
@@ -69,7 +86,47 @@ final class LyricsDiskCache {
             line[1] is! String) {
           return null;
         }
-        parsed.add(LyricLine(line[0], line[1]));
+        int? end;
+        final words = <LyricWord>[];
+        if (line.length == 4) {
+          end = line[2] is int ? line[2] as int : null;
+          if (line[2] != null &&
+              (end == null || end < line[0] || end > 60000000)) {
+            return null;
+          }
+          if (line[3] is! List || (line[3] as List).length > 4000) return null;
+          for (final word in line[3] as List) {
+            if (word is! List ||
+                word.length != 3 ||
+                word[0] is! int ||
+                word[1] is! int ||
+                word[2] is! String ||
+                word[0] < line[0] ||
+                word[1] <= word[0] ||
+                word[1] > 60000000 ||
+                (end != null && word[1] > end) ||
+                (words.isNotEmpty && word[0] < words.last.startMs)) {
+              return null;
+            }
+            words.add(LyricWord(word[0], word[1], word[2]));
+          }
+          if (words.isNotEmpty &&
+              words.map((word) => word.text).join() != line[1]) {
+            return null;
+          }
+        }
+        totalWords += words.length;
+        if (totalWords > 50000) {
+          return null;
+        }
+        parsed.add(
+          LyricLine(
+            line[0],
+            line[1],
+            endMs: end,
+            words: List.unmodifiable(words),
+          ),
+        );
       }
       final doc = LyricsDocument(
         lines: parsed,
@@ -77,9 +134,10 @@ final class LyricsDiskCache {
         title: json['title'] as String? ?? '',
         artist: json['artist'] as String? ?? '',
         sourceProviderId: json['source'] as String? ?? source,
+        wordTimingChecked:
+            json['version'] == 2 && json['wordTimingChecked'] != false,
       );
       if (doc.isEmpty) return null;
-      if (legacy) await put(track, source, doc);
       return doc;
     } catch (_) {
       return null;
@@ -95,13 +153,23 @@ final class LyricsDiskCache {
     final bytes = Uint8List.fromList(
       utf8.encode(
         jsonEncode({
-          'version': 1,
+          'version': 2,
+          'wordTimingChecked': doc.wordTimingChecked,
           'cacheKeyVersion': 2,
           'lookupTitle': track.title,
           'lookupArtist': track.artist,
           'durationMs': track.durationMs.isFinite ? track.durationMs : 0,
           'lines': [
-            for (final line in doc.lines) [line.startMs, line.text],
+            for (final line in doc.lines)
+              [
+                line.startMs,
+                line.text,
+                line.endMs,
+                [
+                  for (final word in line.words)
+                    [word.startMs, word.endMs, word.text],
+                ],
+              ],
           ],
           'plainText': doc.plainText,
           'title': doc.title,

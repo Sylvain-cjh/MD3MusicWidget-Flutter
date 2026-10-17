@@ -17,7 +17,7 @@ publish_to: 'none'
 
 
 
-version: 1.0.0+1
+version: 1.1.0+1
 
 environment:
   sdk: ^3.12.2
@@ -41,6 +41,8 @@ dependencies:
   shared_preferences: ^2.3.2
   file_picker: ^11.0.2
   crypto: ^3.0.7
+  xml: ^7.0.1
+  ffi: ^2.2.0
 
 dev_dependencies:
   flutter_test:
@@ -69,6 +71,7 @@ flutter:
 
   shaders:
     - shaders/cover_layers.frag
+    - shaders/lyrics_smoke.frag
 
   assets:
     - images/tray_icon.ico

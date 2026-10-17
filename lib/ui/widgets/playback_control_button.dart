@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/physics.dart';
 
 import '../animations/cover_parallax_motion.dart';
+import '../animations/transport_tactile_motion.dart';
 
 
 
@@ -33,22 +35,34 @@ class PlaybackControlButton extends StatefulWidget {
 }
 
 class PlaybackControlButtonState extends State<PlaybackControlButton>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late final CoverParallaxMotion motion = CoverParallaxMotion(this);
   late final AnimationController _glyph = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 180),
     value: widget.isPlaying == true ? 1 : 0,
   );
-  late final AnimationController _press = AnimationController(
+  late final AnimationController _press = AnimationController.unbounded(
     vsync: this,
-    duration: const Duration(milliseconds: 100),
-    reverseDuration: const Duration(milliseconds: 200),
   );
   late final Listenable _visual = Listenable.merge([motion, _press]);
   bool _pressed = false, _hovered = false;
   int? _pointer;
   int builds = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) return;
+    _release();
+    _hovered = false;
+    motion.setTarget(Offset.zero, hovered: false);
+  }
 
   @override
   void didChangeDependencies() {
@@ -68,10 +82,15 @@ class PlaybackControlButtonState extends State<PlaybackControlButton>
     if (MediaQuery.disableAnimationsOf(context)) {
       _press.value = 0;
     } else {
-      _press.animateTo(
-        pressed ? 1 : 0,
-        duration: Duration(milliseconds: pressed ? 100 : 200),
-        curve: Curves.easeOutCubic,
+      _press.animateWith(
+        SpringSimulation(
+          pressed
+              ? TransportTactileMotion.pressSpring
+              : TransportTactileMotion.releaseSpring,
+          _press.value,
+          pressed ? 1 : 0,
+          _press.velocity,
+        ),
       );
     }
   }
@@ -90,9 +109,9 @@ class PlaybackControlButtonState extends State<PlaybackControlButton>
       return;
     }
     motion.setTarget(
-      Offset(
-        (local.dx - widget.width / 2) / (widget.width / 2),
-        (local.dy - widget.height / 2) / (widget.height / 2),
+      TransportTactileMotion.pointerTarget(
+        local,
+        context.size ?? Size(widget.width, widget.height),
       ),
       hovered: true,
     );
@@ -134,6 +153,7 @@ class PlaybackControlButtonState extends State<PlaybackControlButton>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     motion.dispose();
     _press.dispose();
     _glyph.dispose();
@@ -240,50 +260,46 @@ class PlaybackControlButtonState extends State<PlaybackControlButton>
                   clipBehavior: Clip.none,
                   children: [
                     IgnorePointer(
-                      child: AnimatedScale(
-                        scale: reduced
-                            ? 1
-                            : _pressed
-                            ? .95
-                            : _hovered
-                            ? 1.02
-                            : 1,
-                        duration: reduced
-                            ? Duration.zero
-                            : Duration(milliseconds: _pressed ? 100 : 200),
-                        curve: Curves.easeOutCubic,
-                        child: AnimatedBuilder(
-                          animation: _visual,
-                          builder: (context, _) {
-                            final point = reduced
-                                ? Offset.zero
-                                : motion.position;
-                            final press = reduced ? 0.0 : _press.value;
-                            final hover = reduced ? 0.0 : motion.hover;
-                            Matrix4 layer(double distance, double tilt) {
-                              final transform = Matrix4.identity();
-                              if (!reduced &&
-                                  (point.distanceSquared > .000001 ||
-                                      press > .000001)) {
-                                transform.setEntry(3, 2, .0015);
-                                transform.rotateX(
-                                  point.dy * tilt * (1 - press * .65),
-                                );
-                                transform.rotateY(
-                                  -point.dx * tilt * (1 - press * .65),
-                                );
-                                transform.translateByDouble(
-                                  point.dx * distance * (1 - press * .5),
-                                  point.dy * distance * (1 - press * .5) +
-                                      press,
-                                  0,
-                                  1,
-                                );
-                              }
-                              return transform;
+                      child: AnimatedBuilder(
+                        animation: _visual,
+                        builder: (context, _) {
+                          final point = reduced ? Offset.zero : motion.position;
+                          final springPress = reduced
+                              ? 0.0
+                              : _press.value.clamp(-.08, 1.0);
+                          final press = springPress.clamp(0.0, 1.0);
+                          final hover = reduced ? 0.0 : motion.hover;
+                          final tiltPoint = TransportTactileMotion.inertialTilt(
+                            point,
+                            reduced ? Offset.zero : motion.velocity,
+                          );
+                          Matrix4 layer(double distance, double tilt) {
+                            final transform = Matrix4.identity();
+                            if (!reduced &&
+                                (point.distanceSquared > .000001 ||
+                                    press > .000001)) {
+                              transform.setEntry(3, 2, .0015);
+                              transform.rotateX(
+                                tiltPoint.dy * tilt * (1 - press * .65),
+                              );
+                              transform.rotateY(
+                                -tiltPoint.dx * tilt * (1 - press * .65),
+                              );
+                              transform.translateByDouble(
+                                point.dx * distance * (1 - press * .5),
+                                point.dy * distance * (1 - press * .5) + press,
+                                0,
+                                1,
+                              );
                             }
+                            return transform;
+                          }
 
-                            return Stack(
+                          final scale = 1 + hover * .018 - springPress * .055;
+                          return Transform.scale(
+                            key: const ValueKey('transport_press_transform'),
+                            scale: scale,
+                            child: Stack(
                               fit: StackFit.expand,
                               clipBehavior: Clip.none,
                               children: [
@@ -324,9 +340,9 @@ class PlaybackControlButtonState extends State<PlaybackControlButton>
                                   child: glyph,
                                 ),
                               ],
-                            );
-                          },
-                        ),
+                            ),
+                          );
+                        },
                       ),
                     ),
                     

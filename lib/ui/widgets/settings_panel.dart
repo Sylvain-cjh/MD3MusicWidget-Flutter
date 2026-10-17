@@ -16,6 +16,7 @@ import 'settings_section_navigation.dart';
 import 'settings_scroll_viewport.dart';
 import 'adaptive_media_text.dart';
 import 'jelly_slider.dart';
+import 'editable_slider_value.dart';
 import 'smooth_rounded_clip.dart';
 import '../../core/cover_layers.dart';
 
@@ -66,6 +67,7 @@ class SettingsPanel extends StatefulWidget {
 class _SettingsPanelState extends State<SettingsPanel>
     with SingleTickerProviderStateMixin {
   late bool _hasTimeline;
+  bool _hasWordTiming = false;
   _SettingsSection _selectedSection = _SettingsSection.window;
   int _sectionEntryDirection = 1;
   double _sectionEntryTravel = 50;
@@ -81,6 +83,76 @@ class _SettingsPanelState extends State<SettingsPanel>
   Timer? _spectrumStyleSaveTimer;
   List<PerformanceProcess> _performanceProcesses = const [];
   bool _performanceProcessesLoading = false;
+  bool _cacheDirectoryChanging = false;
+  String? _cacheDirectoryError;
+
+  Future<void> _changeCacheDirectory({bool reset = false}) async {
+    if (_cacheDirectoryChanging) return;
+    try {
+      final path = reset ? '' : await FilePicker.getDirectoryPath();
+      if (path == null || !mounted) return;
+      setState(() {
+        _cacheDirectoryChanging = true;
+        _cacheDirectoryError = null;
+      });
+      await AppState.setCacheDirectory(path);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _cacheDirectoryError = '这个位置暂时无法写入，已保留原来的缓存位置');
+      }
+    } finally {
+      if (mounted) setState(() => _cacheDirectoryChanging = false);
+    }
+  }
+
+  Widget _buildCacheDirectoryRow() => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(SettingsLabels.cacheDirectory, style: _settingTitleStyle()),
+        const SizedBox(height: 4),
+        Text(
+          _cacheDirectoryError ?? SettingsDescriptions.cacheDirectory,
+          style: _settingSubtitleStyle(),
+        ),
+        const SizedBox(height: 6),
+        Tooltip(
+          message: AppState.cacheDirectoryPath,
+          child: Text(
+            AppState.cacheDirectoryPath,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: _settingSubtitleStyle(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            FilledButton.tonalIcon(
+              key: const ValueKey('choose_cache_directory'),
+              onPressed: _cacheDirectoryChanging ? null : _changeCacheDirectory,
+              icon: const Icon(Icons.folder_open_rounded, size: 18),
+              label: Text(
+                _cacheDirectoryChanging
+                    ? SettingsLabels.cacheDirectoryChanging
+                    : SettingsLabels.chooseCacheDirectory,
+              ),
+            ),
+            if (AppState.customCacheDirectory.isNotEmpty)
+              TextButton(
+                onPressed: _cacheDirectoryChanging
+                    ? null
+                    : () => _changeCacheDirectory(reset: true),
+                child: const Text(SettingsLabels.resetCacheDirectory),
+              ),
+          ],
+        ),
+      ],
+    ),
+  );
 
   Future<void> _refreshPerformanceProcesses() async {
     if (_performanceProcessesLoading) return;
@@ -160,6 +232,20 @@ class _SettingsPanelState extends State<SettingsPanel>
     );
   }
 
+  void _updateLyricsVisual(VoidCallback change) {
+    setState(change);
+    AppState.lyrics.setPositionMs(AppState.lyricsPlaybackPositionMs);
+    AppState.notifyLyricsVisualChanged();
+    unawaited(AppState.saveSettings());
+  }
+
+  void _handleWordTiming() {
+    final next = AppState.lyrics.state.document?.isWordTimed == true;
+    if (mounted && next != _hasWordTiming) {
+      setState(() => _hasWordTiming = next);
+    }
+  }
+
   void _updateSpectrumThickness(double value) {
     _updateSpectrumStyle(() => AppState.spectrumThickness = value);
   }
@@ -210,6 +296,8 @@ class _SettingsPanelState extends State<SettingsPanel>
     max: 1,
     resetValue: AppState.defaultRightCoverFadeLength,
     valueLabel: (value) => '${(value * 100).round()}%',
+    inputScale: 100,
+    inputSuffix: '%',
     sliderKey: ValueKey(keyName),
     onChanged: (value) => _updateRightArtwork(() => onChanged(value)),
     onChangeEnd: _finishRightArtworkChange,
@@ -246,6 +334,8 @@ class _SettingsPanelState extends State<SettingsPanel>
       value: 1,
     );
     _hasTimeline = AppState.playbackDurationMs > 0;
+    _hasWordTiming = AppState.lyrics.state.document?.isWordTimed == true;
+    AppState.lyrics.addListener(_handleWordTiming);
     AppState.playbackRevision.addListener(_handleTimelineAvailability);
     AppState.fontsRevision.addListener(_handleFontsChanged);
   }
@@ -425,6 +515,7 @@ class _SettingsPanelState extends State<SettingsPanel>
 
   @override
   void dispose() {
+    AppState.lyrics.removeListener(_handleWordTiming);
     _sourceRequestSerial++;
     _sectionEntryController.dispose();
     if (_typographySaveTimer?.isActive == true) _finishTypographyChange();
@@ -904,6 +995,8 @@ class _SettingsPanelState extends State<SettingsPanel>
                                 resetValue: AppState.defaultSpectrumThickness,
                                 valueLabel: (value) =>
                                     '${value.toStringAsFixed(2)}×',
+                                inputFractionDigits: 2,
+                                inputSuffix: '×',
                                 sliderKey: const ValueKey(
                                   'spectrum_thickness_slider',
                                 ),
@@ -946,6 +1039,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                                       resetValue: 32,
                                       valueLabel: (value) =>
                                           '${value.round()} 根',
+                                      inputSuffix: '根',
                                       sliderKey: const ValueKey(
                                         'spectrum_column_count_slider',
                                       ),
@@ -979,6 +1073,8 @@ class _SettingsPanelState extends State<SettingsPanel>
                               resetValue: AppState.defaultRightCoverDarkening,
                               valueLabel: (value) =>
                                   '${(value * 100).round()}%',
+                              inputScale: 100,
+                              inputSuffix: '%',
                               sliderKey: const ValueKey(
                                 'right_cover_darkening_slider',
                               ),
@@ -1045,6 +1141,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                               max: 6,
                               resetValue: AppState.defaultRightCoverBlur,
                               valueLabel: (value) => value.toStringAsFixed(1),
+                              inputFractionDigits: 1,
                               sliderKey: const ValueKey(
                                 'right_cover_blur_slider',
                               ),
@@ -1176,6 +1273,8 @@ class _SettingsPanelState extends State<SettingsPanel>
                           title: SettingsLabels.storageGroup,
                           icon: Icons.storage_rounded,
                           children: [
+                            _buildCacheDirectoryRow(),
+                            _buildDivider(),
                             _buildContinuousSliderRow(
                               title: SettingsLabels.lyricsCacheLimit,
                               subtitle: SettingsDescriptions.lyricsCacheLimit,
@@ -1185,6 +1284,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                               divisions: 256,
                               resetValue: 16,
                               valueLabel: SettingsLabels.cacheCapacity,
+                              inputSuffix: 'MiB',
                               sliderKey: const ValueKey(
                                 'lyrics_cache_limit_slider',
                               ),
@@ -1206,6 +1306,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                               divisions: 1024,
                               resetValue: 128,
                               valueLabel: SettingsLabels.cacheCapacity,
+                              inputSuffix: 'MiB',
                               sliderKey: const ValueKey(
                                 'background_cache_limit_slider',
                               ),
@@ -1630,7 +1731,130 @@ class _SettingsPanelState extends State<SettingsPanel>
                                       children: [
                                         _buildDivider(),
                                         _buildLocalLyricsFolderRow(),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 18,
+                                            vertical: 8,
+                                          ),
+                                          child: Text(
+                                            SettingsDescriptions
+                                                .localTimedLyrics,
+                                            style: _settingSubtitleStyle(),
+                                          ),
+                                        ),
                                       ],
+                                    ),
+                                  ),
+                                  _buildDivider(),
+                                  _buildSwitchRow(
+                                    SettingsLabels.wordLyrics,
+                                    SettingsDescriptions.wordLyrics,
+                                    AppState.wordLyricsEnabled,
+                                    (value) => _updateLyricsVisual(
+                                      () => AppState.wordLyricsEnabled = value,
+                                    ),
+                                  ),
+                                  _buildOptionalSetting(
+                                    visible:
+                                        _hasWordTiming &&
+                                        AppState.wordLyricsEnabled,
+                                    child: Column(
+                                      children: [
+                                        _buildSwitchRow(
+                                          SettingsLabels.wordLyricsSmoke,
+                                          SettingsDescriptions.wordLyricsSmoke,
+                                          AppState.wordLyricsSmokeEnabled,
+                                          (value) => _updateLyricsVisual(
+                                            () =>
+                                                AppState.wordLyricsSmokeEnabled =
+                                                    value,
+                                          ),
+                                        ),
+                                        _buildOptionalSetting(
+                                          visible:
+                                              !AppState.wordLyricsSmokeEnabled,
+                                          child: Column(
+                                            children: [
+                                              _buildDropdownRow<
+                                                LyricsHighlightStyle
+                                              >(
+                                                SettingsLabels.wordLyricsStyle,
+                                                null,
+                                                AppState.lyricsHighlightStyle,
+                                                (value) => _updateLyricsVisual(
+                                                  () =>
+                                                      AppState.lyricsHighlightStyle =
+                                                          value,
+                                                ),
+                                                const [
+                                                  DropdownMenuEntry(
+                                                    value: LyricsHighlightStyle
+                                                        .sweep,
+                                                    label: SettingsLabels
+                                                        .wordLyricsSweep,
+                                                  ),
+                                                  DropdownMenuEntry(
+                                                    value: LyricsHighlightStyle
+                                                        .soft,
+                                                    label: SettingsLabels
+                                                        .wordLyricsSoft,
+                                                  ),
+                                                  DropdownMenuEntry(
+                                                    value: LyricsHighlightStyle
+                                                        .emphasis,
+                                                    label: SettingsLabels
+                                                        .wordLyricsEmphasis,
+                                                  ),
+                                                ],
+                                              ),
+                                              _buildContinuousSliderRow(
+                                                title: SettingsLabels
+                                                    .wordLyricsInactive,
+                                                subtitle: SettingsDescriptions
+                                                    .wordLyricsInactive,
+                                                value: AppState
+                                                    .lyricsInactiveOpacity,
+                                                min: .15,
+                                                max: 1,
+                                                resetValue: .46,
+                                                sliderKey: const ValueKey(
+                                                  'lyrics_inactive_slider',
+                                                ),
+                                                valueLabel: (value) =>
+                                                    '${(value * 100).round()}%',
+                                                inputScale: 100,
+                                                inputSuffix: '%',
+                                                onChanged: (value) =>
+                                                    _updateLyricsVisual(
+                                                      () =>
+                                                          AppState.lyricsInactiveOpacity =
+                                                              value,
+                                                    ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  _buildContinuousSliderRow(
+                                    title: SettingsLabels.lyricsOffset,
+                                    subtitle: SettingsDescriptions.lyricsOffset,
+                                    value: AppState.lyricsOffsetMs / 1000,
+                                    min: -5,
+                                    max: 5,
+                                    divisions: 200,
+                                    resetValue: 0,
+                                    sliderKey: const ValueKey(
+                                      'lyrics_offset_slider',
+                                    ),
+                                    valueLabel: (value) =>
+                                        '${value > 0 ? '+' : ''}${value.toStringAsFixed(3)} 秒',
+                                    inputFractionDigits: 3,
+                                    inputSuffix: '秒',
+                                    onChanged: (value) => _updateLyricsVisual(
+                                      () => AppState.lyricsOffsetMs =
+                                          (value * 1000).roundToDouble(),
                                     ),
                                   ),
                                   _buildDivider(),
@@ -1776,6 +2000,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                                     min: 100,
                                     max: 900,
                                     valueLabel: (value) => 'W${value.round()}',
+                                    inputPrefix: 'W',
                                     sliderKey: const ValueKey(
                                       'lyrics_weight_slider',
                                     ),
@@ -1794,6 +2019,8 @@ class _SettingsPanelState extends State<SettingsPanel>
                                     max: 17,
                                     valueLabel: (value) =>
                                         '${value.toStringAsFixed(1)} px',
+                                    inputFractionDigits: 1,
+                                    inputSuffix: 'px',
                                     sliderKey: const ValueKey(
                                       'lyrics_size_slider',
                                     ),
@@ -1877,6 +2104,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                               min: 100,
                               max: 900,
                               valueLabel: (value) => 'W${value.round()}',
+                              inputPrefix: 'W',
                               sliderKey: const ValueKey('title_weight_slider'),
                               resetValue: AppState.defaultTitleWeightValue,
                               onChanged: (value) => _updateTypography(
@@ -1891,6 +2119,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                               min: 100,
                               max: 900,
                               valueLabel: (value) => 'W${value.round()}',
+                              inputPrefix: 'W',
                               sliderKey: const ValueKey('artist_weight_slider'),
                               resetValue: AppState.defaultArtistWeightValue,
                               onChanged: (value) => _updateTypography(
@@ -2051,6 +2280,10 @@ class _SettingsPanelState extends State<SettingsPanel>
     required double resetValue,
     int? divisions,
     VoidCallback? onChangeEnd,
+    double inputScale = 1,
+    int inputFractionDigits = 0,
+    String inputPrefix = '',
+    String inputSuffix = '',
   }) {
     final displayedValue = value.clamp(min, max);
     return Padding(
@@ -2061,8 +2294,19 @@ class _SettingsPanelState extends State<SettingsPanel>
           Row(
             children: [
               Expanded(child: Text(title, style: _settingTitleStyle())),
-              Text(
-                valueLabel(displayedValue),
+              EditableSliderValue(
+                key: ValueKey('value_$sliderKey'),
+                title: title,
+                label: valueLabel(displayedValue),
+                value: displayedValue,
+                min: min,
+                max: max,
+                inputScale: inputScale,
+                fractionDigits: inputFractionDigits,
+                prefix: inputPrefix,
+                suffix: inputSuffix,
+                onChanged: onChanged,
+                onChangeEnd: onChangeEnd ?? _finishTypographyChange,
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   color: AppState.currentScheme.primary,
                 ),

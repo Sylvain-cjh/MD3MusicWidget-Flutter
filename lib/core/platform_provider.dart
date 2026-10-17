@@ -128,6 +128,10 @@ abstract interface class RetryableLyricsProvider {
   void invalidateMiss(PlatformTrack track);
 }
 
+
+
+abstract interface class ExhaustiveLyricsProvider {}
+
 abstract interface class QueuePlatformProvider
     implements MusicPlatformProvider {
   Future<PlatformQueue?> loadQueue(PlatformTrack track);

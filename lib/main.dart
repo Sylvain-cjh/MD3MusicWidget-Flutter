@@ -5,16 +5,21 @@ import 'package:window_manager/window_manager.dart';
 
 import 'core/app_state.dart';
 import 'core/font_credits.dart';
+import 'core/widget_diagnostics.dart';
 import 'ui/player_view.dart';
 
 const Size _maximumWindowSize = Size(16384, 16384);
 
-void main() async {
+Future<void> main() async {
+  WidgetDiagnostics.mark('dartEntry');
   WidgetsFlutterBinding.ensureInitialized();
+  WidgetDiagnostics.mark('bindingReady');
   FontCredits.register();
   await windowManager.ensureInitialized();
+  WidgetDiagnostics.mark('windowManagerReady');
 
   await AppState.loadSettings();
+  WidgetDiagnostics.mark('settingsReady');
 
   WindowOptions windowOptions = WindowOptions(
     size: Size(AppState.playerWidth, AppState.baseWindowHeight),
@@ -22,27 +27,28 @@ void main() async {
     center: true,
     backgroundColor: Colors.transparent,
     skipTaskbar: true,
-    titleBarStyle: TitleBarStyle.hidden,
     alwaysOnTop: AppState.isAlwaysOnTop,
   );
 
   final windowReady = Completer<void>();
   runApp(MusicWidgetApp(windowReady: windowReady.future));
-
-  await windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.setAsFrameless();
-    await windowManager.setHasShadow(false);
-    await windowManager.setAlwaysOnTop(AppState.isAlwaysOnTop);
-    await windowManager.setIgnoreMouseEvents(false, forward: true);
-    await windowManager.setAspectRatio(0);
-    await windowManager.setMinimumSize(Size.zero);
-    await windowManager.setMaximumSize(_maximumWindowSize);
-    await windowManager.setResizable(false);
-    await windowManager.setPreventClose(true);
-    if (!windowReady.isCompleted) windowReady.complete();
-    await windowManager.show();
-    await windowManager.focus();
-  });
+  WidgetDiagnostics.mark('runApp');
+  
+  
+  await windowManager.waitUntilReadyToShow(windowOptions);
+  WidgetDiagnostics.mark('windowOptionsReady');
+  await windowManager.setAsFrameless();
+  await windowManager.setHasShadow(false);
+  await windowManager.setIgnoreMouseEvents(false, forward: true);
+  await windowManager.setAspectRatio(0);
+  await windowManager.setMaximumSize(_maximumWindowSize);
+  await windowManager.setResizable(false);
+  await windowManager.setPreventClose(true);
+  await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
+  if (!windowReady.isCompleted) windowReady.complete();
+  await windowManager.show();
+  await windowManager.focus();
+  WidgetDiagnostics.mark('windowShown');
 
   unawaited(
     Future<void>.delayed(
@@ -62,7 +68,10 @@ class MusicWidgetApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: AppState.buildTheme(),
-      home: PlayerView(windowReady: windowReady),
+      home: PlayerView(
+        windowReady: windowReady,
+        startPlatformServices: !WidgetDiagnostics.enabled,
+      ),
     );
   }
 }

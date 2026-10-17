@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
 
 
 final class PersistentCache {
-  final Directory directory;
+  Directory _directory;
+  Directory get directory => _directory;
   final int Function() limitBytes;
   final int maximumEntryBytes;
   final bool Function()? isEnabled;
@@ -15,12 +17,21 @@ final class PersistentCache {
   final Map<String, Map<String, dynamic>> _entries = {};
   Future<void> _tail = Future.value();
   bool _loaded = false;
+  bool _indexDirty = false;
+  Timer? _indexTimer;
+  int debugIndexWrites = 0;
   PersistentCache({
-    required this.directory,
+    required Directory directory,
     required this.limitBytes,
     this.maximumEntryBytes = 16 * 1024 * 1024,
     this.isEnabled,
-  });
+    
+    
+  }) : _directory = directory;
+
+  static Future<String> _checksum(Uint8List bytes) => bytes.length >= 256 * 1024
+      ? Isolate.run(() => sha256.convert(bytes).toString())
+      : Future.value(sha256.convert(bytes).toString());
 
   Future<T> _serial<T>(Future<T> Function() work) {
     final result = _tail.then((_) => work());
@@ -85,18 +96,33 @@ final class PersistentCache {
   }
 
   Future<void> _saveIndex() async {
-    if (!_enabled) return;
+    if (!_enabled || !_indexDirty) return;
     final temporary = File('${_index.path}.tmp');
     await temporary.writeAsString(
       jsonEncode({'version': 1, 'entries': _entries}),
       flush: true,
     );
     await temporary.rename(_index.path);
+    _indexDirty = false;
+    debugIndexWrites++;
+  }
+
+  void _deferIndexSave() {
+    _indexTimer ??= Timer(const Duration(milliseconds: 400), () {
+      _indexTimer = null;
+      unawaited(
+        _serial(() async {
+          try {
+            await _saveIndex();
+          } catch (_) {}
+        }),
+      );
+    });
   }
 
   Future<void> _drop(String digest) async {
     if (!_enabled) return;
-    _entries.remove(digest);
+    if (_entries.remove(digest) != null) _indexDirty = true;
     try {
       if (await _file(digest).exists()) await _file(digest).delete();
     } catch (_) {}
@@ -129,7 +155,8 @@ final class PersistentCache {
       try {
         await _load();
         if (limitBytes() <= 0) return null;
-        final digest = _digest(key), entry = _entries[_digest(key)];
+        final digest = _digest(key);
+        final entry = _entries[digest];
         if (entry == null) return null;
         final file = _file(digest);
         if (await FileSystemEntity.type(file.path, followLinks: false) !=
@@ -140,13 +167,14 @@ final class PersistentCache {
           return null;
         }
         final bytes = await file.readAsBytes();
-        if (sha256.convert(bytes).toString() != entry['checksum']) {
+        if (await _checksum(bytes) != entry['checksum']) {
           await _drop(digest);
           await _saveIndex();
           return null;
         }
         entry['used'] = DateTime.now().microsecondsSinceEpoch;
-        await _saveIndex();
+        _indexDirty = true;
+        _deferIndexSave();
         return bytes;
       } catch (_) {
         return null;
@@ -157,25 +185,32 @@ final class PersistentCache {
   Future<void> put(String key, Uint8List bytes) {
     
     
-    if (!_enabled) return Future.value();
+    if (!_enabled ||
+        bytes.isEmpty ||
+        bytes.length > maximumEntryBytes ||
+        bytes.length > limitBytes()) {
+      return Future.value();
+    }
+    
+    final snapshot = Uint8List.fromList(bytes);
     return _serial(() async {
       if (!_enabled) return;
       try {
         await _load();
-        if (bytes.isEmpty ||
-            bytes.length > limitBytes() ||
-            bytes.length > maximumEntryBytes) {
+        if (snapshot.length > limitBytes()) {
           return;
         }
         final digest = _digest(key), file = _file(_digest(key));
         final temporary = File('${file.path}.tmp');
-        await temporary.writeAsBytes(bytes, flush: true);
+        final checksum = await _checksum(snapshot);
+        await temporary.writeAsBytes(snapshot, flush: true);
         await temporary.rename(file.path);
         _entries[digest] = {
-          'size': bytes.length,
+          'size': snapshot.length,
           'used': DateTime.now().microsecondsSinceEpoch,
-          'checksum': sha256.convert(bytes).toString(),
+          'checksum': checksum,
         };
+        _indexDirty = true;
         await _trim();
       } catch (_) {}
     });
@@ -230,5 +265,93 @@ final class PersistentCache {
     });
   }
 
-  Future<void> flush() => _tail;
+  
+  
+  Future<void> relocate(Directory target, {bool copyExisting = true}) {
+    if (!_enabled) {
+      _indexTimer?.cancel();
+      _indexTimer = null;
+      _directory = target.absolute;
+      _entries.clear();
+      _loaded = _indexDirty = false;
+      return Future.value();
+    }
+    return _serial(() async {
+      final destination = target.absolute;
+      final current = directory.absolute;
+      final same = Platform.isWindows
+          ? current.path.toLowerCase() == destination.path.toLowerCase()
+          : current.path == destination.path;
+      if (same) return;
+      _indexTimer?.cancel();
+      _indexTimer = null;
+      if (!_enabled) {
+        _directory = destination;
+        _entries.clear();
+        _loaded = _indexDirty = false;
+        return;
+      }
+      await _load();
+      await _saveIndex();
+      final replacement = PersistentCache(
+        directory: destination,
+        limitBytes: limitBytes,
+        maximumEntryBytes: maximumEntryBytes,
+        isEnabled: isEnabled,
+      );
+      await replacement._load();
+      if (copyExisting) {
+        for (final entry in _entries.entries) {
+          final existing = replacement._entries[entry.key];
+          if (existing != null &&
+              (existing['used'] as int) > (entry.value['used'] as int)) {
+            final prior = replacement._file(entry.key);
+            if (await FileSystemEntity.type(prior.path, followLinks: false) ==
+                    FileSystemEntityType.file &&
+                await prior.length() == existing['size'] &&
+                await _checksum(await prior.readAsBytes()) ==
+                    existing['checksum']) {
+              continue;
+            }
+          }
+          final source = _file(entry.key);
+          if (await FileSystemEntity.type(source.path, followLinks: false) !=
+                  FileSystemEntityType.file ||
+              await source.length() != entry.value['size']) {
+            continue;
+          }
+          final bytes = await source.readAsBytes();
+          if (await _checksum(bytes) != entry.value['checksum']) continue;
+          final file = replacement._file(entry.key);
+          final temporary = File('${file.path}.tmp');
+          await temporary.writeAsBytes(bytes, flush: true);
+          await temporary.rename(file.path);
+          replacement._entries[entry.key] = Map<String, dynamic>.from(
+            entry.value,
+          );
+          replacement._indexDirty = true;
+        }
+      }
+      await replacement._trim();
+      _directory = destination;
+      _entries
+        ..clear()
+        ..addAll(replacement._entries);
+      _loaded = true;
+      _indexDirty = false;
+    });
+  }
+
+  Future<void> flush() {
+    if (!_enabled) return Future.value();
+    _indexTimer?.cancel();
+    _indexTimer = null;
+    return _serial(() async {
+      _indexTimer?.cancel();
+      _indexTimer = null;
+      try {
+        await _saveIndex();
+      } catch (_) {}
+    });
+  }
 }

@@ -7,6 +7,8 @@ final class LyricsPrimaryAttempt {
   final Duration budget;
   final Stopwatch _clock = Stopwatch()..start();
   final Set<HttpClientRequest> _requests = {};
+  final Set<LyricsPrimaryAttempt> _children = {};
+  LyricsPrimaryAttempt? _parent;
   late final Timer _deadline;
   bool _closed = false;
 
@@ -30,12 +32,32 @@ final class LyricsPrimaryAttempt {
     }
   }
 
+  LyricsPrimaryAttempt slice(
+    Duration maximum, {
+    Duration reserve = Duration.zero,
+  }) {
+    final available = remaining - reserve;
+    if (available <= Duration.zero) {
+      throw TimeoutException('No lyric phase budget remains');
+    }
+    final child = LyricsPrimaryAttempt(
+      available < maximum ? available : maximum,
+    );
+    child._parent = this;
+    _children.add(child);
+    return child;
+  }
+
   Future<HttpClientRequest> open(HttpClient client, Uri uri) async {
     final opening = client.getUrl(uri);
     
     
     unawaited(
       opening.then<void>((request) {
+        
+        
+        
+        request.done.ignore();
         if (_closed) {
           request.abort(TimeoutException('Primary lyrics cancelled'));
         }
@@ -56,6 +78,11 @@ final class LyricsPrimaryAttempt {
     if (_closed) return;
     _closed = true;
     _deadline.cancel();
+    _parent?._children.remove(this);
+    for (final child in _children.toList()) {
+      child.close();
+    }
+    _children.clear();
     for (final request in _requests) {
       request.abort(TimeoutException('Primary lyric lookup timed out'));
     }

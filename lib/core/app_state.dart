@@ -10,6 +10,8 @@ import 'app_typography.dart';
 
 import 'media_provider.dart';
 import 'lyrics_coordinator.dart';
+import 'lyrics_highlight.dart';
+export 'lyrics_highlight.dart';
 import 'local_lrc_lyrics_provider.dart';
 import 'lrclib_lyrics_provider.dart';
 import 'qq_music_lyrics_provider.dart';
@@ -132,6 +134,10 @@ class AppState {
   static final Directory _cacheRoot = Directory(
     '${Platform.environment['LOCALAPPDATA'] ?? Platform.environment['HOME'] ?? Directory.systemTemp.path}${Platform.pathSeparator}MD3MusicWidget${Platform.pathSeparator}cache-v1',
   );
+  static String customCacheDirectory = '';
+  static Future<void> _cacheDirectoryTail = Future.value();
+  static String get cacheDirectoryPath =>
+      lyricsCacheStore.directory.parent.path;
   static final PersistentCache lyricsCacheStore = PersistentCache(
     isEnabled: () => usePersistentCaches,
     directory: Directory('${_cacheRoot.path}${Platform.pathSeparator}lyrics'),
@@ -322,6 +328,54 @@ class AppState {
     await Future.wait([lyricsCacheStore.clear(), backgroundCacheStore.clear()]);
   }
 
+  static Future<void> setCacheDirectory(
+    String path, {
+    bool persist = true,
+    bool migrate = true,
+  }) {
+    Future<void> change() async {
+      final selected = path.trim();
+      if (selected.contains('\u0000')) {
+        throw const FormatException('Invalid cache directory');
+      }
+      final root = selected.isEmpty
+          ? _cacheRoot
+          : Directory(
+              '${Directory(selected).absolute.path}${Platform.pathSeparator}MD3MusicWidget-cache-v1',
+            );
+      final oldLyrics = lyricsCacheStore.directory;
+      final oldBackground = backgroundCacheStore.directory;
+      try {
+        await lyricsCacheStore.relocate(
+          Directory('${root.path}${Platform.pathSeparator}lyrics'),
+          copyExisting: migrate,
+        );
+        await backgroundCacheStore.relocate(
+          Directory('${root.path}${Platform.pathSeparator}background'),
+          copyExisting: migrate,
+        );
+      } catch (_) {
+        await lyricsCacheStore.relocate(oldLyrics);
+        await backgroundCacheStore.relocate(oldBackground);
+        rethrow;
+      }
+      customCacheDirectory = selected.isEmpty
+          ? ''
+          : Directory(selected).absolute.path;
+      if (persist) await saveSettings();
+    }
+
+    
+    
+    if (!usePersistentCaches) return change();
+    final result = _cacheDirectoryTail.then((_) => change());
+    _cacheDirectoryTail = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
+  }
+
   static final ValueNotifier<int> playbackRevision = ValueNotifier<int>(0);
   static final ValueNotifier<bool> nextUpPreviewVisible = ValueNotifier<bool>(
     false,
@@ -489,6 +543,13 @@ class AppState {
   static void notifySpectrumStyleChanged() => spectrumStyleRevision.value++;
   static bool showLyrics = false;
   static bool hideUnavailableLyrics = false;
+  static bool wordLyricsEnabled = true;
+  static bool wordLyricsSmokeEnabled = false;
+  static LyricsHighlightStyle lyricsHighlightStyle = LyricsHighlightStyle.sweep;
+  static double lyricsInactiveOpacity = .46;
+  static double lyricsOffsetMs = 0;
+  static double get lyricsPlaybackPositionMs =>
+      estimatedPlaybackPositionMs + lyricsOffsetMs;
   static bool get lyricsPanelVisible =>
       showLyrics &&
       (!hideUnavailableLyrics ||
@@ -1022,6 +1083,25 @@ class AppState {
         );
         showLyrics = snapshot['showLyrics'] == true;
         hideUnavailableLyrics = snapshot['hideUnavailableLyrics'] == true;
+        wordLyricsEnabled = snapshot['wordLyricsEnabled'] != false;
+        wordLyricsSmokeEnabled = snapshot['wordLyricsSmokeEnabled'] == true;
+        lyricsHighlightStyle = _enumFromName(
+          LyricsHighlightStyle.values,
+          snapshot['lyricsHighlightStyle'],
+          LyricsHighlightStyle.sweep,
+        );
+        lyricsInactiveOpacity = _validLyricsNumber(
+          snapshot['lyricsInactiveOpacity'],
+          .46,
+          .15,
+          1,
+        );
+        lyricsOffsetMs = _validLyricsNumber(
+          snapshot['lyricsOffsetMs'],
+          0,
+          -5000,
+          5000,
+        );
         spectrumThickness = _validSpectrumThickness(
           snapshot['spectrumThickness'],
         );
@@ -1262,6 +1342,19 @@ class AppState {
         maximumSizeRatio,
       );
       isMousePassthrough = false;
+      final savedCacheDirectory =
+          snapshot?['customCacheDirectory'] ??
+          p.getString('customCacheDirectory');
+      try {
+        await setCacheDirectory(
+          savedCacheDirectory is String ? savedCacheDirectory : '',
+          persist: false,
+          migrate: false,
+        );
+      } catch (_) {
+        
+        await setCacheDirectory('', persist: false, migrate: false);
+      }
       refreshQueue(force: true);
       await _restoreCustomFonts();
     } catch (_) {}
@@ -1286,6 +1379,25 @@ class AppState {
     );
     showLyrics = p.getBool('showLyrics') ?? false;
     hideUnavailableLyrics = p.getBool('hideUnavailableLyrics') ?? false;
+    wordLyricsEnabled = p.getBool('wordLyricsEnabled') ?? true;
+    wordLyricsSmokeEnabled = p.getBool('wordLyricsSmokeEnabled') ?? false;
+    lyricsHighlightStyle = _enumFromIndex(
+      LyricsHighlightStyle.values,
+      p.getInt('lyricsHighlightStyle'),
+      LyricsHighlightStyle.sweep,
+    );
+    lyricsInactiveOpacity = _validLyricsNumber(
+      p.getDouble('lyricsInactiveOpacity'),
+      .46,
+      .15,
+      1,
+    );
+    lyricsOffsetMs = _validLyricsNumber(
+      p.getDouble('lyricsOffsetMs'),
+      0,
+      -5000,
+      5000,
+    );
     spectrumThickness = _validSpectrumThickness(
       p.getDouble('spectrumThickness'),
     );
@@ -1431,6 +1543,11 @@ class AppState {
     'spectrumMode': spectrumMode.name,
     'showLyrics': showLyrics,
     'hideUnavailableLyrics': hideUnavailableLyrics,
+    'wordLyricsEnabled': wordLyricsEnabled,
+    'wordLyricsSmokeEnabled': wordLyricsSmokeEnabled,
+    'lyricsHighlightStyle': lyricsHighlightStyle.name,
+    'lyricsInactiveOpacity': lyricsInactiveOpacity,
+    'lyricsOffsetMs': lyricsOffsetMs,
     'spectrumThickness': spectrumThickness,
     'automaticSpectrumColumns': automaticSpectrumColumns,
     'spectrumColumnCount': spectrumColumnCount,
@@ -1467,6 +1584,7 @@ class AppState {
     'showNextUp': showNextUp,
     'lyricsCacheLimitMiB': lyricsCacheLimitMiB,
     'backgroundCacheLimitMiB': backgroundCacheLimitMiB,
+    'customCacheDirectory': customCacheDirectory,
     'nextUpLeadSeconds': nextUpLeadSeconds,
     'currentFontFamily': currentFontFamily,
     'titleWeightValue': titleWeightValue,
@@ -1511,6 +1629,14 @@ class AppState {
       : defaultSpectrumThickness;
   static int _validSpectrumColumns(Object? value) =>
       value is num && value.isFinite ? value.toInt().clamp(1, 128) : 32;
+  static double _validLyricsNumber(
+    Object? value,
+    double fallback,
+    double min,
+    double max,
+  ) => value is num && value.isFinite
+      ? value.toDouble().clamp(min, max)
+      : fallback;
   static Future<void> saveSettings() async {
     if (_prefs == null) return;
     _pendingSettingsSnapshot = jsonEncode(_captureSettingsSnapshot());

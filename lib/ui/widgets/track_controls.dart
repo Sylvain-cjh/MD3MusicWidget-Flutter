@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
 import '../../core/media_provider.dart';
 import 'playback_control_button.dart';
+import 'playback_pause_shade.dart';
 import 'media_geometry.dart';
 import 'cover_parallax.dart';
 import 'spectrum_glass_surface.dart';
@@ -328,7 +329,6 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         ? Colors.white.withValues(alpha: 0.78)
         : AppState.currentScheme.onSurfaceVariant;
     final bool isV = widget.isVertical;
-    final double uiOpacity = AppState.isPlaying ? 1.0 : 0.5;
     final bool canPrevious =
         AppState.showPlaybackControls &&
         MediaCapability.supports(
@@ -622,7 +622,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                         AppState.titleWeightValue,
                         fontSize: titleFontSize,
                       ),
-                      color: textColor.withValues(alpha: uiOpacity),
+                      color: textColor,
                       fontFamily: AppState.effectiveGlobalFontFamily,
                       fontFamilyFallback: AppState.textFontFallback,
                       letterSpacing: 0.0,
@@ -681,7 +681,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                         AppState.artistWeightValue,
                         fontSize: artistFontSize,
                       ),
-                      color: subTextColor.withValues(alpha: uiOpacity),
+                      color: subTextColor,
                       fontFamily: AppState.effectiveGlobalFontFamily,
                       fontFamilyFallback: AppState.textFontFallback,
                       letterSpacing: 0.0,
@@ -737,32 +737,59 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               width: prevW,
               height: btnH,
               child: canPrevious
-                  ? AnimatedOpacity(
-                      duration: const Duration(milliseconds: 500),
-                      curve: Curves.easeOutCubic,
-                      opacity: uiOpacity,
-                      child: PlaybackControlButton(
-                        key: const ValueKey('transport_previous'),
-                        width: prevW,
-                        height: btnH,
-                        borderRadius: AppState.getShapeRadius(
-                          AppState.prevButtonShape,
-                          btnH,
-                        ),
-                        background: AppState.currentScheme.primaryContainer,
-                        foreground: AppState.currentScheme.onPrimaryContainer,
-                        icon: Icons.skip_previous_rounded,
-                        iconSize: btnH * 0.54,
-                        label: '上一首',
-                        direction: -1,
-                        onPressed: () {
-                          AppState.sendCommand(MediaCommand.previous);
-                        },
+                  ? PlaybackControlButton(
+                      key: const ValueKey('transport_previous'),
+                      width: prevW,
+                      height: btnH,
+                      borderRadius: AppState.getShapeRadius(
+                        AppState.prevButtonShape,
+                        btnH,
                       ),
+                      background: AppState.currentScheme.primaryContainer,
+                      foreground: AppState.currentScheme.onPrimaryContainer,
+                      icon: Icons.skip_previous_rounded,
+                      iconSize: btnH * 0.54,
+                      label: '上一首',
+                      direction: -1,
+                      onPressed: () {
+                        AppState.sendCommand(MediaCommand.previous);
+                      },
                     )
                   : const SizedBox.shrink(),
             ),
 
+            MorphPositioned(
+              motion: widget.layoutMotion,
+              duration: AppState.layoutSwitchDuration,
+              curve: AppState.layoutSwitchCurve,
+              left: nextL,
+              top: btnT,
+              width: nextW,
+              height: btnH,
+              child: canNext
+                  ? PlaybackControlButton(
+                      key: const ValueKey('transport_next'),
+                      width: nextW,
+                      height: btnH,
+                      borderRadius: AppState.getShapeRadius(
+                        AppState.nextButtonShape,
+                        btnH,
+                      ),
+                      background: AppState.currentScheme.primaryContainer,
+                      foreground: AppState.currentScheme.onPrimaryContainer,
+                      icon: Icons.skip_next_rounded,
+                      iconSize: btnH * 0.54,
+                      label: '下一首',
+                      direction: 1,
+                      onPressed: () {
+                        AppState.sendCommand(MediaCommand.next);
+                      },
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            Positioned.fill(
+              child: PlaybackPauseShade(paused: !AppState.isPlaying),
+            ),
             MorphPositioned(
               motion: widget.layoutMotion,
               duration: AppState.layoutSwitchDuration,
@@ -796,41 +823,6 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                     )
                   : const SizedBox.shrink(),
             ),
-
-            MorphPositioned(
-              motion: widget.layoutMotion,
-              duration: AppState.layoutSwitchDuration,
-              curve: AppState.layoutSwitchCurve,
-              left: nextL,
-              top: btnT,
-              width: nextW,
-              height: btnH,
-              child: canNext
-                  ? AnimatedOpacity(
-                      duration: const Duration(milliseconds: 500),
-                      curve: Curves.easeOutCubic,
-                      opacity: uiOpacity,
-                      child: PlaybackControlButton(
-                        key: const ValueKey('transport_next'),
-                        width: nextW,
-                        height: btnH,
-                        borderRadius: AppState.getShapeRadius(
-                          AppState.nextButtonShape,
-                          btnH,
-                        ),
-                        background: AppState.currentScheme.primaryContainer,
-                        foreground: AppState.currentScheme.onPrimaryContainer,
-                        icon: Icons.skip_next_rounded,
-                        iconSize: btnH * 0.54,
-                        label: '下一首',
-                        direction: 1,
-                        onPressed: () {
-                          AppState.sendCommand(MediaCommand.next);
-                        },
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
           ],
         );
       },
@@ -861,6 +853,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
             accentColor: AppState.currentScheme.primary,
             image: AppState.coverProvider,
             isPlaying: AppState.isPlaying,
+            dimWhenPaused: false,
             enable3D: AppState.enable3DCover,
             layered: AppState.enableCoverLayers,
             layerIdentity: _coverIdentity,

@@ -18,6 +18,7 @@ class CoverParallax extends StatefulWidget {
   final Color accentColor;
   final ImageProvider? image;
   final bool isPlaying;
+  final bool dimWhenPaused;
   final bool enable3D;
   final bool layered;
   final Object? layerIdentity;
@@ -31,6 +32,7 @@ class CoverParallax extends StatefulWidget {
     required this.accentColor,
     required this.image,
     required this.isPlaying,
+    this.dimWhenPaused = true,
     required this.enable3D,
     this.layered = false,
     this.layerIdentity,
@@ -81,7 +83,7 @@ class CoverParallaxState extends State<CoverParallax>
     _reduced = MediaQuery.disableAnimationsOf(context);
     motion.reduceMotion(_reduced);
     if (_reduced) _releaseLayers();
-    if (!_reduced && _hovered) _ensureLayers();
+    if (!_reduced) _ensureLayers();
   }
 
   @override
@@ -93,7 +95,11 @@ class CoverParallaxState extends State<CoverParallax>
         oldWidget.enable3D != widget.enable3D ||
         oldWidget.layerService != widget.layerService) {
       _releaseLayers();
-      if (_hovered) _ensureLayers();
+      
+      
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _ensureLayers();
+      });
     }
     if (oldWidget.size != widget.size ||
         oldWidget.enable3D != widget.enable3D) {
@@ -156,7 +162,7 @@ class CoverParallaxState extends State<CoverParallax>
             _layerRetry?.cancel();
             _layerRetry = Timer(const Duration(milliseconds: 300), () {
               _layerRetry = null;
-              if (mounted && _hovered) _ensureLayers();
+              if (mounted) _ensureLayers();
             });
           }
           return;
@@ -206,8 +212,6 @@ class CoverParallaxState extends State<CoverParallax>
   }
 
   void _exit(PointerExitEvent event) {
-    _layerRetry?.cancel();
-    _layerRetry = null;
     _hovered = false;
     _lastPointer = null;
     _setTarget();
@@ -222,7 +226,11 @@ class CoverParallaxState extends State<CoverParallax>
             ((point.dy - size / 2) / (size / 2)).clamp(-1.0, 1.0),
           )
         : Offset.zero;
-    motion.setTarget(target, hovered: _hovered);
+    double soften(double value) => value * (1.1 - .1 * value.abs());
+    motion.setTarget(
+      Offset(soften(target.dx), soften(target.dy)),
+      hovered: _hovered,
+    );
   }
 
   @override
@@ -321,17 +329,18 @@ class CoverParallaxState extends State<CoverParallax>
                 child: child,
               ),
             ),
-          RepaintBoundary(
-            child: AnimatedContainer(
-              duration: _reduced
-                  ? Duration.zero
-                  : const Duration(milliseconds: 500),
-              curve: Curves.easeOutCubic,
-              color: Colors.black.withValues(
-                alpha: widget.isPlaying ? 0 : 0.45,
+          if (widget.dimWhenPaused)
+            RepaintBoundary(
+              child: AnimatedContainer(
+                duration: _reduced
+                    ? Duration.zero
+                    : const Duration(milliseconds: 500),
+                curve: Curves.easeOutCubic,
+                color: Colors.black.withValues(
+                  alpha: widget.isPlaying ? 0 : 0.45,
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -346,7 +355,13 @@ class CoverParallaxState extends State<CoverParallax>
           animation: motion,
           child: face,
           builder: (context, face) {
-            final depth = _reduced ? Offset.zero : motion.position;
+            final lead = motion.position + motion.velocity * .006;
+            final depth = _reduced
+                ? Offset.zero
+                : Offset(
+                    lead.dx.clamp(-1.05, 1.05),
+                    lead.dy.clamp(-1.05, 1.05),
+                  );
             final hover = _reduced ? 0.0 : motion.hover;
             final tilt = widget.enable3D ? 0.14 : 0.0;
             final matrix = Matrix4.identity();

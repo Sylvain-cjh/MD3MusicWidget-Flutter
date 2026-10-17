@@ -126,6 +126,14 @@ final class SettingsLabels {
 
   
   static const showLyrics = '显示歌词';
+  static const wordLyrics = '逐字高亮';
+  static const wordLyricsSmoke = '消散歌词';
+  static const wordLyricsStyle = '高亮样式';
+  static const wordLyricsSweep = '平滑扫色';
+  static const wordLyricsSoft = '柔和点亮';
+  static const wordLyricsEmphasis = '轻微抬升';
+  static const wordLyricsInactive = '未唱部分明暗';
+  static const lyricsOffset = '歌词时间微调';
   static const lyricsProvider = '歌词提供商';
   static const providerLrclib = 'LRCLIB · 在线';
   static const providerLocal = '本地 LRC';
@@ -184,4 +192,8 @@ final class SettingsLabels {
   static const lyricsSettleOut = '缩小退场';
   static const lyricsWipeIn = '横向揭幕';
   static const lyricsWipeOut = '横向收幕';
+  static const cacheDirectory = '缓存位置';
+  static const chooseCacheDirectory = '更换文件夹';
+  static const resetCacheDirectory = '恢复默认位置';
+  static const cacheDirectoryChanging = '正在整理缓存…';
 }

@@ -22,10 +22,14 @@ class LayoutBackdropBlend extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: motion,
-    child: SizedBox(
-      width: targetSize.width,
-      height: targetSize.height,
-      child: child,
+    child: RepaintBoundary(
+      child: ClipRect(
+        child: SizedBox(
+          width: targetSize.width,
+          height: targetSize.height,
+          child: child,
+        ),
+      ),
     ),
     builder: (context, live) {
       final enabled =

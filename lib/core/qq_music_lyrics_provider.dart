@@ -8,15 +8,22 @@ import 'lyrics_http_client.dart';
 import 'lyrics_primary_attempt.dart';
 import 'lrclib_lyrics_provider.dart';
 import 'platform_provider.dart';
+import 'qrc_decoder.dart';
+import 'dart:async';
 
 final class QqMusicLyricsProvider
-    implements LyricsPlatformProvider, RetryableLyricsProvider {
+    implements
+        LyricsPlatformProvider,
+        RetryableLyricsProvider,
+        ExhaustiveLyricsProvider {
   static const providerId = 'qqMusic';
   static const _maxBytes = 2 * 1024 * 1024;
   final HttpClient _client;
   final LrclibLyricsProvider _fallback;
   final Uri _searchEndpoint;
   final Uri _lyricEndpoint;
+  final Uri? _wordLyricEndpoint;
+  final Future<String?> Function(String) _decodeQrc;
   final Duration primaryBudget;
   final Map<String, Future<LyricsDocument?>> _pending = {};
   final LinkedHashMap<String, (LyricsDocument?, DateTime)> _cache =
@@ -27,8 +34,16 @@ final class QqMusicLyricsProvider
     required this._fallback,
     Uri? searchEndpoint,
     Uri? lyricEndpoint,
+    Uri? wordLyricEndpoint,
+    Future<String?> Function(String)? qrcDecoder,
     this.primaryBudget = const Duration(seconds: 4),
   }) : _client = directLyricsHttpClient(client),
+       _decodeQrc = qrcDecoder ?? decodeQrcPayload,
+       _wordLyricEndpoint =
+           wordLyricEndpoint ??
+           (lyricEndpoint == null
+               ? Uri.https('u.y.qq.com', '/cgi-bin/musicu.fcg')
+               : null),
        _searchEndpoint =
            searchEndpoint ??
            Uri.https('c.y.qq.com', '/soso/fcgi-bin/client_search_cp'),
@@ -150,10 +165,35 @@ final class QqMusicLyricsProvider
     }
     matches.sort((a, b) => b.$1.compareTo(a.$1));
     if (matches.isEmpty) return null;
+    for (final match in matches.take(2)) {
+      final candidate = attempt.slice(const Duration(milliseconds: 2200));
+      final document = await candidate
+          .run(() async {
+            final lineFuture = _loadLineLyrics(
+              match.$2,
+              candidate,
+            ).catchError((Object _) => null);
+            final words = await _loadWordLyrics(
+              match.$2,
+              candidate,
+            ).catchError((Object _) => null);
+            if (words?.isWordTimed == true) return words;
+            return await lineFuture ?? words;
+          })
+          .catchError((Object _) => null);
+      if (document != null && !document.isEmpty) return document;
+    }
+    return null;
+  }
+
+  Future<LyricsDocument?> _loadLineLyrics(
+    String mid,
+    LyricsPrimaryAttempt attempt,
+  ) async {
     final lyric = await _getJson(
       _lyricEndpoint.replace(
         queryParameters: {
-          'songmid': matches.first.$2,
+          'songmid': mid,
           'format': 'json',
           'nobase64': '1',
           'g_tk': '5381',
@@ -164,8 +204,59 @@ final class QqMusicLyricsProvider
     if (lyric is! Map || lyric['retcode'] != 0) return null;
     final lrc = lyric['lyric']?.toString() ?? '';
     if (lrc.trim().isEmpty) return null;
-    final document = LyricsDocument.parseLrc(_decodeEntities(lrc));
+    final document = await LyricsDocument.parseAsync(_decodeEntities(lrc));
     return document.isEmpty ? null : document;
+  }
+
+  Future<LyricsDocument?> _loadWordLyrics(
+    String mid,
+    LyricsPrimaryAttempt parent,
+  ) async {
+    if (_wordLyricEndpoint == null) return null;
+    final available = parent.remaining.inMilliseconds - 100;
+    if (available <= 0) return null;
+    final child = parent.slice(
+      const Duration(milliseconds: 1600),
+      reserve: const Duration(milliseconds: 100),
+    );
+    return child.run(() async {
+      final payload = jsonEncode({
+        'comm': {'ct': 24, 'cv': 0},
+        'req_0': {
+          'module': 'music.musichallSong.PlayLyricInfo',
+          'method': 'GetPlayLyricInfo',
+          'param': {
+            'songMID': mid,
+            'qrc': 1,
+            'qrc_t': 0,
+            'roma': 0,
+            'trans': 0,
+            'crypt': 0,
+          },
+        },
+      });
+      final json = await _getJson(
+        _wordLyricEndpoint.replace(queryParameters: {'data': payload}),
+        child,
+      );
+      if (json is! Map || json['req_0'] is! Map) return null;
+      final response = json['req_0'] as Map;
+      if (response['code'] != 0 || response['data'] is! Map) return null;
+      final data = response['data'] as Map;
+      var text = data['lyric'] is String ? data['lyric'] as String : '';
+      if (text.isEmpty) return null;
+      if (data['qrc'] == 1) {
+        text = await _decodeQrc(text) ?? '';
+      } else if (!text.trimLeft().startsWith('[') &&
+          !text.trimLeft().startsWith('<')) {
+        text = utf8.decode(base64.decode(text));
+      }
+      if (text.isEmpty) return null;
+      final document = await LyricsDocument.parseAsync(
+        text.trimLeft().startsWith('<') ? text : _decodeEntities(text),
+      );
+      return document.isEmpty ? null : document;
+    });
   }
 
   Future<dynamic> _getJson(Uri uri, LyricsPrimaryAttempt attempt) async {
@@ -173,7 +264,7 @@ final class QqMusicLyricsProvider
     try {
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'Mozilla/5.0 MD3MusicWidget/0.10.1',
+        'Mozilla/5.0 MD3MusicWidget/1.0.0',
       );
       request.headers.set(HttpHeaders.refererHeader, 'https://y.qq.com/');
       final response = await request.close().timeout(attempt.remaining);

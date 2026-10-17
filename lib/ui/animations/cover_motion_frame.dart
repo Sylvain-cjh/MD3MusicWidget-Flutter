@@ -60,29 +60,27 @@ abstract final class CoverMotionGeometry {
   
   static CoverMotionFrame softSlideIncoming(int direction, double progress) {
     final p = progress.clamp(0.0, 1.0);
+    if (p == 1) return const CoverMotionFrame();
     if (direction >= 0) {
       return CoverMotionFrame(
         offset: nextEntryOffset * (1 - p),
         scale: 0.92 + 0.08 * p,
+        opacity: const Interval(
+          0,
+          .14,
+          curve: Curves.easeOutCubic,
+        ).transform(p),
       );
     }
-    if (p < frontLiftProgress) {
-      final lift = p / frontLiftProgress;
-      return CoverMotionFrame(
-        offset: Offset.lerp(
-          const Offset(-0.04, 0.055),
-          const Offset(-deckDistance, -0.035),
-          lift,
-        )!,
-        scale: 0.90 + 0.06 * lift,
-        angle: -0.05 * lift,
-      );
-    }
-    final settle = (p - frontLiftProgress) / (1 - frontLiftProgress);
+    
+    final arc = math.sin(math.pi * p);
     return CoverMotionFrame(
-      offset: const Offset(-deckDistance, -0.035) * (1 - settle),
-      scale: 0.96 + 0.04 * settle,
-      angle: -0.05 * (1 - settle),
+      offset: Offset(
+        -.04 * (1 - p) - (deckDistance - .02) * arc,
+        .055 * (1 - p) - .0625 * arc,
+      ),
+      scale: .90 + .10 * p + .01 * arc,
+      angle: -.05 * arc,
     );
   }
 

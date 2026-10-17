@@ -60,6 +60,11 @@ final class SettingsDescriptions {
 
   
   static const showLyrics = '这是一个神秘的歌词显示';
+  static const wordLyrics = '有逐字时间时跟着唱，没有时照常显示整句';
+  static const wordLyricsSmoke = '体验当灭霸的感觉';
+  static const wordLyricsInactive = '让正在唱的部分更容易看清';
+  static const lyricsOffset = '正值提前，负值延后；只影响歌词';
+  static const localTimedLyrics = '也支持 .ttml、.yrc、明文 .qrc 和增强 LRC';
   static const lyricsTransition = '新的一句会这样来到眼前';
   static const lyricsLinkAnimations = '打开时，上一句离开和下一句进入会使用同一种风格';
   static const lyricsExitTransition = '上一句离开时，也可以有自己的节奏';
@@ -80,4 +85,5 @@ final class SettingsDescriptions {
   static const globalFont = '想换一种感觉，也可以加上自己的字体';
   static const titleWeight = '让歌名轻一点或更醒目，拖动就能看到';
   static const artistWeight = '歌手名不必和歌名一样抢眼';
+  static const cacheDirectory = '歌词和封面一起搬过去，原位置的副本会保留';
 }

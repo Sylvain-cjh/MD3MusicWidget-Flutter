@@ -14,11 +14,18 @@ class StableArtworkSurface extends StatefulWidget {
   final ImageProvider provider;
   final BoxFit fit;
   final Alignment alignment;
+  final bool animateReplacement;
+
+  
+  
+  final Rect? clampedImageRect;
   const StableArtworkSurface({
     super.key,
     required this.provider,
     this.fit = BoxFit.cover,
     this.alignment = Alignment.center,
+    this.animateReplacement = true,
+    this.clampedImageRect,
   });
   @override
   State<StableArtworkSurface> createState() => StableArtworkSurfaceState();
@@ -76,6 +83,11 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
   @override
   void didUpdateWidget(StableArtworkSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!widget.animateReplacement && _motion.isAnimating) {
+      
+      
+      _motion.value = 1;
+    }
     _resolve();
   }
 
@@ -156,9 +168,10 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
       }
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder)..scale(rasterScale);
+      final snapshotSize = widget.clampedImageRect?.size ?? _paintSize;
       _ArtworkPainter.draw(
         canvas,
-        _paintSize,
+        snapshotSize,
         current,
         widget.fit,
         widget.alignment,
@@ -167,8 +180,8 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
       ui.Image? snapshot;
       try {
         snapshot = await picture.toImage(
-          (_paintSize.width * rasterScale).ceil(),
-          (_paintSize.height * rasterScale).ceil(),
+          (snapshotSize.width * rasterScale).ceil(),
+          (snapshotSize.height * rasterScale).ceil(),
         );
         if (!mounted || serial != _serial) {
           snapshot.dispose();
@@ -203,7 +216,7 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
     setState(() {
       _incoming = image;
     });
-    if (_base.isEmpty || _reduced) {
+    if (_base.isEmpty || _reduced || !widget.animateReplacement) {
       _motion.value = 1;
       
       _settleFrames();
@@ -224,6 +237,7 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
             _motion,
             widget.fit,
             widget.alignment,
+            widget.clampedImageRect,
           ),
           size: Size.infinite,
         ),
@@ -249,20 +263,23 @@ class _ArtworkPainter extends CustomPainter {
   final Animation<double> motion;
   final BoxFit fit;
   final Alignment alignment;
+  final Rect? clampedImageRect;
   _ArtworkPainter(
     this.base,
     this.incoming,
     this.motion,
     this.fit,
     this.alignment,
+    this.clampedImageRect,
   ) : super(repaint: motion);
   static void draw(
     Canvas canvas,
     Size size,
     List<_ArtworkFrame> frames,
     BoxFit fit,
-    Alignment alignment,
-  ) {
+    Alignment alignment, {
+    Rect? clampedImageRect,
+  }) {
     if (size.isEmpty || frames.isEmpty) return;
     final bounds = Offset.zero & size;
     final active = frames.where((f) => f.weight > 0).toList();
@@ -275,15 +292,52 @@ class _ArtworkPainter extends CustomPainter {
       );
       final fitted = applyBoxFit(fit, input, size);
       final paint = Paint()
+        
+        
+        
+        ..isAntiAlias = clampedImageRect == null
         ..filterQuality = FilterQuality.medium
         ..color = Colors.white.withValues(alpha: frame.weight)
         ..blendMode = active.length > 1 ? BlendMode.plus : BlendMode.srcOver;
-      canvas.drawImageRect(
-        frame.image,
-        alignment.inscribe(fitted.source, Offset.zero & input),
-        alignment.inscribe(fitted.destination, bounds),
-        paint,
-      );
+      if (clampedImageRect case final rect?) {
+        
+        
+        
+        canvas.save();
+        canvas.clipRect(bounds);
+        final xs = [
+          (bounds.left, rect.left, 0.0, 1.0),
+          (rect.left, rect.right, 0.0, input.width),
+          (rect.right, bounds.right, input.width - 1, input.width),
+        ];
+        final ys = [
+          (bounds.top, rect.top, 0.0, 1.0),
+          (rect.top, rect.bottom, 0.0, input.height),
+          (rect.bottom, bounds.bottom, input.height - 1, input.height),
+        ];
+        for (final x in xs) {
+          if (x.$2 <= x.$1) continue;
+          for (final y in ys) {
+            if (y.$2 <= y.$1) continue;
+            final destination = Rect.fromLTRB(x.$1, y.$1, x.$2, y.$2);
+            if (!destination.overlaps(bounds)) continue;
+            canvas.drawImageRect(
+              frame.image,
+              Rect.fromLTRB(x.$3, y.$3, x.$4, y.$4),
+              destination,
+              paint,
+            );
+          }
+        }
+        canvas.restore();
+      } else {
+        canvas.drawImageRect(
+          frame.image,
+          alignment.inscribe(fitted.source, Offset.zero & input),
+          alignment.inscribe(fitted.destination, bounds),
+          paint,
+        );
+      }
     }
     if (active.length > 1) canvas.restore();
   }
@@ -304,6 +358,7 @@ class _ArtworkPainter extends CustomPainter {
       ],
       fit,
       alignment,
+      clampedImageRect: clampedImageRect,
     );
   }
 

@@ -30,6 +30,7 @@ class FlutterWindow : public Win32Window {
   void RefreshFonts();
   SystemFontCatalog font_catalog_;
   bool font_refresh_pending_ = false;
+  bool font_catalog_started_ = false;
   
   flutter::DartProject project_;
 

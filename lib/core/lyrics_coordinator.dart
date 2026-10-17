@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'lyrics_document.dart';
 import 'platform_provider.dart';
 import 'lyrics_disk_cache.dart';
+import 'lyrics_request_error.dart';
+import 'lyrics_reconnect_policy.dart';
 
 enum LyricsStatus { unavailable, loading, ready, failed }
 
@@ -28,6 +30,11 @@ final class LyricsState {
   final LyricsIssue issue;
   final int attempt;
   final int maximumAttempts;
+  final DateTime? retryAt;
+  final bool automaticRetryScheduled;
+  final DateTime? reconnectUntil;
+  final int reconnectAttempt;
+  final int maximumReconnectAttempts;
 
   const LyricsState({
     required this.status,
@@ -37,6 +44,11 @@ final class LyricsState {
     this.issue = LyricsIssue.none,
     this.attempt = 1,
     this.maximumAttempts = 1,
+    this.retryAt,
+    this.automaticRetryScheduled = false,
+    this.reconnectUntil,
+    this.reconnectAttempt = 0,
+    this.maximumReconnectAttempts = 0,
   });
 
   LyricLine? get currentLine =>
@@ -62,15 +74,26 @@ final class LyricsCoordinator extends ChangeNotifier {
   final bool retryMissing;
   Timer? _retryTimer;
   Completer<void>? _retryWake;
+  Timer? _cooldownTimer;
+  int _reconnectAttempts = 0;
+  DateTime? _reconnectUntil;
+  String? _reconnectProviderId;
+  final LyricsReconnectPolicy reconnectPolicy;
+  final DateTime Function() _now;
 
   LyricsCoordinator(
     this.providers, {
     this.cache,
     int maximumAttempts = 1,
     this.retryMissing = false,
-  }) : maximumAttempts = maximumAttempts.clamp(1, 5);
+    this.reconnectPolicy = const LyricsReconnectPolicy(),
+    DateTime Function()? clock,
+  }) : maximumAttempts = maximumAttempts.clamp(1, 5),
+       _now = clock ?? DateTime.now;
 
   void _cancelRetry() {
+    _cooldownTimer?.cancel();
+    _cooldownTimer = null;
     _retryTimer?.cancel();
     _retryTimer = null;
     final wake = _retryWake;
@@ -95,9 +118,28 @@ final class LyricsCoordinator extends ChangeNotifier {
     PlatformTrack? track, {
     String? providerId,
     bool force = false,
+  }) => _loadTrack(track, providerId: providerId, force: force);
+
+  Future<void> _loadTrack(
+    PlatformTrack? track, {
+    String? providerId,
+    bool force = false,
+    bool cooldownRecovery = false,
   }) async {
     final identity = track?.identity;
     final displayIdentity = track?.queueIdentity;
+    final sameContext =
+        displayIdentity != null &&
+        displayIdentity == _displayTrackIdentity &&
+        _selectedProviderId == providerId &&
+        _providerRevision == providers.revision;
+    
+    
+    if (sameContext &&
+        !cooldownRecovery &&
+        _state.retryAt?.isAfter(_now()) == true) {
+      return;
+    }
     if (!force &&
         identity == _trackIdentity &&
         _selectedProviderId == providerId &&
@@ -108,7 +150,9 @@ final class LyricsCoordinator extends ChangeNotifier {
         displayIdentity != null &&
         displayIdentity == _displayTrackIdentity &&
         (_state.status == LyricsStatus.ready ||
-            _state.status == LyricsStatus.loading) &&
+            _state.status == LyricsStatus.loading ||
+            _state.issue == LyricsIssue.rateLimited ||
+            _reconnectUntil != null) &&
         _selectedProviderId == providerId &&
         _providerRevision == providers.revision) {
       _trackIdentity = identity;
@@ -119,8 +163,14 @@ final class LyricsCoordinator extends ChangeNotifier {
     _selectedProviderId = providerId;
     _providerRevision = providers.revision;
     _cancelRetry();
+    if (!sameContext ||
+        (force &&
+            !cooldownRecovery &&
+            (_reconnectUntil == null || !_now().isBefore(_reconnectUntil!)))) {
+      _resetReconnect();
+    }
     final generation = ++_generation;
-    _positionMs = 0;
+    if (!sameContext) _positionMs = 0;
     final provider = track == null
         ? null
         : providers.lyricsFor(track, providerId: providerId);
@@ -136,7 +186,7 @@ final class LyricsCoordinator extends ChangeNotifier {
     try {
       LyricsDocument? document;
       final useDisk = provider.id != 'localLrc';
-      if (!force && useDisk && cache != null) {
+      if ((!force || cooldownRecovery) && useDisk && cache != null) {
         _cacheLookupGeneration = generation;
         try {
           document = await cache!.get(track!, provider.id);
@@ -151,22 +201,38 @@ final class LyricsCoordinator extends ChangeNotifier {
       if (document == null) {
         
         
+        final attemptLimit = cooldownRecovery ? 1 : maximumAttempts;
+        if (force && !cooldownRecovery && provider is RetryableLyricsProvider) {
+          (provider as RetryableLyricsProvider).invalidateMiss(track!);
+        }
+        
+        
         _setState(
           LyricsState(
             status: LyricsStatus.loading,
-            providerId: provider.id,
-            maximumAttempts: maximumAttempts,
+            providerId: cooldownRecovery
+                ? (_reconnectProviderId ?? provider.id)
+                : provider.id,
+            maximumAttempts: attemptLimit,
+            reconnectUntil: _reconnectUntil,
+            reconnectAttempt: _reconnectAttempts,
+            maximumReconnectAttempts: reconnectPolicy.maximumAttempts,
           ),
         );
-        for (var attempt = 1; attempt <= maximumAttempts; attempt++) {
+        for (var attempt = 1; attempt <= attemptLimit; attempt++) {
           if (_disposed || generation != _generation) return;
           if (attempt > 1) {
             _setState(
               LyricsState(
                 status: LyricsStatus.loading,
-                providerId: provider.id,
+                providerId: cooldownRecovery
+                    ? (_reconnectProviderId ?? provider.id)
+                    : provider.id,
                 attempt: attempt,
-                maximumAttempts: maximumAttempts,
+                maximumAttempts: attemptLimit,
+                reconnectUntil: _reconnectUntil,
+                reconnectAttempt: _reconnectAttempts,
+                maximumReconnectAttempts: reconnectPolicy.maximumAttempts,
               ),
             );
           }
@@ -175,8 +241,9 @@ final class LyricsCoordinator extends ChangeNotifier {
             if (_disposed || generation != _generation) return;
             if (document != null && !document.isEmpty) break;
             if (!retryMissing ||
+                provider is ExhaustiveLyricsProvider ||
                 provider is! RetryableLyricsProvider ||
-                attempt == maximumAttempts) {
+                attempt == attemptLimit) {
               break;
             }
             (provider as RetryableLyricsProvider).invalidateMiss(track);
@@ -191,7 +258,7 @@ final class LyricsCoordinator extends ChangeNotifier {
                 error is SocketException ||
                 error is TimeoutException ||
                 error is HttpException;
-            if (rateLimited || !transient || attempt == maximumAttempts) {
+            if (rateLimited || !transient || attempt == attemptLimit) {
               rethrow;
             }
             if (provider is RetryableLyricsProvider) {
@@ -202,6 +269,7 @@ final class LyricsCoordinator extends ChangeNotifier {
         }
       }
       if (_disposed || generation != _generation) return;
+      _resetReconnect();
       if (document == null || document.isEmpty) {
         _setState(
           LyricsState(
@@ -224,12 +292,18 @@ final class LyricsCoordinator extends ChangeNotifier {
             lineIndex: document.lineIndexAt(_positionMs),
           ),
         );
+        if (restoredFromDisk && !document.wordTimingChecked && cache != null) {
+          
+          
+          unawaited(_upgradeWordTiming(track!, provider, document, generation));
+        }
       }
     } catch (error) {
       if (_disposed || generation != _generation) return;
       final issue = switch (error) {
+        LyricsRateLimitException() => LyricsIssue.rateLimited,
         HttpException(message: final message)
-            when message.contains('rate limited') =>
+            when RegExp(r'\b429\b|rate limited').hasMatch(message) =>
           LyricsIssue.rateLimited,
         HttpException() ||
         SocketException() ||
@@ -237,14 +311,166 @@ final class LyricsCoordinator extends ChangeNotifier {
         FormatException() => LyricsIssue.invalidData,
         _ => LyricsIssue.unknown,
       };
-      _setState(
-        LyricsState(
-          status: LyricsStatus.failed,
-          providerId: provider.id,
-          issue: issue,
-        ),
+      final rateLimit = error is LyricsRateLimitException
+          ? error
+          : issue == LyricsIssue.rateLimited
+          ? LyricsRateLimitException(
+              providerId: provider.id,
+              retryAt: _now().add(const Duration(seconds: 30)),
+              fromServer: true,
+            )
+          : null;
+      final recoverableNetwork =
+          cooldownRecovery &&
+          issue == LyricsIssue.network &&
+          !(error is HttpException &&
+              RegExp(r'\b4\d\d\b').hasMatch(error.message));
+      if (rateLimit != null) {
+        _reconnectUntil ??= _now().add(reconnectPolicy.window);
+        _reconnectProviderId = rateLimit.providerId;
+      }
+      final nextAttempt =
+          (rateLimit != null || recoverableNetwork) && _reconnectUntil != null
+          ? reconnectPolicy.nextAttempt(
+              now: _now(),
+              windowEnd: _reconnectUntil!,
+              completedAttempts: _reconnectAttempts,
+              serverRetryAt: rateLimit?.retryAt,
+            )
+          : null;
+      final retryAt = nextAttempt ?? rateLimit?.retryAt;
+      _setReconnectFailure(
+        providerId:
+            rateLimit?.providerId ??
+            (cooldownRecovery ? _reconnectProviderId : null) ??
+            provider.id,
+        issue: issue,
+        retryAt: retryAt,
+        automatic: nextAttempt != null,
       );
+      if (retryAt != null && track != null) {
+        _scheduleCooldown(
+          retryAt,
+          track,
+          providerId,
+          generation,
+          recover: nextAttempt != null,
+        );
+      }
     }
+  }
+
+  void _resetReconnect() {
+    _reconnectUntil = null;
+    _reconnectProviderId = null;
+    _reconnectAttempts = 0;
+  }
+
+  void _setReconnectFailure({
+    required String providerId,
+    required LyricsIssue issue,
+    required DateTime? retryAt,
+    required bool automatic,
+  }) => _setState(
+    LyricsState(
+      status: LyricsStatus.failed,
+      providerId: providerId,
+      issue: issue,
+      retryAt: retryAt,
+      automaticRetryScheduled: automatic,
+      reconnectUntil: _reconnectUntil,
+      reconnectAttempt: _reconnectAttempts,
+      maximumReconnectAttempts: reconnectPolicy.maximumAttempts,
+    ),
+  );
+
+  void _scheduleCooldown(
+    DateTime retryAt,
+    PlatformTrack track,
+    String? providerId,
+    int generation, {
+    required bool recover,
+  }) {
+    if (_disposed || generation != _generation) return;
+    final remaining = retryAt.difference(_now());
+    
+    final delay = remaining <= Duration.zero
+        ? Duration.zero
+        : remaining > const Duration(days: 1)
+        ? const Duration(days: 1)
+        : remaining;
+    _cooldownTimer = Timer(delay, () {
+      _cooldownTimer = null;
+      if (_disposed || generation != _generation) return;
+      if (_now().isBefore(retryAt)) {
+        _scheduleCooldown(
+          retryAt,
+          track,
+          providerId,
+          generation,
+          recover: recover,
+        );
+      } else if (recover &&
+          _reconnectUntil != null &&
+          reconnectPolicy.canStart(
+            now: _now(),
+            windowEnd: _reconnectUntil!,
+            completedAttempts: _reconnectAttempts,
+          )) {
+        _reconnectAttempts++;
+        unawaited(
+          _loadTrack(
+            track,
+            providerId: providerId,
+            force: true,
+            cooldownRecovery: true,
+          ),
+        );
+      } else {
+        
+        
+        _setReconnectFailure(
+          providerId: _state.providerId,
+          issue: _state.issue,
+          retryAt: _state.retryAt,
+          automatic: false,
+        );
+      }
+    });
+  }
+
+  Future<void> _upgradeWordTiming(
+    PlatformTrack track,
+    LyricsPlatformProvider provider,
+    LyricsDocument cached,
+    int generation,
+  ) async {
+    var replacement = cached.withWordTimingChecked();
+    try {
+      final fresh = await provider.loadLyrics(track);
+      if (fresh != null &&
+          !fresh.isEmpty &&
+          (fresh.isWordTimed || !cached.isWordTimed)) {
+        replacement = fresh.withWordTimingChecked();
+      }
+    } catch (_) {
+      
+    }
+    if (_disposed || generation != _generation) return;
+    await cache!.put(track, provider.id, replacement);
+    if (_disposed || generation != _generation || !replacement.isWordTimed) {
+      return;
+    }
+    _setState(
+      LyricsState(
+        status: LyricsStatus.ready,
+        providerId: replacement.sourceProviderId.isEmpty
+            ? provider.id
+            : replacement.sourceProviderId,
+        document: replacement,
+        lineIndex: replacement.lineIndexAt(_positionMs),
+      ),
+    );
   }
 
   void setPositionMs(double positionMs) {

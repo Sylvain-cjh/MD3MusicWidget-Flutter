@@ -27,8 +27,10 @@ final class LocalLrcLyricsProvider implements LyricsPlatformProvider {
     final artist = _safeName(track.artist);
     if (title.isEmpty) return null;
     final names = <String>[
-      if (artist.isNotEmpty) '$artist - $title.lrc',
-      '$title.lrc',
+      for (final extension in const ['ttml', 'yrc', 'qrc', 'alrc', 'lrc']) ...[
+        if (artist.isNotEmpty) '$artist - $title.$extension',
+        '$title.$extension',
+      ],
     ];
     for (final name in names) {
       final file = File('$directory${Platform.pathSeparator}$name');
@@ -41,11 +43,15 @@ final class LocalLrcLyricsProvider implements LyricsPlatformProvider {
     var scanned = 0;
     await for (final entry in folder.list(followLinks: false)) {
       if (++scanned > 512) break;
-      if (entry is! File || !entry.path.toLowerCase().endsWith('.lrc')) {
+      if (entry is! File ||
+          !RegExp(
+            r'\.(ttml|yrc|qrc|alrc|lrc)$',
+            caseSensitive: false,
+          ).hasMatch(entry.path)) {
         continue;
       }
       final filename = entry.uri.pathSegments.last;
-      final key = _matchKey(filename.substring(0, filename.length - 4));
+      final key = _matchKey(filename.replaceFirst(RegExp(r'\.[^.]+$'), ''));
       if (titleKey.isEmpty || !key.contains(titleKey)) continue;
       final artistMatched = artistKey.isNotEmpty && key.contains(artistKey);
       candidates.add((artistMatched ? 2 : 1, entry));
@@ -67,7 +73,7 @@ final class LocalLrcLyricsProvider implements LyricsPlatformProvider {
           metadataTitle.isEmpty &&
           _matchKey(
                 candidate.$2.uri.pathSegments.last.replaceFirst(
-                  RegExp(r'\.lrc$', caseSensitive: false),
+                  RegExp(r'\.(ttml|yrc|qrc|alrc|lrc)$', caseSensitive: false),
                   '',
                 ),
               ) !=
@@ -102,8 +108,9 @@ final class LocalLrcLyricsProvider implements LyricsPlatformProvider {
       } else {
         contents = utf8.decode(bytes);
       }
-      final document = LyricsDocument.parseLrc(
+      final document = await LyricsDocument.parseAsync(
         contents.replaceFirst('\ufeff', ''),
+        format: file.path.split('.').last,
       );
       return document.isEmpty ? null : document;
     } on FormatException {

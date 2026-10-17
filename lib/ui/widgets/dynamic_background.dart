@@ -137,24 +137,31 @@ class _AnchoredBackgroundCanvas extends StatelessWidget {
   final double width;
   final double height;
   final double anchorHeight;
+  final double? anchorWidth;
+  final double anchorLeft;
   final Widget child;
 
   const _AnchoredBackgroundCanvas({
     required this.width,
     required this.height,
     required this.anchorHeight,
+    this.anchorWidth,
+    this.anchorLeft = 0,
     required this.child,
   });
 
   @override
   Widget build(BuildContext context) => OverflowBox(
-    alignment: Alignment.topCenter,
+    alignment: anchorWidth == null ? Alignment.topCenter : Alignment.topLeft,
     minWidth: width,
     maxWidth: width,
     minHeight: height,
     maxHeight: height,
     child: Transform.translate(
-      offset: Offset(0, (anchorHeight - height) / 2),
+      offset: Offset(
+        anchorWidth == null ? 0 : anchorLeft + (anchorWidth! - width) / 2,
+        (anchorHeight - height) / 2,
+      ),
       child: child,
     ),
   );
@@ -162,8 +169,49 @@ class _AnchoredBackgroundCanvas extends StatelessWidget {
 
 class DynamicBackground extends StatefulWidget {
   final double? anchorHeight;
+  final double? anchorWidth;
+  final double anchorLeft;
   final bool? verticalLayout;
-  const DynamicBackground({super.key, this.anchorHeight, this.verticalLayout});
+  final bool animateArtworkReplacement;
+  const DynamicBackground({
+    super.key,
+    this.anchorHeight,
+    this.anchorWidth,
+    this.anchorLeft = 0,
+    this.verticalLayout,
+    this.animateArtworkReplacement = true,
+  });
+
+  
+  
+  static Future<void> prepareLayout(
+    BuildContext context,
+    WidgetLayout layout,
+  ) async {
+    final source = AppState.bgBlurProvider ?? AppState.coverProvider;
+    if (!AppState.enableGlow || source == null) return;
+    await precacheImage(
+      BlurredArtworkProvider(
+        source: source,
+        identity: AppState.currentCoverVersion.isEmpty
+            ? 'fallback'
+            : AppState.currentCoverVersion,
+        waterfall: AppState.glowMode == GlowMode.waterfall,
+        headerHeight: AppState.glowMode == GlowMode.waterfall
+            ? AppState.glowHeaderHeightOf(layout)
+            : 0,
+        pixelScale:
+            MediaQuery.devicePixelRatioOf(context) *
+            AppState.componentScale *
+            1.25,
+      ),
+      context,
+      onError: (error, stack) {
+        debugPrint('目标布局背景预备失败，保留已有背景: $error');
+      },
+    );
+  }
+
   @override
   State<DynamicBackground> createState() => _DynamicBackgroundState();
 }
@@ -319,37 +367,37 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     super.dispose();
   }
 
-  Widget _buildWaterfallGlow(
-    ImageProvider bgProvider,
-    String coverKey,
-    double canvasW,
-    double canvasH,
-    double headerH,
-  ) {
-    return _preparedGlow(bgProvider, coverKey, headerH, true);
-  }
-
-  Widget _buildWallpaperGlow(ImageProvider bgProvider, String coverKey) {
-    return _preparedGlow(bgProvider, coverKey, 0, false);
-  }
-
   Widget _preparedGlow(
     ImageProvider source,
     String identity,
     double headerH,
     bool waterfall,
-  ) => StableArtworkSurface(
-    fit: BoxFit.fill,
-    provider: BlurredArtworkProvider(
-      source: source,
-      identity: identity,
-      waterfall: waterfall,
-      headerHeight: headerH,
-      pixelScale:
-          MediaQuery.devicePixelRatioOf(context) *
-          AppState.componentScale *
-          1.25,
-    ),
+  ) => LayoutBuilder(
+    builder: (context, constraints) {
+      const zoom = 1.25;
+      final width = widget.anchorWidth ?? constraints.maxWidth;
+      final height = widget.anchorHeight ?? constraints.maxHeight;
+      final rect = Rect.fromCenter(
+        center: Offset(widget.anchorLeft + width / 2, height / 2),
+        width: AppState.canvasWidth * zoom,
+        height: AppState.canvasHeight * zoom,
+      );
+      return StableArtworkSurface(
+        fit: BoxFit.fill,
+        animateReplacement: widget.animateArtworkReplacement,
+        clampedImageRect: rect,
+        provider: BlurredArtworkProvider(
+          source: source,
+          identity: identity,
+          waterfall: waterfall,
+          headerHeight: waterfall ? headerH : 0,
+          pixelScale:
+              MediaQuery.devicePixelRatioOf(context) *
+              AppState.componentScale *
+              zoom,
+        ),
+      );
+    },
   );
 
   Widget _buildBlurredArtwork(
@@ -364,21 +412,19 @@ class _DynamicBackgroundState extends State<DynamicBackground>
       headerHeight,
       MediaQuery.devicePixelRatioOf(context),
       AppState.componentScale,
+      widget.anchorWidth,
+      widget.anchorHeight,
+      widget.anchorLeft,
+      widget.animateArtworkReplacement,
     );
     if (_blurredArtworkKey != key) {
       _blurredArtworkKey = key;
       _blurredArtwork = RepaintBoundary(
-        child: Transform.scale(
-          scale: 1.25,
-          child: AppState.glowMode == GlowMode.waterfall
-              ? _buildWaterfallGlow(
-                  provider,
-                  coverKey,
-                  AppState.canvasWidth,
-                  AppState.canvasHeight,
-                  headerHeight,
-                )
-              : _buildWallpaperGlow(provider, coverKey),
+        child: _preparedGlow(
+          provider,
+          coverKey,
+          headerHeight,
+          AppState.glowMode == GlowMode.waterfall,
         ),
       );
     }
@@ -434,25 +480,18 @@ class _DynamicBackgroundState extends State<DynamicBackground>
         return Stack(
           children: [
             Positioned.fill(
-              child: _AnchoredBackgroundCanvas(
-                width: canvasW,
-                height: canvasH,
-                anchorHeight: widget.anchorHeight ?? constraints.maxHeight,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 800),
-                  curve: Curves.easeOutQuart,
-                  color: isDark
-                      ? (AppState.enableGlow
-                            ? AppState.currentScheme.surfaceContainerLow
-                            : (AppState.enableOledTheme
-                                  ? Colors.black
-                                  : AppState
-                                        .currentScheme
-                                        .surfaceContainerHigh))
-                      : (AppState.enableGlow
-                            ? AppState.currentScheme.surface
-                            : AppState.currentScheme.surfaceContainerHighest),
-                ),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 800),
+                curve: Curves.easeOutQuart,
+                color: isDark
+                    ? (AppState.enableGlow
+                          ? AppState.currentScheme.surfaceContainerLow
+                          : (AppState.enableOledTheme
+                                ? Colors.black
+                                : AppState.currentScheme.surfaceContainerHigh))
+                    : (AppState.enableGlow
+                          ? AppState.currentScheme.surface
+                          : AppState.currentScheme.surfaceContainerHighest),
               ),
             ),
 
@@ -463,58 +502,62 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                   curve: Curves.easeOutCubic,
                   opacity: _artworkAbsent ? 0.0 : 1.0,
                   onEnd: _releaseHeldArtwork,
-                  child: _AnchoredBackgroundCanvas(
-                    width: canvasW,
-                    height: canvasH,
-                    anchorHeight: widget.anchorHeight ?? constraints.maxHeight,
-                    child: AnimatedBuilder(
-                      animation: _revealAnimation,
-                      builder: (context, child) {
-                        return ClipPath(
-                          clipBehavior: _revealAnimation.value >= 0.99999
-                              ? Clip.none
-                              : Clip.antiAliasWithSaveLayer,
-                          clipper: CircularRevealClipper(
-                            fraction: _revealAnimation.value,
-                            center: AppState.revealCenterOf(_layout),
-                          ),
-                          child: child,
-                        );
-                      },
-                      child: _buildBlurredArtwork(
-                        bgProvider,
-                        coverKey,
-                        headerH,
-                      ),
-                    ),
+                  child: AnimatedBuilder(
+                    animation: _revealAnimation,
+                    builder: (context, child) {
+                      return ClipPath(
+                        clipBehavior: _revealAnimation.value >= 0.99999
+                            ? Clip.none
+                            : Clip.antiAliasWithSaveLayer,
+                        clipper: CircularRevealClipper(
+                          fraction: _revealAnimation.value,
+                          center:
+                              AppState.revealCenterOf(_layout) +
+                              Offset(
+                                widget.anchorLeft +
+                                    ((widget.anchorWidth ??
+                                                constraints.maxWidth) -
+                                            canvasW) /
+                                        2,
+                                ((widget.anchorHeight ??
+                                            constraints.maxHeight) -
+                                        canvasH) /
+                                    2,
+                              ),
+                        ),
+                        child: child,
+                      );
+                    },
+                    child: _buildBlurredArtwork(bgProvider, coverKey, headerH),
                   ),
                 ),
               ),
 
             Positioned.fill(
-              child: _AnchoredBackgroundCanvas(
-                width: canvasW,
-                height: canvasH,
-                anchorHeight: widget.anchorHeight ?? constraints.maxHeight,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 600),
-                      color: overlayColor.withValues(
-                        alpha: universalDimOpacity,
-                      ),
-                    ),
-                    FadeTransition(
-                      opacity: _revealAnimation,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 600),
+                    color: overlayColor.withValues(alpha: universalDimOpacity),
+                  ),
+                  FadeTransition(
+                    opacity: _revealAnimation,
+                    child: _AnchoredBackgroundCanvas(
+                      width: canvasW,
+                      height: canvasH,
+                      anchorWidth: widget.anchorWidth,
+                      anchorLeft: widget.anchorLeft,
+                      anchorHeight:
+                          widget.anchorHeight ?? constraints.maxHeight,
                       child: RepaintBoundary(
                         child: CustomPaint(
                           painter: DitherNoisePainter(AppState.themeBrightness),
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
 

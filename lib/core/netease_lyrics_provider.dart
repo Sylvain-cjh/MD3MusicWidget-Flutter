@@ -96,7 +96,10 @@ final class NeteasePublicClient {
 }
 
 final class NeteaseLyricsProvider
-    implements LyricsPlatformProvider, RetryableLyricsProvider {
+    implements
+        LyricsPlatformProvider,
+        RetryableLyricsProvider,
+        ExhaustiveLyricsProvider {
   static const providerId = 'neteaseCloud';
   final NeteasePublicClient client;
   final LyricsPlatformProvider fallback;
@@ -232,18 +235,67 @@ final class NeteaseLyricsProvider
             candidates[0].$2 != candidates[1].$2)) {
       return null;
     }
-    final lyric = await client.get('/api/song/lyric', {
+    Object? lyric;
+    try {
+      final wordAttempt = attempt.slice(
+        const Duration(milliseconds: 1600),
+        reserve: const Duration(milliseconds: 100),
+      );
+      lyric = await wordAttempt.run(
+        () => client.get('/api/song/lyric/v1', {
+          'id': candidates.first.$2,
+          'cp': 'false',
+          'lv': '0',
+          'kv': '0',
+          'tv': '0',
+          'rv': '0',
+          'yv': '0',
+          'ytv': '0',
+          'yrv': '0',
+        }, attempt: wordAttempt),
+      );
+    } catch (_) {
+      
+    }
+    final document = await _parsePayload(lyric);
+    if (document != null) return document;
+    lyric = await client.get('/api/song/lyric', {
       'id': candidates.first.$2,
       'lv': '-1',
       'kv': '-1',
       'tv': '-1',
     }, attempt: attempt);
-    if (lyric is! Map || lyric['code'] != 200 || lyric['lrc'] is! Map) {
+    return _parsePayload(lyric);
+  }
+
+  Future<LyricsDocument?> _parsePayload(Object? lyric) async {
+    if (lyric is! Map || lyric['code'] != 200) {
       return null;
     }
+    for (final key in const ['yrc', 'klyric']) {
+      final timed = lyric[key];
+      if (timed is Map && timed['lyric'] is String) {
+        try {
+          final words = await LyricsDocument.parseAsync(
+            timed['lyric'] as String,
+            format: 'yrc',
+          );
+          if (words.isWordTimed) return words.withSourceProviderId(providerId);
+        } on FormatException {
+          
+        }
+      }
+    }
+    if (lyric['lrc'] is! Map) return null;
     final text = (lyric['lrc'] as Map)['lyric'];
     if (text is! String || text.trim().isEmpty) return null;
-    final document = LyricsDocument.parseLrc(text);
-    return document.isEmpty ? null : document.withSourceProviderId(providerId);
+    try {
+      final document = await LyricsDocument.parseAsync(text);
+      return document.isEmpty
+          ? null
+          : document.withSourceProviderId(providerId);
+    } on FormatException {
+      return null;
+    }
   }
 }

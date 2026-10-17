@@ -6,12 +6,15 @@ import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
 import '../../core/lyrics_coordinator.dart';
 import '../animations/lyrics_content_transition.dart';
+import '../animations/lyrics_smoke_motion.dart';
 import 'pixel_aligned_text.dart';
 import 'smooth_rounded_clip.dart';
 import 'provider_brand_mark.dart';
+import 'word_timed_lyrics_text.dart';
 
 class MusicLyricsPanel extends StatefulWidget {
-  const MusicLyricsPanel({super.key});
+  final DateTime Function()? clock;
+  const MusicLyricsPanel({super.key, this.clock});
 
   @override
   State<MusicLyricsPanel> createState() => _MusicLyricsPanelState();
@@ -23,6 +26,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     sigmaY: 13,
   );
   Timer? _timelineTimer;
+  Timer? _cooldownDisplayTimer;
   LyricsState? _retainedState;
   late final AnimatedSwitcherTransitionBuilder _lineTransitionBuilder =
       _buildLineTransition;
@@ -45,17 +49,60 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     AppState.backgroundRevision.addListener(_onLyricsChanged);
     AppState.playbackRevision.addListener(_syncTimelineTimer);
     _syncTimelineTimer();
+    _syncCooldownTimer();
   }
 
   void _onLyricsChanged() {
     _syncTimelineTimer();
+    _syncCooldownTimer();
     if (mounted) setState(() {});
+  }
+
+  DateTime get _now => widget.clock?.call() ?? DateTime.now();
+
+  int _cooldownSeconds(LyricsState state) {
+    final remaining = state.retryAt?.difference(_now).inMilliseconds ?? 0;
+    return remaining <= 0 ? 0 : (remaining / 1000).ceil();
+  }
+
+  void _syncCooldownTimer() {
+    final state = AppState.lyrics.state;
+    if ((state.issue == LyricsIssue.rateLimited ||
+            state.automaticRetryScheduled) &&
+        _cooldownSeconds(state) > 0) {
+      _cooldownDisplayTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+        if (_cooldownSeconds(AppState.lyrics.state) == 0) {
+          _cooldownDisplayTimer?.cancel();
+          _cooldownDisplayTimer = null;
+        }
+      });
+    } else {
+      _cooldownDisplayTimer?.cancel();
+      _cooldownDisplayTimer = null;
+    }
+  }
+
+  String _cooldownText(LyricsState state) {
+    final seconds = _cooldownSeconds(state);
+    if (seconds == 0) {
+      if (state.automaticRetryScheduled) return '正在重新连接歌词…';
+      return state.reconnectUntil != null
+          ? '自动重连暂时没成功，可以点右侧再试'
+          : '歌词服务刚才有点忙，可以重新试试了';
+    }
+    final time = seconds >= 120 ? '${(seconds / 60).ceil()} 分钟' : '$seconds 秒';
+    return state.automaticRetryScheduled
+        ? (state.issue == LyricsIssue.rateLimited
+              ? '歌词服务忙，$time后自动重连'
+              : '歌词连接有点不稳，$time后自动重连')
+        : '歌词服务还在忙，请等$time再试';
   }
 
   void _syncTimelineTimer() {
     if (AppState.isPlaying && AppState.lyrics.state.document?.isTimed == true) {
       _timelineTimer ??= Timer.periodic(const Duration(milliseconds: 100), (_) {
-        AppState.lyrics.setPositionMs(AppState.estimatedPlaybackPositionMs);
+        AppState.lyrics.setPositionMs(AppState.lyricsPlaybackPositionMs);
       });
     } else {
       _timelineTimer?.cancel();
@@ -66,6 +113,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
   @override
   void dispose() {
     _timelineTimer?.cancel();
+    _cooldownDisplayTimer?.cancel();
     AppState.lyrics.removeListener(_onLyricsChanged);
     AppState.typographyRevision.removeListener(_onLyricsChanged);
     AppState.lyricsVisualRevision.removeListener(_onLyricsChanged);
@@ -78,13 +126,19 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     if (AppState.currentPlatformTrack == null) return '等待歌曲播放';
     switch (state.status) {
       case LyricsStatus.loading:
+        if (state.reconnectAttempt > 0) {
+          return '正在重新连接歌词… ${state.reconnectAttempt}/${state.maximumReconnectAttempts}';
+        }
         return state.attempt > 1
             ? '再试一次… ${state.attempt}/${state.maximumAttempts}'
             : '正在匹配歌词…';
       case LyricsStatus.failed:
         return switch (state.issue) {
-          LyricsIssue.rateLimited => '歌词服务请求过于频繁，请稍后切歌重试',
-          LyricsIssue.network => '歌词网络请求失败，请检查网络',
+          LyricsIssue.rateLimited => _cooldownText(state),
+          LyricsIssue.network =>
+            state.reconnectUntil != null
+                ? _cooldownText(state)
+                : '歌词网络请求失败，请检查网络',
           LyricsIssue.invalidData => '歌词返回格式无法解析',
           _ => '歌词获取失败',
         };
@@ -228,10 +282,15 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                       LyricsTransitionStyle.fade,
                       reduceMotion: reduceMotion,
                     ),
-                    reverseDuration: LyricsContentTransition.durationFor(
-                      LyricsTransitionStyle.fade,
-                      reduceMotion: reduceMotion,
-                    ),
+                    reverseDuration:
+                        AppState.wordLyricsEnabled &&
+                            AppState.wordLyricsSmokeEnabled &&
+                            !reduceMotion
+                        ? LyricsSmokeMotion.tailFor(state.currentLine)
+                        : LyricsContentTransition.durationFor(
+                            LyricsTransitionStyle.fade,
+                            reduceMotion: reduceMotion,
+                          ),
                     switchInCurve: Curves.easeOutCubic,
                     switchOutCurve: Curves.easeOutCubic.flipped,
                     layoutBuilder: (currentChild, previousChildren) => Stack(
@@ -242,13 +301,35 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                     transitionBuilder: _lineTransitionBuilder,
                     child: Align(
                       key: ValueKey(
-                        '${state.providerId}:${state.status}:${state.lineIndex}:$displayText',
+                        state.issue == LyricsIssue.rateLimited ||
+                                state.automaticRetryScheduled
+                            ? '${state.providerId}:lyrics_cooldown_${state.issue.name}'
+                            : '${state.providerId}:${state.status}:${state.lineIndex}:$displayText',
                       ),
                       alignment: Alignment.centerLeft,
                       child:
                           state.status == LyricsStatus.loading &&
                               AppState.currentPlatformTrack != null
                           ? _loadingContent(scheme, reduceMotion, state)
+                          : state.currentLine?.isWordTimed == true &&
+                                AppState.wordLyricsEnabled
+                          ? PixelAlignedText(
+                              child: WordTimedLyricsText(
+                                line: state.currentLine!,
+                                style: AppState.lyricsTextStyle(
+                                  scheme.onSurface,
+                                ),
+                                highlight: scheme.onSurface,
+                                inactiveOpacity: AppState.lyricsInactiveOpacity,
+                                effect: AppState.lyricsHighlightStyle,
+                                smokeEnabled: AppState.wordLyricsSmokeEnabled,
+                                active: !hiding && AppState.showLyrics,
+                                positionMs: () =>
+                                    AppState.lyricsPlaybackPositionMs,
+                                isPlaying: () => AppState.isPlaying,
+                                playbackChanges: AppState.playbackRevision,
+                              ),
+                            )
                           : PixelAlignedText(
                               child: Text(
                                 displayText,
@@ -268,9 +349,14 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                     (state.status == LyricsStatus.failed ||
                         state.issue == LyricsIssue.noMatch))
                   IconButton(
-                    tooltip: '重新查询歌词',
+                    key: const ValueKey('lyrics_retry_button'),
+                    tooltip: _cooldownSeconds(state) > 0
+                        ? '等待歌词服务恢复'
+                        : '重新查询歌词',
                     icon: const Icon(Icons.refresh_rounded, size: 19),
-                    onPressed: () => AppState.refreshLyrics(force: true),
+                    onPressed: _cooldownSeconds(state) > 0
+                        ? null
+                        : () => AppState.refreshLyrics(force: true),
                   ),
               ],
             ),
