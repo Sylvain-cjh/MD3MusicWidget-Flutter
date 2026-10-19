@@ -72,6 +72,7 @@ final class SettingsDescriptions {
   static const lyricsProviderLocal = '只在你选的文件夹里找，不用在线查询';
   static const lyricsProviderQqMusic = '先试试 QQ 音乐；找不到时会回到 LRCLIB';
   static const lyricsProviderNetease = '先从网易云找歌词，找不到时试试 LRCLIB';
+  static const lyricsProviderAmll = '试试社区制作的逐字歌词，找不到时回到 LRCLIB';
   static const neteasePlaylist = '连接公开歌单，按列表顺序推测下一首';
   static const lyricsCacheLimit = '减少重复查找';
   static const backgroundCacheLimit = '保存封面与背景';

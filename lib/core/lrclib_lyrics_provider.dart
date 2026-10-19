@@ -8,6 +8,7 @@ import 'lyrics_document.dart';
 import 'lyrics_http_client.dart';
 import 'lyrics_disk_cache.dart';
 import 'lyrics_primary_attempt.dart';
+import 'lyrics_song_matcher.dart';
 import 'lyrics_request_error.dart';
 import 'platform_provider.dart';
 
@@ -300,8 +301,14 @@ final class LrclibLyricsProvider
   ) {
     final responseTitle = data['trackName']?.toString().trim() ?? '';
     final responseArtist = data['artistName']?.toString().trim() ?? '';
-    if (!_matchesTitle(track.title, responseTitle) ||
-        !_matchesArtist(track.artist, responseArtist)) {
+    if (LyricsSongMatcher(track).score(
+          title: responseTitle,
+          artists: [responseArtist],
+          durationMs: (data['duration'] as num?)?.toDouble() == null
+              ? null
+              : (data['duration'] as num).toDouble() * 1000,
+        ) ==
+        null) {
       return null;
     }
     final responseDuration = (data['duration'] as num?)?.toDouble();
@@ -318,50 +325,16 @@ final class LrclibLyricsProvider
     return document.isEmpty ? null : document;
   }
 
-  static String _matchKey(String text) => text.toLowerCase().replaceAll(
-    RegExp(r'[^\p{L}\p{N}]', unicode: true),
-    '',
-  );
-
-  static bool _matchesTitle(String wanted, String candidate) {
-    final a = _matchKey(wanted);
-    final b = _matchKey(candidate);
-    if (a.isEmpty || b.isEmpty) return false;
-    if (a == b) return true;
-    final shorter = a.length < b.length ? a : b;
-    final longer = a.length < b.length ? b : a;
-    return shorter.length >= 4 &&
-        shorter.length / longer.length >= 0.7 &&
-        longer.contains(shorter);
-  }
-
-  static bool _matchesArtist(String wanted, String candidate) {
-    if (wanted == '未知歌手' || wanted == '无媒体会话') return true;
-    final a = _matchKey(wanted);
-    final b = _matchKey(candidate);
-    return a.isEmpty ||
-        b.isEmpty ||
-        a == b ||
-        (a.length >= 3 && b.contains(a)) ||
-        (b.length >= 3 && a.contains(b));
-  }
-
   static int _matchScore(PlatformTrack track, Map<String, dynamic> data) {
-    final titleExact =
-        _matchKey(track.title) ==
-        _matchKey(data['trackName']?.toString() ?? '');
-    final artistExact =
-        _matchKey(track.artist) ==
-        _matchKey(data['artistName']?.toString() ?? '');
     final duration = (data['duration'] as num?)?.toDouble();
-    final durationClose =
-        track.durationMs > 0 &&
-        duration != null &&
-        (duration - track.durationMs / 1000).abs() <= 3;
     final timed = (data['syncedLyrics']?.toString() ?? '').trim().isNotEmpty;
-    return (titleExact ? 8 : 0) +
-        (artistExact ? 4 : 0) +
-        (durationClose ? 2 : 0) +
+    return (LyricsSongMatcher(track).score(
+                  title: data['trackName']?.toString() ?? '',
+                  artists: [data['artistName']?.toString() ?? ''],
+                  durationMs: duration == null ? null : duration * 1000,
+                ) ??
+                0) *
+            2 +
         (timed ? 1 : 0);
   }
 

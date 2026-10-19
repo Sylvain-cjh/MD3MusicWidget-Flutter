@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+import 'artwork_resources.dart';
 
 
 
@@ -32,6 +33,7 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
   ) => OneFrameImageStreamCompleter(_load());
 
   Future<ImageInfo> _load() async {
+    CachedArtwork.trackVariant(source, this);
     final stream = source.resolve(
       ImageConfiguration(devicePixelRatio: pixelScale),
     );

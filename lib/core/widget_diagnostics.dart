@@ -8,6 +8,9 @@ abstract final class WidgetDiagnostics {
   static final frames = <FrameTiming>[];
   static final actions = <String, Future<void> Function(Object?)>{};
   static final errors = <String>[];
+  
+  static bool suppressDither = false;
+  static bool suppressPalette = false;
 
   static void mark(String name) {
     if (enabled) marks[name] = DateTime.now().microsecondsSinceEpoch;

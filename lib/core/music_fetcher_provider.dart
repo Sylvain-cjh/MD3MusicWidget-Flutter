@@ -20,6 +20,7 @@ final class MusicFetcherProvider implements MediaProvider {
   bool _closed = false;
   int _connectionSerial = 0;
   bool _spectrumEnabled = false;
+  bool? _sentSpectrumEnabled;
 
   @override
   Stream<MediaProviderEvent> get events => _events.stream;
@@ -45,6 +46,7 @@ final class MusicFetcherProvider implements MediaProvider {
       socket.setOption(SocketOption.tcpNoDelay, true);
       _decoder.reset();
       _socket = socket;
+      _sentSpectrumEnabled = null;
       _socketSubscription = socket.listen(
         _handleBytes,
         onError: (Object error, StackTrace stackTrace) {
@@ -121,6 +123,8 @@ final class MusicFetcherProvider implements MediaProvider {
     _spectrumEnabled = enabled;
     final Socket? socket = _socket;
     if (socket == null) return;
+    if (_sentSpectrumEnabled == enabled) return;
+    _sentSpectrumEnabled = enabled;
     final Uint8List payload = Uint8List.fromList(<int>[enabled ? 1 : 0]);
     socket.add(
       MusicFetcherProtocol.encodeFrame(

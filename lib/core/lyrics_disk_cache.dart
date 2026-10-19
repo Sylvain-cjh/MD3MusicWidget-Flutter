@@ -61,7 +61,7 @@ final class LyricsDiskCache {
     try {
       final json = jsonDecode(utf8.decode(bytes));
       if (json is! Map ||
-          !const [1, 2].contains(json['version']) ||
+          !const [1, 2, 3].contains(json['version']) ||
           json['lines'] is! List) {
         return null;
       }
@@ -135,7 +135,14 @@ final class LyricsDiskCache {
         artist: json['artist'] as String? ?? '',
         sourceProviderId: json['source'] as String? ?? source,
         wordTimingChecked:
-            json['version'] == 2 && json['wordTimingChecked'] != false,
+            parsed.any((line) => line.isWordTimed) ||
+            (json['version'] == 3 && json['wordTimingChecked'] != false) ||
+            (json['version'] == 2 &&
+                !const ['qqMusic', 'neteaseCloud', 'amll'].contains(source) &&
+                json['wordTimingChecked'] != false),
+        wordTimingRetryAt: json['wordTimingRetryAt'] is int
+            ? DateTime.fromMillisecondsSinceEpoch(json['wordTimingRetryAt'])
+            : null,
       );
       if (doc.isEmpty) return null;
       return doc;
@@ -153,8 +160,9 @@ final class LyricsDiskCache {
     final bytes = Uint8List.fromList(
       utf8.encode(
         jsonEncode({
-          'version': 2,
+          'version': 3,
           'wordTimingChecked': doc.wordTimingChecked,
+          'wordTimingRetryAt': doc.wordTimingRetryAt?.millisecondsSinceEpoch,
           'cacheKeyVersion': 2,
           'lookupTitle': track.title,
           'lookupArtist': track.artist,
@@ -180,12 +188,24 @@ final class LyricsDiskCache {
         }),
       ),
     );
-    final writes = [store.put(keyFor(track, source), bytes)];
+    Future<bool> preserveWords(Uint8List existing) async {
+      final previous = existing.length > 16384
+          ? await Isolate.run(() => _decodeCached(existing, track, source))
+          : _decodeCached(existing, track, source);
+      return previous?.isWordTimed != true;
+    }
+
+    Future<void> write(String id) => store.put(
+      keyFor(track, id),
+      bytes,
+      shouldReplace: doc.isWordTimed ? null : preserveWords,
+    );
+    final writes = [write(source)];
     final actual = doc.sourceProviderId;
     
     
     if (actual.isNotEmpty && actual != source) {
-      writes.add(store.put(keyFor(track, actual), bytes));
+      writes.add(write(actual));
     }
     
     

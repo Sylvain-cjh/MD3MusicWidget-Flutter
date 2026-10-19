@@ -92,6 +92,28 @@ final class MediaSnapshot {
         : null,
     autoRepeatMode: data['autoRepeatMode']?.toString().toLowerCase() ?? '',
   );
+
+  MediaSnapshot withMetadata({
+    String? artist,
+    String? sourceAppId,
+    double? durationMs,
+  }) => MediaSnapshot(
+    processId: processId,
+    sourceAppId: sourceAppId ?? this.sourceAppId,
+    title: title,
+    artist: artist ?? this.artist,
+    trackVersion: trackVersion,
+    isPlaying: isPlaying,
+    coverVersion: coverVersion,
+    legacyCoverBase64: legacyCoverBase64,
+    positionMs: positionMs,
+    durationMs: durationMs ?? this.durationMs,
+    timelineUpdatedAtMs: timelineUpdatedAtMs,
+    fetcherUpdatedAtMs: fetcherUpdatedAtMs,
+    capabilities: capabilities,
+    isShuffleActive: isShuffleActive,
+    autoRepeatMode: autoRepeatMode,
+  );
 }
 
 sealed class MediaProviderEvent {

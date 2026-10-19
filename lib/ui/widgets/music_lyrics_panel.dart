@@ -167,6 +167,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
       'neteaseCloud' => '网易云音乐',
       'lrclib' => 'LRCLIB',
       'localLrc' => '本地 LRC',
+      'amll' => 'AMLL 逐字词库',
       _ => '歌词',
     };
     return Tooltip(
@@ -277,71 +278,76 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: AnimatedSwitcher(
-                    duration: LyricsContentTransition.durationFor(
-                      LyricsTransitionStyle.fade,
-                      reduceMotion: reduceMotion,
-                    ),
-                    reverseDuration:
-                        AppState.wordLyricsEnabled &&
-                            AppState.wordLyricsSmokeEnabled &&
-                            !reduceMotion
-                        ? LyricsSmokeMotion.tailFor(state.currentLine)
-                        : LyricsContentTransition.durationFor(
-                            LyricsTransitionStyle.fade,
-                            reduceMotion: reduceMotion,
-                          ),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeOutCubic.flipped,
-                    layoutBuilder: (currentChild, previousChildren) => Stack(
-                      alignment: Alignment.centerLeft,
-                      clipBehavior: Clip.hardEdge,
-                      children: [...previousChildren, ?currentChild],
-                    ),
-                    transitionBuilder: _lineTransitionBuilder,
-                    child: Align(
-                      key: ValueKey(
-                        state.issue == LyricsIssue.rateLimited ||
-                                state.automaticRetryScheduled
-                            ? '${state.providerId}:lyrics_cooldown_${state.issue.name}'
-                            : '${state.providerId}:${state.status}:${state.lineIndex}:$displayText',
+                  
+                  
+                  child: ClipRect(
+                    child: AnimatedSwitcher(
+                      duration: LyricsContentTransition.durationFor(
+                        LyricsTransitionStyle.fade,
+                        reduceMotion: reduceMotion,
                       ),
-                      alignment: Alignment.centerLeft,
-                      child:
-                          state.status == LyricsStatus.loading &&
-                              AppState.currentPlatformTrack != null
-                          ? _loadingContent(scheme, reduceMotion, state)
-                          : state.currentLine?.isWordTimed == true &&
-                                AppState.wordLyricsEnabled
-                          ? PixelAlignedText(
-                              child: WordTimedLyricsText(
-                                line: state.currentLine!,
-                                style: AppState.lyricsTextStyle(
-                                  scheme.onSurface,
-                                ),
-                                highlight: scheme.onSurface,
-                                inactiveOpacity: AppState.lyricsInactiveOpacity,
-                                effect: AppState.lyricsHighlightStyle,
-                                smokeEnabled: AppState.wordLyricsSmokeEnabled,
-                                active: !hiding && AppState.showLyrics,
-                                positionMs: () =>
-                                    AppState.lyricsPlaybackPositionMs,
-                                isPlaying: () => AppState.isPlaying,
-                                playbackChanges: AppState.playbackRevision,
-                              ),
-                            )
-                          : PixelAlignedText(
-                              child: Text(
-                                displayText,
-                                maxLines: 2,
-                                textHeightBehavior:
-                                    AppState.crispTextHeightBehavior,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppState.lyricsTextStyle(
-                                  scheme.onSurface,
-                                ),
-                              ),
+                      reverseDuration:
+                          AppState.wordLyricsEnabled &&
+                              AppState.wordLyricsSmokeEnabled &&
+                              !reduceMotion
+                          ? LyricsSmokeMotion.tailFor(state.currentLine)
+                          : LyricsContentTransition.durationFor(
+                              LyricsTransitionStyle.fade,
+                              reduceMotion: reduceMotion,
                             ),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeOutCubic.flipped,
+                      layoutBuilder: (currentChild, previousChildren) => Stack(
+                        alignment: Alignment.centerLeft,
+                        clipBehavior: Clip.none,
+                        children: [...previousChildren, ?currentChild],
+                      ),
+                      transitionBuilder: _lineTransitionBuilder,
+                      child: Align(
+                        key: ValueKey(
+                          state.issue == LyricsIssue.rateLimited ||
+                                  state.automaticRetryScheduled
+                              ? '${state.providerId}:lyrics_cooldown_${state.issue.name}'
+                              : '${state.providerId}:${state.status}:${state.lineIndex}:$displayText',
+                        ),
+                        alignment: Alignment.centerLeft,
+                        child:
+                            state.status == LyricsStatus.loading &&
+                                AppState.currentPlatformTrack != null
+                            ? _loadingContent(scheme, reduceMotion, state)
+                            : state.currentLine?.isWordTimed == true &&
+                                  AppState.wordLyricsEnabled
+                            ? PixelAlignedText(
+                                child: WordTimedLyricsText(
+                                  line: state.currentLine!,
+                                  style: AppState.lyricsTextStyle(
+                                    scheme.onSurface,
+                                  ),
+                                  highlight: scheme.onSurface,
+                                  inactiveOpacity:
+                                      AppState.lyricsInactiveOpacity,
+                                  effect: AppState.lyricsHighlightStyle,
+                                  smokeEnabled: AppState.wordLyricsSmokeEnabled,
+                                  active: !hiding && AppState.showLyrics,
+                                  positionMs: () =>
+                                      AppState.lyricsPlaybackPositionMs,
+                                  isPlaying: () => AppState.isPlaying,
+                                  playbackChanges: AppState.playbackRevision,
+                                ),
+                              )
+                            : PixelAlignedText(
+                                child: Text(
+                                  displayText,
+                                  maxLines: 2,
+                                  textHeightBehavior:
+                                      AppState.crispTextHeightBehavior,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppState.lyricsTextStyle(
+                                    scheme.onSurface,
+                                  ),
+                                ),
+                              ),
+                      ),
                     ),
                   ),
                 ),

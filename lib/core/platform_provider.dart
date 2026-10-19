@@ -44,6 +44,7 @@ final class PlatformTrack {
   final String title;
   final String artist;
   final double durationMs;
+  final String? lifecycleId;
 
   const PlatformTrack({
     required this.sourceAppId,
@@ -51,6 +52,7 @@ final class PlatformTrack {
     required this.title,
     required this.artist,
     required this.durationMs,
+    this.lifecycleId,
   });
 
   static PlatformTrack? fromSnapshot(MediaSnapshot snapshot) {
@@ -81,6 +83,8 @@ final class PlatformTrack {
 
   String get queueIdentity =>
       jsonEncode([sourceAppId.toLowerCase(), title.trim(), artist.trim()]);
+
+  String get contextIdentity => lifecycleId ?? queueIdentity;
 
   MusicPlatform get platform => identifyMusicPlatform(sourceAppId);
 }
@@ -127,6 +131,17 @@ abstract interface class RetryableLyricsProvider {
   
   void invalidateMiss(PlatformTrack track);
 }
+
+
+
+abstract interface class WordTimingLyricsProvider {
+  Future<LyricsDocument?> upgradeWordTiming(PlatformTrack track);
+}
+
+
+
+abstract interface class BackgroundWordTimingLyricsProvider
+    implements WordTimingLyricsProvider {}
 
 
 

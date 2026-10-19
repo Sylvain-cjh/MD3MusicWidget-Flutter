@@ -29,7 +29,8 @@ class PerformanceMonitorPanel extends StatefulWidget {
       _PerformanceMonitorPanelState();
 }
 
-class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
+class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel>
+    with WidgetsBindingObserver {
   final SystemPerformanceTracker _tracker = SystemPerformanceTracker();
   final PerformanceHistory _history = PerformanceHistory();
   Timer? _timer;
@@ -39,6 +40,8 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
   String? _configuredExecutable;
   bool? _configuredActive;
   int _generation = 0;
+  bool _tickerMode = true, _applicationVisible = true;
+  bool get _active => widget.active && _tickerMode && _applicationVisible;
   int get _mask =>
       (widget.metricsMask ?? AppState.performanceMetricsMask) &
       PerformanceMetric.allMask;
@@ -55,15 +58,33 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AppState.performanceRevision.addListener(_configure);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _configure();
     });
-    unawaited(_sample());
-    _timer = Timer.periodic(
-      const Duration(milliseconds: 500),
-      (_) => unawaited(_sample()),
-    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final enabled = TickerMode.valuesOf(context).enabled;
+    if (_tickerMode != enabled) {
+      _tickerMode = enabled;
+      _configure();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final visible =
+        state != AppLifecycleState.hidden &&
+        state != AppLifecycleState.paused &&
+        state != AppLifecycleState.detached;
+    if (_applicationVisible != visible) {
+      _applicationVisible = visible;
+      _configure();
+    }
   }
 
   void _configure() {
@@ -71,7 +92,7 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
     final executable = AppState.performanceProcessExecutable;
     if (_configuredMask == mask &&
         _configuredExecutable == executable &&
-        _configuredActive == widget.active) {
+        _configuredActive == _active) {
       return;
     }
     if (_configuredMask != null) {
@@ -97,19 +118,30 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
     }
     _configuredMask = mask;
     _configuredExecutable = executable;
-    _configuredActive = widget.active;
+    _configuredActive = _active;
+    _timer?.cancel();
+    _timer = null;
+    if (_active && mask != 0) {
+      _timer = Timer.periodic(
+        const Duration(milliseconds: 500),
+        (_) => unawaited(_sample()),
+      );
+    }
     if (mounted) setState(() {});
     unawaited(
       SystemPerformanceProvider.configure(
-        enabled: widget.active && mask != 0,
+        enabled: _active && mask != 0,
         executable: executable,
         metricsMask: mask,
       ),
     );
+    
+    
+    if (_active && mask != 0) unawaited(_sample());
   }
 
   Future<void> _sample() async {
-    if (_sampling || !widget.active || _mask == 0) return;
+    if (_sampling || !_active || _mask == 0) return;
     _sampling = true;
     final generation = _generation;
     try {
@@ -144,6 +176,8 @@ class _PerformanceMonitorPanelState extends State<PerformanceMonitorPanel> {
   @override
   void dispose() {
     _timer?.cancel();
+    ++_generation;
+    WidgetsBinding.instance.removeObserver(this);
     AppState.performanceRevision.removeListener(_configure);
     unawaited(
       SystemPerformanceProvider.configure(enabled: false, executable: ''),

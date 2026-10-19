@@ -8,6 +8,7 @@ final class QueueCoordinator extends ChangeNotifier {
   final PlatformProviderRegistry registry;
   PlatformQueue? _queue;
   String? _trackIdentity;
+  String? _lookupIdentity;
   String? _providerId;
   String? _error;
   bool _loading = false;
@@ -53,12 +54,14 @@ final class QueueCoordinator extends ChangeNotifier {
     final provider = enabled && track != null
         ? registry.queueFor(track, providerId: providerId)
         : null;
-    final identity = provider == null ? null : track!.queueIdentity;
+    final identity = provider == null ? null : track!.contextIdentity;
+    final lookupIdentity = provider == null ? null : track!.queueIdentity;
     final contextKey = provider is QueueContextProvider
         ? (provider as QueueContextProvider).queueContextKey
         : provider?.id;
     if (!force &&
         identity == _trackIdentity &&
+        lookupIdentity == _lookupIdentity &&
         provider?.id == _providerId &&
         contextKey == _contextKey) {
       return;
@@ -71,6 +74,7 @@ final class QueueCoordinator extends ChangeNotifier {
         provider?.id == _providerId &&
         contextKey == _contextKey;
     _trackIdentity = identity;
+    _lookupIdentity = lookupIdentity;
     _providerId = provider?.id;
     _contextKey = contextKey;
     if (!keepQueue) _queue = null;
@@ -102,7 +106,7 @@ final class QueueCoordinator extends ChangeNotifier {
         }
       }
       if (serial != _requestSerial) return;
-      _queue = loaded;
+      if (loaded != null || !keepQueue) _queue = loaded;
     } catch (error) {
       if (serial != _requestSerial) return;
       _error = error.toString();

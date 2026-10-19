@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'lyrics_document.dart';
 import 'lyrics_http_client.dart';
 import 'lyrics_primary_attempt.dart';
+import 'lyrics_song_matcher.dart';
 import 'platform_provider.dart';
 
 String _normalize(String value) =>
@@ -18,19 +19,6 @@ List<String> _artists(Map song) {
       .map((artist) => artist['name']?.toString().trim() ?? '')
       .where((name) => name.isNotEmpty)
       .toList();
-}
-
-bool _artistMatches(String wanted, List<String> artists) {
-  if (wanted.trim().isEmpty || wanted == '未知歌手') return true;
-  final key = _normalize(wanted);
-  if (_normalize(artists.join(' / ')) == key) return true;
-  final parts = wanted
-      .split(RegExp(r'[/&、]'))
-      .map(_normalize)
-      .where((part) => part.isNotEmpty)
-      .toSet();
-  final names = artists.map(_normalize).toSet();
-  return parts.isNotEmpty && parts.every(names.contains);
 }
 
 
@@ -99,16 +87,19 @@ final class NeteaseLyricsProvider
     implements
         LyricsPlatformProvider,
         RetryableLyricsProvider,
+        BackgroundWordTimingLyricsProvider,
         ExhaustiveLyricsProvider {
   static const providerId = 'neteaseCloud';
   final NeteasePublicClient client;
   final LyricsPlatformProvider fallback;
+  final WordTimingLyricsProvider? wordFallback;
   final LinkedHashMap<String, (LyricsDocument?, DateTime)> _cache =
       LinkedHashMap();
   final Map<String, Future<LyricsDocument?>> _pending = {};
   final Duration primaryBudget;
   NeteaseLyricsProvider({
     required this.fallback,
+    this.wordFallback,
     NeteasePublicClient? client,
     this.primaryBudget = const Duration(seconds: 4),
   }) : client = client ?? NeteasePublicClient() {
@@ -138,6 +129,37 @@ final class NeteaseLyricsProvider
       key,
       () => _load(track, key).whenComplete(() {
         _pending.remove(key);
+      }),
+    );
+  }
+
+  @override
+  Future<LyricsDocument?> upgradeWordTiming(PlatformTrack track) {
+    final key =
+        '${_normalize(track.title)}|${_normalize(track.artist)}|${track.durationMs.isFinite ? track.durationMs.round() : 0}';
+    return _pending.putIfAbsent(
+      'words|$key',
+      () => Future<LyricsDocument?>(() async {
+        try {
+          final cached = _cache[key]?.$1;
+          if (cached?.isWordTimed == true) return cached;
+          if (wordFallback != null &&
+              cached != null &&
+              cached.wordTimingRetryAt?.isAfter(DateTime.now()) == true) {
+            return await wordFallback!.upgradeWordTiming(track);
+          }
+          final attempt = LyricsPrimaryAttempt(primaryBudget);
+          final fresh = await attempt.run(() => _loadPublic(track, attempt));
+          if (fresh != null) {
+            _cache[key] = (fresh, DateTime.now().add(const Duration(hours: 2)));
+            while (_cache.length > 8) {
+              _cache.remove(_cache.keys.first);
+            }
+          }
+          return fresh;
+        } finally {
+          _pending.remove('words|$key');
+        }
       }),
     );
   }
@@ -173,9 +195,17 @@ final class NeteaseLyricsProvider
       }
       if (document != null) return document;
     }
-    final resolved = (await fallback.loadLyrics(
-      track,
-    ))?.withSourceProviderId(fallback.id);
+    final document = await fallback.loadLyrics(track);
+    final sourced = document == null
+        ? null
+        : document.sourceProviderId.isEmpty
+        ? document.withSourceProviderId(fallback.id)
+        : document;
+    final resolved = sourced?.isWordTimed == true
+        ? sourced
+        : sourced?.withWordTimingRetryAt(
+            DateTime.now().add(const Duration(minutes: 30)),
+          );
     if (resolved != null && !resolved.isEmpty) {
       _cache.remove(key);
       _cache[key] = (resolved, DateTime.now().add(const Duration(hours: 2)));
@@ -205,30 +235,26 @@ final class NeteaseLyricsProvider
     }
     final songs = (json['result'] as Map)['songs'];
     if (songs is! List) return null;
-    final byId = <String, double>{};
+    final byId = <String, int>{};
+    final matcher = LyricsSongMatcher(track);
     for (final song in songs.whereType<Map>()) {
       final id = song['id']?.toString() ?? '';
-      if (!RegExp(r'^\d+$').hasMatch(id) ||
-          _normalize(song['name']?.toString() ?? '') !=
-              _normalize(track.title) ||
-          !_artistMatches(track.artist, _artists(song))) {
+      if (!RegExp(r'^\d+$').hasMatch(id)) {
         continue;
       }
       final value = song['duration'] ?? song['dt'];
       final duration = value is num && value.isFinite ? value : null;
-      final difference =
-          duration == null ||
-              !track.durationMs.isFinite ||
-              track.durationMs <= 0
-          ? 0.0
-          : (duration.toDouble() - track.durationMs).abs();
-      if (difference > 12000) continue;
-      byId[id] = difference;
+      final score = matcher.score(
+        title: song['name']?.toString() ?? '',
+        artists: _artists(song),
+        durationMs: duration?.toDouble(),
+      );
+      if (score != null) byId[id] = score;
     }
     final candidates = [
       for (final entry in byId.entries) (entry.value, entry.key),
     ];
-    candidates.sort((a, b) => a.$1.compareTo(b.$1));
+    candidates.sort((a, b) => b.$1.compareTo(a.$1));
     if (candidates.isEmpty ||
         (candidates.length > 1 &&
             candidates[0].$1 == candidates[1].$1 &&
@@ -293,7 +319,11 @@ final class NeteaseLyricsProvider
       final document = await LyricsDocument.parseAsync(text);
       return document.isEmpty
           ? null
-          : document.withSourceProviderId(providerId);
+          : document
+                .withSourceProviderId(providerId)
+                .withWordTimingRetryAt(
+                  DateTime.now().add(const Duration(minutes: 30)),
+                );
     } on FormatException {
       return null;
     }

@@ -414,12 +414,14 @@ class CoverParallaxState extends State<CoverParallax>
 class _CoverRaster {
   final ui.Image original, mask, background;
   final ui.Image? priority, textRepair;
+  final bool compactProgram;
   _CoverRaster(
     this.original,
     this.mask,
     this.background, {
     this.priority,
     this.textRepair,
+    this.compactProgram = false,
   });
   static _CoverRaster borrow(CoverLayers layers) {
     return _CoverRaster(
@@ -428,6 +430,7 @@ class _CoverRaster {
       layers.background.clone(),
       priority: layers.priority?.clone(),
       textRepair: layers.textRepair?.clone(),
+      compactProgram: layers.compactProgram,
     );
   }
 
@@ -457,11 +460,16 @@ class _CoverLayersPainter extends CustomPainter {
     this.shader,
     this.pixelRatio,
   ) : super(repaint: signal) {
-    shader.setImageSampler(0, layers.original);
-    shader.setImageSampler(1, layers.mask);
-    shader.setImageSampler(2, layers.background);
-    shader.setImageSampler(3, layers.priority ?? layers.mask);
-    shader.setImageSampler(4, layers.textRepair ?? layers.background);
+    final filter = layers.compactProgram
+        ? ui.FilterQuality.low
+        : ui.FilterQuality.none;
+    shader.setImageSampler(0, layers.original, filterQuality: filter);
+    shader.setImageSampler(1, layers.mask, filterQuality: filter);
+    shader.setImageSampler(2, layers.background, filterQuality: filter);
+    if (!layers.compactProgram) {
+      shader.setImageSampler(3, layers.priority ?? layers.mask);
+      shader.setImageSampler(4, layers.textRepair ?? layers.background);
+    }
   }
 
   @override
@@ -497,12 +505,17 @@ class _CoverLayersPainter extends CustomPainter {
       ..setFloat(11, layers.mask.width.toDouble())
       ..setFloat(12, layers.mask.height.toDouble())
       ..setFloat(13, layers.background.width.toDouble())
-      ..setFloat(14, layers.background.height.toDouble())
-      ..setFloat(
+      ..setFloat(14, layers.background.height.toDouble());
+    if (!layers.compactProgram) {
+      shader.setFloat(
         15,
         layers.priority != null && layers.textRepair != null ? 1 : 0,
-      )
-      ..setFloat(16, pixelRatio * 1.14 * (1.0 + motion.hover * 0.055));
+      );
+    }
+    shader.setFloat(
+      layers.compactProgram ? 15 : 16,
+      pixelRatio * 1.14 * (1.0 + motion.hover * 0.055),
+    );
     _paint.shader = shader;
     if (mix < 1) {
       

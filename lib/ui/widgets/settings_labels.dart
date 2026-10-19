@@ -196,4 +196,5 @@ final class SettingsLabels {
   static const chooseCacheDirectory = '更换文件夹';
   static const resetCacheDirectory = '恢复默认位置';
   static const cacheDirectoryChanging = '正在整理缓存…';
+  static const providerAmll = 'AMLL 逐字词库 · beta';
 }

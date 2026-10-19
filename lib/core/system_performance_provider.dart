@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'runtime_capabilities.dart';
 
 enum PerformanceMetric {
   fps(1),
@@ -154,8 +155,22 @@ class SystemPerformanceProvider {
       });
     } on PlatformException {
       fpsStatus.value = 'captureFailed';
+      RuntimeCapabilities.instance.set(
+        RuntimeCapability.systemMetrics,
+        const CapabilityStatus(
+          CapabilityPhase.temporarilyUnavailable,
+          reason: 'metrics_configuration_failed',
+        ),
+      );
     } on MissingPluginException {
       fpsStatus.value = 'unavailable';
+      RuntimeCapabilities.instance.set(
+        RuntimeCapability.systemMetrics,
+        const CapabilityStatus(
+          CapabilityPhase.unsupported,
+          reason: 'native_metrics_unavailable',
+        ),
+      );
     }
   }
 
@@ -206,14 +221,32 @@ class SystemPerformanceProvider {
       final sample = SystemPerformanceSample.fromMap(data);
       if (configuration == _configuration) {
         fpsStatus.value = _fpsEnabled ? sample.fpsStatus : 'disabled';
+        RuntimeCapabilities.instance.set(
+          RuntimeCapability.systemMetrics,
+          const CapabilityStatus(CapabilityPhase.ready),
+        );
       }
       return sample.totalMemoryBytes > 0 ||
               !PerformanceMetric.memory.enabledIn(sample.metricsMask)
           ? sample
           : null;
     } on PlatformException {
+      RuntimeCapabilities.instance.set(
+        RuntimeCapability.systemMetrics,
+        const CapabilityStatus(
+          CapabilityPhase.temporarilyUnavailable,
+          reason: 'metrics_sample_failed',
+        ),
+      );
       return null;
     } on MissingPluginException {
+      RuntimeCapabilities.instance.set(
+        RuntimeCapability.systemMetrics,
+        const CapabilityStatus(
+          CapabilityPhase.unsupported,
+          reason: 'native_metrics_unavailable',
+        ),
+      );
       return null;
     }
   }

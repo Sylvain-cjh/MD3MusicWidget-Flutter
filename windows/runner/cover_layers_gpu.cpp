@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <map>
@@ -333,7 +334,8 @@ class CoverGpuContext {
       D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {}; desc.pRootSignature = root.Get();
       desc.CS = {shader->GetBufferPointer(), shader->GetBufferSize()};
       ComPtr<ID3D12PipelineState> pipeline;
-      Check(device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)), "gpu_pipeline");
+      const auto operation=std::string("gpu_pipeline:")+entry;
+      Check(device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)), operation.c_str());
       found = pipelines.emplace(entry, pipeline).first;
     }
     auto& selected_mask = detector_output ? *detector_output : mask;
@@ -460,6 +462,12 @@ struct OrtSessionState {
     CheckStatus(api->AddSessionConfigEntry(options, "session.intra_op.allow_spinning", "0"));
     CheckStatus(api->AddSessionConfigEntry(options, "session.inter_op.allow_spinning", "0"));
     CheckStatus(api->AddSessionConfigEntry(options, "session.disable_cpu_ep_fallback", "1"));
+    if(gpu.model_kind==6) {
+      
+      
+      
+      CheckStatus(api->AddSessionConfigEntry(options, "ep.dml.disable_graph_fusion", "1"));
+    }
     CheckStatus(dml->SessionOptionsAppendExecutionProvider_DML1(options, device.Get(), gpu.queue.Get()));
     const auto model = root_path / filename;
     try {
@@ -676,12 +684,16 @@ int PrepareCover(
     uint8_t* mask_output, uint8_t* background_output, int out_width, int out_height,
     char* message, int capacity,uint8_t* priority_output=nullptr,uint8_t* text_output=nullptr,
     bool subject_draft=false) noexcept {
+  const auto started=std::chrono::steady_clock::now();
+  bool local_trial=false;
   try {
     if (!runtime_directory || !rgba || !mask_output || !background_output ||
         width < 2 || height < 2 || width > 2048 || height > 2048 ||
         out_width < 2 || out_height < 2 || out_width > ((priority_output || subject_draft) ? 2048 : 768) || out_height > ((priority_output || subject_draft) ? 2048 : 768)) {
       throw std::runtime_error("invalid_input");
     }
+    local_trial=!subject_draft && std::filesystem::is_regular_file(
+        std::filesystem::path(runtime_directory)/L"cover-layers-human123-best2.local-trial");
     CoverGpuContext gpu(width, height, out_width, out_height, subject_draft);
     gpu.Upload(gpu.source, rgba);
     const uint32_t initial[16] = {0, 0x3f800000};
@@ -702,9 +714,14 @@ int PrepareCover(
     std::array<uint32_t,3> body_evidence={};
     std::array<uint32_t,3> attachment_evidence={};
     std::string attachment_error;
+    std::string trial_failure;
+    double inference_ms=0;
     if (!alpha) {
       struct Model { const wchar_t* file; UINT side, kind, channels; const char* layer; const char* name; };
       const Model models[] = {
+        
+        
+        {L"cover-layers-human123-best2-512.onnx",512,6,1,"subject","human123-best2-512-probability"},
         {L"attachment-seg-fp16.onnx",1024,5,1,"subject","birefnet-lite-draft"},
         {L"anime-seg-fp16.onnx", 512, 1, 1, "person", "anime-isnet-fp16"},
         {L"human-seg.onnx", 192, 2, 2, "person", "pphumanseg"},
@@ -715,10 +732,12 @@ int PrepareCover(
       std::unique_ptr<OrtSessionState> selected_inference;
       std::string failures;
       for (const auto& model : models) {
+        if(model.kind==6 && !local_trial) continue;
         
         
         if(subject_draft ? (model.kind!=5 && model.kind!=0) : model.kind==5) continue;
         if (!std::filesystem::is_regular_file(std::filesystem::path(runtime_directory) / model.file)) {
+          if(model.kind==6) trial_failure="candidate_missing";
           failures += std::string(model.name) + ":missing,"; continue;
         }
         try {
@@ -744,7 +763,9 @@ int PrepareCover(
           gpu.Upload(gpu.stats, fresh);
           gpu.Dispatch("Preprocess", model.side, model.side);
           auto inference=std::make_unique<OrtSessionState>();
+          const auto inference_start=std::chrono::steady_clock::now();
           inference->Run(runtime_directory, model.file, gpu);
+          inference_ms+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-inference_start).count();
           gpu.Dispatch("ReduceMask", model.side, model.side);
           gpu.Dispatch("Resolve", gpu.grid_side, gpu.grid_side);
           gpu.Read(gpu.stats, stats.data());
@@ -755,12 +776,23 @@ int PrepareCover(
           const float threshold = model.kind == 0 ? 0.45f : 0.90f;
           if (stats[6] || high < threshold || high - low < 0.001f ||
               stats[5] < minimum || stats[5] > grid_pixels * 97 / 100 || stats[7] < confident) {
-            failures += std::string(model.name) + ":confidence,"; continue;
+            failures += std::string(model.name) + ":confidence,";
+            if(model.kind==6) trial_failure="confidence:"+std::to_string(low)+","+std::to_string(high);
+            continue;
           }
           layer = model.layer; model_name = model.name; accepted = true;
           ambiguous_person=model.kind==1 && stats[5]>std::max(4096u,stats[14]*4u);
           selected_inference=std::move(inference); inference_passes=1; break;
         } catch (const std::exception& error) {
+          const HRESULT removed=gpu.device->GetDeviceRemovedReason();
+          if(FAILED(removed)) {
+            
+            
+            
+            throw std::runtime_error(std::string("gpu_device_removed:model=")+model.name+
+                ";reason="+std::to_string(removed)+";at="+error.what());
+          }
+          if(model.kind==6) trial_failure=std::string(error.what()).substr(0,300);
           
           failures += std::string(model.name) + ":" + error.what() + ",";
         }
@@ -935,11 +967,13 @@ int PrepareCover(
     }
     std::string scene_detail;
     if(priority_output && text_output) {
-      if(alpha || gpu.model_kind==1 || gpu.model_kind==2) {
+      if(alpha || gpu.model_kind==1 || gpu.model_kind==2 || gpu.model_kind==6) {
         
         
         
-        scene_detail=";scene=0;layer_policy=person-only;text_layer=0";
+        scene_detail=gpu.model_kind==6
+            ? ";scene=0;layer_policy=visual-focus-trial;text_layer=0"
+            : ";scene=0;layer_policy=person-only;text_layer=0";
       } else {
         scene_detail=PrepareScene(gpu,runtime_directory,alpha);
         if(scene_detail.find(";scene=1")!=std::string::npos) {
@@ -950,6 +984,12 @@ int PrepareCover(
     gpu.Read(gpu.final_mask, mask_output); gpu.Read(gpu.background, background_output);
     WriteMessage(message, capacity, std::string("gpu:") + (gpu.integrated ? "integrated:" : "discrete:") +
         gpu.adapter + ";layer=" + layer + ";model=" + model_name +
+        ";local_trial="+(local_trial ? "1" : "0")+
+        ";trial_accepted="+(gpu.model_kind==6 ? "1" : "0")+
+        ";graph_fusion="+(gpu.model_kind==6 ? "0" : "default")+
+        ";trial_failure="+trial_failure+
+        ";inference_with_session_ms="+std::to_string(inference_ms)+
+        ";prepare_ms="+std::to_string(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count())+
         ";passes=" + std::to_string(inference_passes) +
         ";texture=" + std::to_string(texture_density) +
         ";body_consensus="+(body_consensus ? "1" : "0")+

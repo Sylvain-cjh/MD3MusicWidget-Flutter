@@ -182,7 +182,11 @@ final class PersistentCache {
     });
   }
 
-  Future<void> put(String key, Uint8List bytes) {
+  Future<void> put(
+    String key,
+    Uint8List bytes, {
+    Future<bool> Function(Uint8List existing)? shouldReplace,
+  }) {
     
     
     if (!_enabled ||
@@ -201,6 +205,21 @@ final class PersistentCache {
           return;
         }
         final digest = _digest(key), file = _file(_digest(key));
+        
+        
+        
+        if (shouldReplace != null && _entries.containsKey(digest)) {
+          final existing = _entries[digest]!;
+          if (await FileSystemEntity.type(file.path, followLinks: false) ==
+                  FileSystemEntityType.file &&
+              await file.length() == existing['size']) {
+            final previous = await file.readAsBytes();
+            if (await _checksum(previous) == existing['checksum'] &&
+                !await shouldReplace(previous)) {
+              return;
+            }
+          }
+        }
         final temporary = File('${file.path}.tmp');
         final checksum = await _checksum(snapshot);
         await temporary.writeAsBytes(snapshot, flush: true);

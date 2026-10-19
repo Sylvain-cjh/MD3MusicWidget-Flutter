@@ -2,7 +2,20 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:material_color_utilities/material_color_utilities.dart';
+
+Future<int> _materialSeed(Uint32List pixels) async {
+  final result = await QuantizerCelebi().quantize(pixels, 128);
+  final argb = result.colorToCount.map(
+    (abgr, count) => MapEntry(
+      (abgr & 0xff00ff00) | ((abgr & 0xff) << 16) | ((abgr >> 16) & 0xff),
+      count,
+    ),
+  );
+  return Score.score(argb, desired: 1).first;
+}
 
 
 
@@ -11,6 +24,70 @@ final class ArtworkPalette {
   final Color seed;
   final double whiteFraction;
   const ArtworkPalette(this.seed, this.whiteFraction);
+
+  
+  
+  
+  static Future<Color> materialSeedFromProvider(ImageProvider provider) async {
+    final stream = provider.resolve(ImageConfiguration.empty);
+    final ready = Completer<ImageInfo>();
+    var accepting = true;
+    final listener = ImageStreamListener(
+      (info, _) {
+        if (!accepting || ready.isCompleted) {
+          info.dispose();
+        } else {
+          ready.complete(info);
+        }
+      },
+      onError: (Object error, StackTrace? stack) {
+        if (!ready.isCompleted) ready.completeError(error, stack);
+      },
+    );
+    stream.addListener(listener);
+    ImageInfo? info;
+    ui.Picture? picture;
+    ui.Image? sampled;
+    try {
+      info = await ready.future.timeout(const Duration(seconds: 5));
+      final image = info.image;
+      final scale = math.min(1.0, 112 / math.max(image.width, image.height));
+      final width = image.width * scale, height = image.height * scale;
+      final recorder = ui.PictureRecorder();
+      paintImage(
+        canvas: Canvas(recorder),
+        rect: Rect.fromLTWH(0, 0, width, height),
+        image: image,
+        filterQuality: FilterQuality.none,
+      );
+      picture = recorder.endRecording();
+      sampled = await picture.toImage(
+        math.max(1, width.toInt()),
+        math.max(1, height.toInt()),
+      );
+      final data = await sampled.toByteData();
+      if (data == null) return neutralSeed;
+      final pixels = data.buffer.asUint32List(
+        data.offsetInBytes,
+        data.lengthInBytes ~/ 4,
+      );
+      return Color(await compute(_materialSeed, pixels));
+    } finally {
+      accepting = false;
+      stream.removeListener(listener);
+      info?.dispose();
+      sampled?.dispose();
+      picture?.dispose();
+      if (info == null) {
+        unawaited(
+          ready.future.then(
+            (lateInfo) => lateInfo.dispose(),
+            onError: (Object _) {},
+          ),
+        );
+      }
+    }
+  }
 
   static ArtworkPalette fromRgba(ByteData rgba) {
     final buckets = <int, _ColorBucket>{};

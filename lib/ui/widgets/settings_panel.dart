@@ -1693,6 +1693,8 @@ class _SettingsPanelState extends State<SettingsPanel>
                                       LyricsProviderChoice.neteaseCloud =>
                                         SettingsDescriptions
                                             .lyricsProviderNetease,
+                                      LyricsProviderChoice.amll =>
+                                        SettingsDescriptions.lyricsProviderAmll,
                                     },
                                     AppState.lyricsProviderChoice,
                                     (value) {
@@ -1720,6 +1722,10 @@ class _SettingsPanelState extends State<SettingsPanel>
                                         value:
                                             LyricsProviderChoice.neteaseCloud,
                                         label: SettingsLabels.providerNetease,
+                                      ),
+                                      DropdownMenuEntry(
+                                        value: LyricsProviderChoice.amll,
+                                        label: SettingsLabels.providerAmll,
                                       ),
                                     ],
                                   ),

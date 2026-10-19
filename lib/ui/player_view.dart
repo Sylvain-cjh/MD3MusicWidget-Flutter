@@ -15,8 +15,10 @@ import '../core/widget_diagnostics.dart';
 import '../core/native_window_geometry.dart';
 import '../core/artwork_resources.dart';
 import '../core/media_provider.dart';
+import '../core/media_session_lifecycle.dart';
+import '../core/demand_polling_loop.dart';
 import '../core/music_fetcher_provider.dart';
-import '../core/platform_provider.dart';
+import '../core/runtime_capabilities.dart';
 import '../core/spectrum_packet.dart';
 import '../core/music_source_service.dart';
 import 'animations/component_size_motion.dart';
@@ -52,10 +54,15 @@ class PlayerView extends StatefulWidget {
 
 class _PlayerViewState extends State<PlayerView>
     with WindowListener, tm.TrayListener, TickerProviderStateMixin {
-  Timer? _pollingTimer;
+  DemandPollingLoop? _pollingTimer;
   Timer? _spectrumTimer;
   Duration? _spectrumPollingInterval;
-  Timer? _mediaReconnectTimer;
+  DemandPollingLoop? _mediaReconnectTimer;
+  bool _servicesStarted = false;
+  late final _mediaLifecycle = MediaSessionLifecycle(
+    onUpdate: _acceptMediaUpdate,
+    estimatedPositionMs: () => AppState.estimatedPlaybackPositionMs,
+  );
   MusicFetcherProvider? _mediaProvider;
   StreamSubscription<MediaProviderEvent>? _mediaProviderSubscription;
   bool _mediaProviderConnectInFlight = false;
@@ -253,6 +260,8 @@ class _PlayerViewState extends State<PlayerView>
 
   @override
   void dispose() {
+    _servicesStarted = false;
+    _mediaLifecycle.dispose();
     _nextUpRetryTimer?.cancel();
     AppState.lyrics.removeListener(_onLyricsVisibilityChanged);
     AppState.lyricsVisualRevision.removeListener(_onLyricsVisibilityChanged);
@@ -402,6 +411,7 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   Future<void> _exitApplication() async {
+    _servicesStarted = false;
     _pollingTimer?.cancel();
     _spectrumTimer?.cancel();
     _mediaReconnectTimer?.cancel();
@@ -417,6 +427,7 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   Future<void> _updateColorScheme() async {
+    if (WidgetDiagnostics.enabled && WidgetDiagnostics.suppressPalette) return;
     final int serial = ++_colorSchemeRequestSerial;
     final provider = AppState.coverProvider;
     if (provider != null) {
@@ -970,11 +981,18 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   void _applyMediaSnapshot(MediaSnapshot snapshot) {
-    _recordFetcherHeartbeat(snapshot.fetcherUpdatedAtMs);
-    if (snapshot.processId > 0) AppState.fetcherPid = snapshot.processId;
     if (!mounted) return;
 
-    final nextTrack = PlatformTrack.fromSnapshot(snapshot);
+    _mediaLifecycle.accept(snapshot);
+  }
+
+  void _acceptMediaUpdate(MediaSessionUpdate update) {
+    if (!mounted) return;
+    final snapshot = update.snapshot;
+    _recordFetcherHeartbeat(snapshot.fetcherUpdatedAtMs);
+    if (snapshot.processId > 0) AppState.fetcherPid = snapshot.processId;
+
+    final nextTrack = update.track;
     AppState.trackNavigation.observe(
       nextTrack,
       queue: AppState.queue.queue,
@@ -990,21 +1008,15 @@ class _PlayerViewState extends State<PlayerView>
         (AppState.currentPlatformTrack?.sourceAppId ?? '') !=
             snapshot.sourceAppId;
     final bool versionChanged = AppState.trackVersion != snapshot.trackVersion;
-    final bool trackChanged = metadataChanged || versionChanged;
     final bool playbackStateChanged = AppState.isPlaying != snapshot.isPlaying;
     final bool capabilitiesChanged =
         AppState.mediaCapabilities != snapshot.capabilities;
-    final bool sameTrackRestarted =
-        versionChanged &&
-        !metadataChanged &&
-        snapshot.positionMs < 5000 &&
-        AppState.estimatedPlaybackPositionMs > 5000;
-    if ((metadataChanged || sameTrackRestarted) &&
-        AppState.playbackDurationMs > 0) {
+    if (update.startsTrack && AppState.playbackDurationMs > 0) {
       AppState.notifyTrackTransition();
     }
 
-    if (trackChanged || playbackStateChanged || capabilitiesChanged) {
+    if (versionChanged) AppState.trackVersion = snapshot.trackVersion;
+    if (metadataChanged || playbackStateChanged || capabilitiesChanged) {
       setState(() {
         AppState.trackTitle = snapshot.title;
         AppState.artistName = snapshot.artist;
@@ -1086,7 +1098,15 @@ class _PlayerViewState extends State<PlayerView>
       case MediaHeartbeatEvent():
         _recordFetcherHeartbeat();
       case MediaDisconnectedEvent():
+        RuntimeCapabilities.instance.set(
+          RuntimeCapability.mediaStream,
+          const CapabilityStatus(
+            CapabilityPhase.temporarilyUnavailable,
+            reason: 'stream_disconnected',
+          ),
+        );
         AppState.mediaCommandSender = null;
+        _syncMediaFallback();
         if (_latestCoverVersion.isNotEmpty &&
             _latestCoverVersion != AppState.currentCoverVersion) {
           unawaited(_loadCover(_latestCoverVersion));
@@ -1105,7 +1125,12 @@ class _PlayerViewState extends State<PlayerView>
     _mediaProviderConnectInFlight = true;
     try {
       if (await provider.connect() && mounted) {
+        RuntimeCapabilities.instance.set(
+          RuntimeCapability.mediaStream,
+          const CapabilityStatus(CapabilityPhase.ready),
+        );
         AppState.mediaCommandSender = provider.sendCommand;
+        _syncMediaFallback();
         _syncSpectrumPolling();
       }
     } finally {
@@ -1154,49 +1179,68 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   void _startPollingTimers() {
-    if (_pollingTimer != null) return;
+    if (_servicesStarted) return;
+    _servicesStarted = true;
     unawaited(_connectMediaProvider());
-    _mediaReconnectTimer ??= Timer.periodic(const Duration(seconds: 2), (_) {
-      if (_mediaProvider?.isConnected != true) {
-        unawaited(_connectMediaProvider());
-      }
-    });
-    _pollingTimer = Timer.periodic(const Duration(milliseconds: 300), (
-      timer,
-    ) async {
-      if (_mediaProvider?.isConnected == true) return;
-      if (_pollInFlight) return;
-      _pollInFlight = true;
-      try {
-        final bytes = await _readLocalResponse(
-          Uri.parse('http://localhost:12580/info'),
-          timeout: const Duration(milliseconds: 420),
-        );
-        final fingerprint = _fingerprintBytes(bytes);
-        if (_lastInfoLength == bytes.length &&
-            _lastInfoFingerprint == fingerprint) {
-          _recordFetcherHeartbeat();
-          return;
-        }
-        _lastInfoLength = bytes.length;
-        _lastInfoFingerprint = fingerprint;
-        final decoded = jsonDecode(utf8.decode(bytes));
-        if (decoded is! Map) throw const FormatException('Invalid /info JSON');
-        final data = Map<String, dynamic>.from(decoded);
-        _applyMediaSnapshot(MediaSnapshot.fromJson(data));
-      } catch (_) {
-        _recordFetcherFailure();
-      } finally {
-        _pollInFlight = false;
-      }
-    });
+    _syncMediaFallback();
     _syncSpectrumPolling();
+  }
+
+  void _syncMediaFallback() {
+    if (!_servicesStarted || !mounted) return;
+    if (_mediaProvider?.isConnected == true) {
+      _pollingTimer?.cancel();
+      _pollingTimer = null;
+      _mediaReconnectTimer?.cancel();
+      _mediaReconnectTimer = null;
+      return;
+    }
+    _mediaReconnectTimer ??= DemandPollingLoop(
+      interval: const Duration(seconds: 2),
+      poll: () async {
+        if (_mediaProvider?.isConnected != true) {
+          await _connectMediaProvider();
+        }
+      },
+    )..setActive(true);
+    _pollingTimer ??= DemandPollingLoop(
+      interval: const Duration(milliseconds: 300),
+      poll: () async {
+        if (_mediaProvider?.isConnected == true) return;
+        if (_pollInFlight) return;
+        _pollInFlight = true;
+        try {
+          final bytes = await _readLocalResponse(
+            Uri.parse('http://localhost:12580/info'),
+            timeout: const Duration(milliseconds: 420),
+          );
+          final fingerprint = _fingerprintBytes(bytes);
+          if (_lastInfoLength == bytes.length &&
+              _lastInfoFingerprint == fingerprint) {
+            _recordFetcherHeartbeat();
+            return;
+          }
+          _lastInfoLength = bytes.length;
+          _lastInfoFingerprint = fingerprint;
+          final decoded = jsonDecode(utf8.decode(bytes));
+          if (decoded is! Map) {
+            throw const FormatException('Invalid /info JSON');
+          }
+          final data = Map<String, dynamic>.from(decoded);
+          _applyMediaSnapshot(MediaSnapshot.fromJson(data));
+        } catch (_) {
+          _recordFetcherFailure();
+        } finally {
+          _pollInFlight = false;
+        }
+      },
+    )..setActive(true);
   }
 
   void _syncSpectrumPolling() {
     final bool shouldPoll =
         mounted &&
-        _pollingTimer != null &&
+        _servicesStarted &&
         AppState.spectrumMode != SpectrumMode.off;
     final provider = _mediaProvider;
     if (provider?.isConnected == true) {

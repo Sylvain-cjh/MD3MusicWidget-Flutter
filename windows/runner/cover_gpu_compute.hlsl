@@ -116,7 +116,7 @@ void Preprocess(uint3 id : SV_DispatchThreadID) {
   if (ModelKind == 4) rgb = (rgb.bgr*255.0-float3(103.53,116.28,123.675)) /
       float3(57.375,57.12,58.395);
   else if (ModelKind == 2) rgb = (rgb-0.5)/0.5;
-  else if (ModelKind == 0 || ModelKind == 3 || ModelKind==5) {
+  else if (ModelKind == 0 || ModelKind == 3 || ModelKind==5 || ModelKind==6) {
     if (ModelKind == 3) rgb = rgb.bgr;
     rgb = (rgb-float3(0.485,0.456,0.406)) / float3(0.229,0.224,0.225);
   }

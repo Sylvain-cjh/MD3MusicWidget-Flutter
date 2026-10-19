@@ -16,6 +16,8 @@ import 'local_lrc_lyrics_provider.dart';
 import 'lrclib_lyrics_provider.dart';
 import 'qq_music_lyrics_provider.dart';
 import 'netease_lyrics_provider.dart';
+import 'amll_lyrics_provider.dart';
+import 'lyrics_fallback_chain.dart';
 import 'netease_playlist_queue_provider.dart';
 import 'platform_provider.dart';
 import 'local_playlist_queue_provider.dart';
@@ -43,7 +45,7 @@ enum GlowMode { waterfall, wallpaper }
 
 enum SpectrumMode { off, bars, mirror, waveform }
 
-enum LyricsProviderChoice { lrclib, localLrc, qqMusic, neteaseCloud }
+enum LyricsProviderChoice { lrclib, localLrc, qqMusic, neteaseCloud, amll }
 
 enum LyricsTransitionStyle {
   fade,
@@ -115,6 +117,11 @@ class AppState {
   static final LrclibLyricsProvider _lrclibLyrics = LrclibLyricsProvider(
     cache: LyricsDiskCache(lyricsCacheStore),
   );
+  static final AmllLyricsProvider _amllLyrics = AmllLyricsProvider();
+  static final _lyricsFallback = LyricsFallbackChain(
+    id: 'amll',
+    sources: [_amllLyrics, _lrclibLyrics],
+  );
   static final QqMusicPlaylistQueueProvider _qqPlaylist =
       QqMusicPlaylistQueueProvider(playlistInput: () => qqPlaylistLink);
   static final NeteasePlaylistQueueProvider _neteasePlaylist =
@@ -123,8 +130,19 @@ class AppState {
       PlatformProviderRegistry()
         ..register(_lrclibLyrics)
         ..register(LocalLrcLyricsProvider(() => localLyricsDirectory))
-        ..register(QqMusicLyricsProvider(fallback: _lrclibLyrics))
-        ..register(NeteaseLyricsProvider(fallback: _lrclibLyrics))
+        ..register(
+          QqMusicLyricsProvider(
+            fallback: _lyricsFallback,
+            wordFallback: _amllLyrics,
+          ),
+        )
+        ..register(
+          NeteaseLyricsProvider(
+            fallback: _lyricsFallback,
+            wordFallback: _amllLyrics,
+          ),
+        )
+        ..register(_lyricsFallback)
         ..register(_qqPlaylist)
         ..register(_neteasePlaylist)
         ..register(LocalPlaylistQueueProvider(() => playlistFilePath));
@@ -156,6 +174,7 @@ class AppState {
     cache: LyricsDiskCache(lyricsCacheStore),
     maximumAttempts: 3,
     retryMissing: true,
+    preferWordTimings: () => wordLyricsEnabled,
   );
   static final QueueCoordinator queue = QueueCoordinator(
     platformProviders,
@@ -386,7 +405,7 @@ class AppState {
     if (_nextUpPreviewController case final existing?) return existing;
     final controller = NextUpPreviewController(
       readInput: () => NextUpPreviewInput(
-        trackIdentity: currentPlatformTrack?.queueIdentity,
+        trackIdentity: currentPlatformTrack?.contextIdentity,
         next: nextQueueItem,
         enabled: showNextUp && hasPlaylistConfigured,
         playing: isPlaying,

@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -51,6 +52,7 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
   bool _tickerMode = true;
   bool _reduced = false;
   bool _smokeLoading = false;
+  Timer? _smokeRetry;
   ui.FragmentProgram? _smokeProgram;
   WordLyricsSmoke? _smoke;
   Object? _smokeAttemptKey;
@@ -205,10 +207,28 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
         _paragraphSize,
         _pixelRatio,
       );
-    } else if (program == null && !_smokeLoading) {
+    } else if (program == null && !_smokeLoading && WordLyricsSmoke.canRetry) {
       _smokeLoading = true;
       WordLyricsSmoke.program().then((value) {
-        if (!mounted || value == null) return;
+        _smokeLoading = false;
+        if (!mounted) return;
+        if (value == null) {
+          if (WordLyricsSmoke.canRetry && _smokeRetry == null) {
+            final remaining = WordLyricsSmoke.retryAt?.difference(
+              DateTime.now(),
+            );
+            _smokeRetry = Timer(
+              remaining != null && remaining > Duration.zero
+                  ? remaining
+                  : const Duration(seconds: 1),
+              () {
+                _smokeRetry = null;
+                if (mounted && widget.active && _tickerMode) _ensureSmoke();
+              },
+            );
+          }
+          return;
+        }
         _smokeProgram = value;
         if (_bright != null) _ensureSmoke();
         _paintRevision.value++;
@@ -264,6 +284,7 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
 
   @override
   void dispose() {
+    _smokeRetry?.cancel();
     widget.playbackChanges.removeListener(_sync);
     _ticker.dispose();
     _paintRevision.dispose();

@@ -31,6 +31,7 @@ final class LyricsDocument {
   final String artist;
   final String sourceProviderId;
   final bool wordTimingChecked;
+  final DateTime? wordTimingRetryAt;
 
   LyricsDocument({
     required List<LyricLine> lines,
@@ -39,6 +40,7 @@ final class LyricsDocument {
     this.artist = '',
     this.sourceProviderId = '',
     this.wordTimingChecked = true,
+    this.wordTimingRetryAt,
   }) : lines = List.unmodifiable(lines);
 
   LyricsDocument withSourceProviderId(String id) => LyricsDocument(
@@ -48,6 +50,7 @@ final class LyricsDocument {
     artist: artist,
     sourceProviderId: id,
     wordTimingChecked: wordTimingChecked,
+    wordTimingRetryAt: wordTimingRetryAt,
   );
 
   LyricsDocument withWordTimingChecked() => LyricsDocument(
@@ -57,6 +60,16 @@ final class LyricsDocument {
     artist: artist,
     sourceProviderId: sourceProviderId,
     wordTimingChecked: true,
+  );
+
+  LyricsDocument withWordTimingRetryAt(DateTime? retryAt) => LyricsDocument(
+    lines: lines,
+    plainText: plainText,
+    title: title,
+    artist: artist,
+    sourceProviderId: sourceProviderId,
+    wordTimingChecked: false,
+    wordTimingRetryAt: retryAt,
   );
 
   bool get isTimed => lines.isNotEmpty;
@@ -163,7 +176,11 @@ final class LyricsDocument {
     final text = source.replaceFirst('\ufeff', '').trim();
     final kind = format.toLowerCase().replaceFirst('.', '');
     if (kind == 'ttml' || RegExp(r'<(?:\w+:)?tt[\s>]').hasMatch(text)) {
-      return _parseTtml(text);
+      try {
+        return _parseTtml(text);
+      } on XmlParserException {
+        throw const FormatException('Invalid TTML XML');
+      }
     }
     if (kind == 'qrc' ||
         kind == 'yrc' ||

@@ -80,6 +80,7 @@ final class LyricsCoordinator extends ChangeNotifier {
   String? _reconnectProviderId;
   final LyricsReconnectPolicy reconnectPolicy;
   final DateTime Function() _now;
+  final bool Function()? preferWordTimings;
 
   LyricsCoordinator(
     this.providers, {
@@ -88,6 +89,7 @@ final class LyricsCoordinator extends ChangeNotifier {
     this.retryMissing = false,
     this.reconnectPolicy = const LyricsReconnectPolicy(),
     DateTime Function()? clock,
+    this.preferWordTimings,
   }) : maximumAttempts = maximumAttempts.clamp(1, 5),
        _now = clock ?? DateTime.now;
 
@@ -127,7 +129,7 @@ final class LyricsCoordinator extends ChangeNotifier {
     bool cooldownRecovery = false,
   }) async {
     final identity = track?.identity;
-    final displayIdentity = track?.queueIdentity;
+    final displayIdentity = track?.contextIdentity;
     final sameContext =
         displayIdentity != null &&
         displayIdentity == _displayTrackIdentity &&
@@ -292,7 +294,16 @@ final class LyricsCoordinator extends ChangeNotifier {
             lineIndex: document.lineIndexAt(_positionMs),
           ),
         );
-        if (restoredFromDisk && !document.wordTimingChecked && cache != null) {
+        final canEnrichNow =
+            !restoredFromDisk &&
+            preferWordTimings?.call() == true &&
+            provider is BackgroundWordTimingLyricsProvider;
+        if ((restoredFromDisk || canEnrichNow) &&
+            !document.wordTimingChecked &&
+            cache != null &&
+            (canEnrichNow ||
+                document.wordTimingRetryAt == null ||
+                !document.wordTimingRetryAt!.isAfter(_now()))) {
           
           
           unawaited(_upgradeWordTiming(track!, provider, document, generation));
@@ -445,16 +456,28 @@ final class LyricsCoordinator extends ChangeNotifier {
     LyricsDocument cached,
     int generation,
   ) async {
-    var replacement = cached.withWordTimingChecked();
+    var replacement = cached.withWordTimingRetryAt(
+      _now().add(const Duration(minutes: 5)),
+    );
     try {
-      final fresh = await provider.loadLyrics(track);
-      if (fresh != null &&
-          !fresh.isEmpty &&
-          (fresh.isWordTimed || !cached.isWordTimed)) {
-        replacement = fresh.withWordTimingChecked();
+      final fresh = provider is WordTimingLyricsProvider
+          ? await (provider as WordTimingLyricsProvider).upgradeWordTiming(
+              track,
+            )
+          : await provider.loadLyrics(track);
+      if (fresh != null && !fresh.isEmpty) {
+        replacement = fresh.isWordTimed
+            ? fresh.withWordTimingChecked()
+            : cached.withWordTimingRetryAt(
+                fresh.wordTimingRetryAt ??
+                    _now().add(const Duration(minutes: 30)),
+              );
       }
-    } catch (_) {
+    } catch (error) {
       
+      if (error is LyricsRateLimitException) {
+        replacement = cached.withWordTimingRetryAt(error.retryAt);
+      }
     }
     if (_disposed || generation != _generation) return;
     await cache!.put(track, provider.id, replacement);

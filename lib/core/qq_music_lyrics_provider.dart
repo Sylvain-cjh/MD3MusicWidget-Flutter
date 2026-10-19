@@ -6,7 +6,7 @@ import 'dart:typed_data';
 import 'lyrics_document.dart';
 import 'lyrics_http_client.dart';
 import 'lyrics_primary_attempt.dart';
-import 'lrclib_lyrics_provider.dart';
+import 'lyrics_song_matcher.dart';
 import 'platform_provider.dart';
 import 'qrc_decoder.dart';
 import 'dart:async';
@@ -15,11 +15,13 @@ final class QqMusicLyricsProvider
     implements
         LyricsPlatformProvider,
         RetryableLyricsProvider,
+        BackgroundWordTimingLyricsProvider,
         ExhaustiveLyricsProvider {
   static const providerId = 'qqMusic';
   static const _maxBytes = 2 * 1024 * 1024;
   final HttpClient _client;
-  final LrclibLyricsProvider _fallback;
+  final LyricsPlatformProvider _fallback;
+  final WordTimingLyricsProvider? wordFallback;
   final Uri _searchEndpoint;
   final Uri _lyricEndpoint;
   final Uri? _wordLyricEndpoint;
@@ -32,6 +34,7 @@ final class QqMusicLyricsProvider
   QqMusicLyricsProvider({
     HttpClient? client,
     required this._fallback,
+    this.wordFallback,
     Uri? searchEndpoint,
     Uri? lyricEndpoint,
     Uri? wordLyricEndpoint,
@@ -62,7 +65,9 @@ final class QqMusicLyricsProvider
     final key =
         '${_key(track.title)}|${_key(track.artist)}|${(track.durationMs / 1000).round()}';
     if (_cache[key]?.$1 == null) _cache.remove(key);
-    _fallback.invalidateMiss(track);
+    if (_fallback is RetryableLyricsProvider) {
+      (_fallback as RetryableLyricsProvider).invalidateMiss(track);
+    }
   }
 
   @override
@@ -74,6 +79,34 @@ final class QqMusicLyricsProvider
       key,
       () => _load(track, key).whenComplete(() {
         _pending.remove(key);
+      }),
+    );
+  }
+
+  @override
+  Future<LyricsDocument?> upgradeWordTiming(PlatformTrack track) {
+    final key =
+        '${_key(track.title)}|${_key(track.artist)}|${(track.durationMs / 1000).round()}';
+    return _pending.putIfAbsent(
+      'words|$key',
+      () => Future<LyricsDocument?>(() async {
+        try {
+          final cached = _cache[key]?.$1;
+          if (cached?.isWordTimed == true) return cached;
+          if (wordFallback != null &&
+              cached != null &&
+              cached.wordTimingRetryAt?.isAfter(DateTime.now()) == true) {
+            return await wordFallback!.upgradeWordTiming(track);
+          }
+          final attempt = LyricsPrimaryAttempt(primaryBudget);
+          final fresh = (await attempt.run(
+            () => _loadFromQq(track, attempt),
+          ))?.withSourceProviderId(providerId);
+          if (fresh != null) _remember(key, fresh, const Duration(hours: 2));
+          return fresh;
+        } finally {
+          _pending.remove('words|$key');
+        }
       }),
     );
   }
@@ -102,9 +135,17 @@ final class QqMusicLyricsProvider
         _remember(key, null, const Duration(minutes: 1));
       }
     }
-    final fallback = (await _fallback.loadLyrics(
-      track,
-    ))?.withSourceProviderId(_fallback.id);
+    final resolved = await _fallback.loadLyrics(track);
+    final sourced = resolved == null
+        ? null
+        : resolved.sourceProviderId.isEmpty
+        ? resolved.withSourceProviderId(_fallback.id)
+        : resolved;
+    final fallback = sourced?.isWordTimed == true
+        ? sourced
+        : sourced?.withWordTimingRetryAt(
+            DateTime.now().add(const Duration(minutes: 30)),
+          );
     if (fallback != null && !fallback.isEmpty) {
       _remember(key, fallback, const Duration(hours: 2));
       return fallback;
@@ -137,30 +178,24 @@ final class QqMusicLyricsProvider
     final songs = (data['song'] as Map)['list'];
     if (songs is! List) return null;
     final matches = <(int, String)>[];
+    final matcher = LyricsSongMatcher(track);
     for (final item in songs) {
       if (item is! Map) continue;
       final songTitle = item['songname']?.toString() ?? '';
       final songMid = item['songmid']?.toString() ?? '';
-      if (songMid.isEmpty || !_titleMatches(title, songTitle)) continue;
+      if (songMid.isEmpty) continue;
       final singers = item['singer'];
-      final artistMatches =
-          artist.isEmpty ||
-          artist == '未知歌手' ||
-          (singers is List &&
-              singers.whereType<Map>().any(
-                (singer) =>
-                    _artistMatches(artist, singer['name']?.toString() ?? ''),
-              ));
-      if (!artistMatches) continue;
       final duration = (item['interval'] as num?)?.toDouble();
-      final durationDifference = duration == null || track.durationMs <= 0
-          ? 0.0
-          : (duration - track.durationMs / 1000).abs();
-      if (durationDifference > 12) continue;
-      final score =
-          (_key(title) == _key(songTitle) ? 4 : 0) +
-          (durationDifference <= 3 ? 2 : 0) +
-          (artistMatches ? 1 : 0);
+      final score = matcher.score(
+        title: songTitle,
+        artists: singers is List
+            ? singers.whereType<Map>().map(
+                (singer) => singer['name']?.toString() ?? '',
+              )
+            : const [],
+        durationMs: duration == null ? null : duration * 1000,
+      );
+      if (score == null) continue;
       matches.add((score, songMid));
     }
     matches.sort((a, b) => b.$1.compareTo(a.$1));
@@ -181,7 +216,13 @@ final class QqMusicLyricsProvider
             return await lineFuture ?? words;
           })
           .catchError((Object _) => null);
-      if (document != null && !document.isEmpty) return document;
+      if (document != null && !document.isEmpty) {
+        return document.isWordTimed
+            ? document
+            : document.withWordTimingRetryAt(
+                DateTime.now().add(const Duration(minutes: 30)),
+              );
+      }
     }
     return null;
   }
@@ -294,28 +335,6 @@ final class QqMusicLyricsProvider
     RegExp(r'[^\p{L}\p{N}]', unicode: true),
     '',
   );
-
-  static bool _titleMatches(String wanted, String candidate) {
-    final a = _key(wanted);
-    final b = _key(candidate);
-    if (a.isEmpty || b.isEmpty) return false;
-    if (a == b) return true;
-    final shorter = a.length < b.length ? a : b;
-    final longer = a.length < b.length ? b : a;
-    return shorter.length >= 4 &&
-        shorter.length / longer.length >= 0.7 &&
-        longer.contains(shorter);
-  }
-
-  static bool _artistMatches(String wanted, String candidate) {
-    final a = _key(wanted);
-    final b = _key(candidate);
-    return a.isNotEmpty &&
-        b.isNotEmpty &&
-        (a == b ||
-            (a.length >= 3 && b.contains(a)) ||
-            (b.length >= 3 && a.contains(b)));
-  }
 
   static String _decodeEntities(String text) => text
       .replaceAll('&amp;', '&')

@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import 'cover_gpu_backend.dart';
+import 'runtime_capabilities.dart';
 
 
 
@@ -31,6 +32,7 @@ final class CoverLayers {
   final String backend;
   final String detail;
   final ui.FragmentProgram? program;
+  final bool compactProgram;
   CoverLayers(
     this.original,
     this.mask,
@@ -40,6 +42,7 @@ final class CoverLayers {
     this.program, {
     this.priority,
     this.textRepair,
+    this.compactProgram = false,
   });
   int get bytes => [original, mask, background, priority, textRepair]
       .whereType<ui.Image>()
@@ -83,12 +86,18 @@ typedef CoverLayerProducer = Future<CoverLayers?> Function(ImageProvider);
 
 
 final class CoverLayerService with WidgetsBindingObserver {
+  
+  
+  
+  static const _cacheRevision = 'probability6-original-pixels-v1';
   static final instance = CoverLayerService();
   final int maximumEntries, maximumBytes;
   final CoverLayerProducer _produce;
   final LinkedHashMap<Object, _Entry> _ready = LinkedHashMap();
   final Map<Object, _LayerJob> _pending = {};
-  final LinkedHashMap<Object, bool> _rejected = LinkedHashMap();
+  final LinkedHashMap<Object, DateTime?> _rejected = LinkedHashMap();
+  final DateTime Function() _clock;
+  DateTime? _backendRetryAt;
   final ValueNotifier<String> status = ValueNotifier('尚未分析封面');
   Future<void> _tail = Future.value();
   int _generation = 0;
@@ -102,13 +111,30 @@ final class CoverLayerService with WidgetsBindingObserver {
     CoverLayerProducer? produce,
     String? executableDirectory,
     String? runtimeDirectory,
-  }) : _produce =
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now,
+       _produce =
            produce ??
            ((image) => _prepare(image, executableDirectory, runtimeDirectory));
 
   int get entryCount => _ready.length;
+  String? get lastResultDetail =>
+      _ready.isEmpty ? null : _ready.values.last.layers.detail;
+  bool _isRejected(Object identity) {
+    if (!_rejected.containsKey(identity)) return false;
+    final retry = _rejected[identity];
+    if (retry != null && !_clock().isBefore(retry)) {
+      _rejected.remove(identity);
+      return false;
+    }
+    return true;
+  }
+
+  bool get _backendCooling => _backendRetryAt?.isAfter(_clock()) == true;
   bool hasResult(Object identity) =>
-      _ready.containsKey(identity) || _rejected.containsKey(identity);
+      _ready.containsKey((_cacheRevision, identity)) ||
+      _isRejected((_cacheRevision, identity)) ||
+      _backendCooling;
   int get retainedBytes => _ready.values.fold(0, (a, b) => a + b.layers.bytes);
 
   Future<CoverLayerLease?> acquire(Object identity, ImageProvider image) async {
@@ -117,8 +143,8 @@ final class CoverLayerService with WidgetsBindingObserver {
       WidgetsBinding.instance.addObserver(this);
       _observing = true;
     }
-    final key = identity;
-    if (_rejected.containsKey(key)) return null;
+    final key = (_cacheRevision, identity);
+    if (_isRejected(key) || _backendCooling) return null;
     var entry = _ready.remove(key);
     if (entry != null) _ready[key] = entry;
     if (entry == null) {
@@ -137,7 +163,7 @@ final class CoverLayerService with WidgetsBindingObserver {
                 return null;
               }
               if (layers == null) {
-                _rejected[key] = true;
+                _rejected[key] = null;
                 while (_rejected.length > 8) {
                   _rejected.remove(_rejected.keys.first);
                 }
@@ -145,6 +171,12 @@ final class CoverLayerService with WidgetsBindingObserver {
                 return null;
               }
               final created = _Entry(layers)..waiters = job.waiters;
+              lastFailure = null;
+              _backendRetryAt = null;
+              RuntimeCapabilities.instance.set(
+                RuntimeCapability.coverLayers,
+                const CapabilityStatus(CapabilityPhase.ready),
+              );
               _ready[key] = created;
               final device = layers.detail.split(';').first;
               status.value = device.startsWith('gpu:integrated:')
@@ -156,7 +188,43 @@ final class CoverLayerService with WidgetsBindingObserver {
             .catchError((Object error) {
               if (!_disposed && generation == _generation) {
                 lastFailure = error.toString();
-                _rejected[key] = true;
+                final detail = error.toString();
+                final quality = detail.contains('mask_quality_rejected');
+                final missing =
+                    detail.contains('missing') || detail.contains('not_found');
+                final unsupported =
+                    detail.contains('integrated_gpu_unavailable') ||
+                    detail.contains('policy_required') ||
+                    detail.contains('not_allowed');
+                final retryAt = quality
+                    ? null
+                    : _clock().add(
+                        unsupported
+                            ? const Duration(minutes: 2)
+                            : const Duration(seconds: 30),
+                      );
+                _rejected[key] = retryAt;
+                if (!quality) _backendRetryAt = retryAt;
+                RuntimeCapabilities.instance.set(
+                  RuntimeCapability.coverLayers,
+                  CapabilityStatus(
+                    quality
+                        ? CapabilityPhase.ready
+                        : missing
+                        ? CapabilityPhase.missingDependency
+                        : unsupported
+                        ? CapabilityPhase.unsupported
+                        : CapabilityPhase.temporarilyUnavailable,
+                    reason: quality
+                        ? 'mask_quality_rejected'
+                        : missing
+                        ? 'gpu_dependency_missing'
+                        : unsupported
+                        ? 'integrated_gpu_unavailable'
+                        : 'gpu_prepare_failed',
+                    retryAt: retryAt,
+                  ),
+                );
                 while (_rejected.length > 8) {
                   _rejected.remove(_rejected.keys.first);
                 }
@@ -212,6 +280,7 @@ final class CoverLayerService with WidgetsBindingObserver {
   }
 
   void clear() {
+    _backendRetryAt = null;
     _generation++;
     _pending.clear();
     _rejected.clear();
@@ -233,8 +302,38 @@ final class CoverLayerService with WidgetsBindingObserver {
   }
 
   static Future<ui.FragmentProgram>? _program;
-  static Future<ui.FragmentProgram> get program =>
-      _program ??= ui.FragmentProgram.fromAsset('shaders/cover_layers.frag');
+  static Future<ui.FragmentProgram>? _subjectProgram;
+  static Future<ui.FragmentProgram> get subjectProgram {
+    final cached = _subjectProgram;
+    if (cached != null) return cached;
+    final loading = ui.FragmentProgram.fromAsset('shaders/cover_subject.frag');
+    _subjectProgram = loading;
+    unawaited(
+      loading.then<void>(
+        (_) {},
+        onError: (Object _, StackTrace _) {
+          if (identical(_subjectProgram, loading)) _subjectProgram = null;
+        },
+      ),
+    );
+    return loading;
+  }
+
+  static Future<ui.FragmentProgram> get program {
+    final cached = _program;
+    if (cached != null) return cached;
+    final loading = ui.FragmentProgram.fromAsset('shaders/cover_layers.frag');
+    _program = loading;
+    unawaited(
+      loading.then<void>(
+        (_) {},
+        onError: (Object _, StackTrace _) {
+          if (identical(_program, loading)) _program = null;
+        },
+      ),
+    );
+    return loading;
+  }
 
   static Future<CoverLayers?> _prepare(
     ImageProvider provider,
@@ -299,15 +398,18 @@ final class CoverLayerService with WidgetsBindingObserver {
             prepared.height,
           );
         }
+        final compact =
+            prepared.priority == null || prepared.textRepair == null;
         return CoverLayers(
           original,
           mask,
           background,
           'gpu',
           prepared.detail,
-          await program,
+          compact ? await subjectProgram : await program,
           priority: priority,
           textRepair: textRepair,
+          compactProgram: compact,
         );
       } catch (_) {
         original?.dispose();

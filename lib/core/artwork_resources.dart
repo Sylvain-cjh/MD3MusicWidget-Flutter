@@ -40,8 +40,8 @@ final class ArtworkSchemeCache {
   ) async {
     final palette = await ArtworkPalette.fromProvider(provider);
     if (palette.whiteFraction < 0.35) {
-      return ColorScheme.fromImageProvider(
-        provider: provider,
+      return ColorScheme.fromSeed(
+        seedColor: await ArtworkPalette.materialSeedFromProvider(provider),
         brightness: brightness,
         dynamicSchemeVariant: variant,
       );
@@ -101,8 +101,10 @@ final class ArtworkSchemeCache {
 }
 
 final class CachedArtwork {
+  static final Expando<CachedArtwork> _owners = Expando();
   final MemoryImage cover;
   final ImageProvider background;
+  final Set<ImageProvider> _variants = {};
   final int encodedBytes;
   Color? averageColor;
   Future<Color?>? _averageTask;
@@ -111,11 +113,26 @@ final class CachedArtwork {
 
   factory CachedArtwork(Uint8List bytes) {
     final cover = MemoryImage(bytes);
-    return CachedArtwork._(
+    final entry = CachedArtwork._(
       cover,
       ResizeImage(cover, width: 256),
       bytes.lengthInBytes,
     );
+    _owners[cover] = entry;
+    _owners[entry.background] = entry;
+    return entry;
+  }
+
+  
+  
+  static void trackVariant(ImageProvider source, ImageProvider variant) {
+    _owners[source]?._variants.add(variant);
+  }
+
+  Iterable<ImageProvider> get providers sync* {
+    yield cover;
+    yield background;
+    yield* _variants;
   }
 
   Future<Color?> prepareAverageColor() => _averageTask ??= () async {
@@ -189,13 +206,18 @@ final class ArtworkResources with WidgetsBindingObserver {
       return null;
     }
     final existing = _artworkPool.remove(version);
-    if (existing != null) _poolBytes -= existing.encodedBytes;
+    if (existing != null) {
+      _poolBytes -= existing.encodedBytes;
+    }
     _artworkPool[version] = entry;
     _poolBytes += entry.encodedBytes;
+    if (existing != null && !identical(existing, entry)) _retireEntry(existing);
     while (_artworkPool.length > maximumArtworkEntries ||
         _poolBytes > maximumEncodedBytes) {
       final oldestKey = _artworkPool.keys.first;
-      _poolBytes -= _artworkPool.remove(oldestKey)!.encodedBytes;
+      final oldest = _artworkPool.remove(oldestKey)!;
+      _poolBytes -= oldest.encodedBytes;
+      _retireEntry(oldest);
     }
     return entry;
   }
@@ -203,8 +225,7 @@ final class ArtworkResources with WidgetsBindingObserver {
   bool retains(ImageProvider? provider) {
     if (provider == null) return false;
     for (final entry in _artworkPool.values) {
-      if (identical(provider, entry.cover) ||
-          identical(provider, entry.background)) {
+      if (entry.providers.contains(provider)) {
         return true;
       }
     }
@@ -213,7 +234,16 @@ final class ArtworkResources with WidgetsBindingObserver {
 
   void forgetArtwork(String version) {
     final entry = _artworkPool.remove(version);
-    if (entry != null) _poolBytes -= entry.encodedBytes;
+    if (entry != null) {
+      _poolBytes -= entry.encodedBytes;
+      _retireEntry(entry);
+    }
+  }
+
+  void _retireEntry(CachedArtwork entry) {
+    for (final provider in entry.providers) {
+      unawaited(retire(provider));
+    }
   }
 
   int get artworkCount => _artworkPool.length;
@@ -227,11 +257,13 @@ final class ArtworkResources with WidgetsBindingObserver {
     } catch (_) {
       return;
     }
-    if (_disposed) return;
+    if (_disposed || retains(provider)) return;
     _retired.remove(key)?.cancel();
     _retired[key] = Timer(const Duration(seconds: 2), () {
       _retired.remove(key);
-      PaintingBinding.instance.imageCache.evict(key, includeLive: false);
+      if (!_disposed && !retains(provider)) {
+        PaintingBinding.instance.imageCache.evict(key, includeLive: false);
+      }
     });
   }
 

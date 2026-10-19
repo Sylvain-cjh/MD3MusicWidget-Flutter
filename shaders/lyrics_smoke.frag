@@ -5,6 +5,7 @@ uniform vec2 uAtlasSize;
 uniform vec4 uWord;
 uniform float uPhase;
 uniform float uSeed;
+uniform vec2 uInkBand;
 uniform sampler2D uInk;
 out vec4 fragColor;
 
@@ -27,7 +28,9 @@ vec4 inkAt(vec2 p) {
                * step(uWord.y, p.y) * step(p.y, hi.y)
                * step(0.0, p.x) * step(p.x, uAtlasSize.x)
                * step(0.0, p.y) * step(p.y, uAtlasSize.y);
-  return texture(uInk, p / uAtlasSize) * inside;
+  vec2 uv = p / uAtlasSize;
+  uv.y = uInkBand.x + uv.y * uInkBand.y;
+  return texture(uInk, uv) * inside;
 }
 
 void main() {

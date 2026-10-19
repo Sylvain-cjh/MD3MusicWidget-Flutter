@@ -175,13 +175,57 @@ LyricsDocument _parsePlatformWords(String source, {bool yrc = false}) {
         'External XML declarations are not supported',
       );
     }
-    final xml = XmlDocument.parse(source);
-    final contents = xml.descendants
-        .whereType<XmlElement>()
-        .map((element) => element.getAttribute('LyricContent'))
-        .whereType<String>();
-    if (contents.isEmpty) return LyricsDocument(lines: []);
-    source = contents.first;
+    try {
+      final xml = XmlDocument.parse(source);
+      final contents = xml.descendants
+          .whereType<XmlElement>()
+          .map((element) => element.getAttribute('LyricContent'))
+          .whereType<String>();
+      if (contents.isEmpty) return LyricsDocument(lines: []);
+      source = contents.first;
+    } on XmlParserException {
+      
+      
+      
+      final opening = RegExp(
+        r'''<Lyric_\d+\b[^>]*\bLyricContent\s*=\s*(["'])''',
+      ).firstMatch(source);
+      final closing = RegExp(
+        r'''(["'])\s*/?>\s*(?:</[\w:.-]+\s*>\s*)*$''',
+      ).firstMatch(source);
+      if (opening == null ||
+          closing == null ||
+          opening[1] != closing[1] ||
+          closing.start < opening.end ||
+          !source.contains('<QrcInfos')) {
+        throw const FormatException('Invalid QRC lyric wrapper');
+      }
+      source = source.substring(opening.end, closing.start).replaceAllMapped(
+        RegExp(r'&(?:amp|lt|gt|quot|apos|#\d+|#x[\da-fA-F]+);'),
+        (match) {
+          final entity = match[0]!;
+          const named = {
+            '&amp;': '&',
+            '&lt;': '<',
+            '&gt;': '>',
+            '&quot;': '"',
+            '&apos;': "'",
+          };
+          if (named.containsKey(entity)) return named[entity]!;
+          final hex = entity.startsWith('&#x');
+          final code = int.tryParse(
+            entity.substring(hex ? 3 : 2, entity.length - 1),
+            radix: hex ? 16 : 10,
+          );
+          return code != null &&
+                  code > 0 &&
+                  code <= 0x10ffff &&
+                  !(code >= 0xd800 && code <= 0xdfff)
+              ? String.fromCharCode(code)
+              : entity;
+        },
+      );
+    }
   }
   final header = RegExp(r'^\[(\d+),(\d+)\](.*)$');
   final marker = yrc
@@ -219,21 +263,58 @@ LyricsDocument _parsePlatformWords(String source, {bool yrc = false}) {
       }
     }
     final text = body.replaceAll(activeMarker, '');
-    final valid =
-        _validLyricWords(words, text) &&
-        words.every(
-          (word) => word.startMs >= start && word.endMs <= start + duration,
-        );
+    final normalized = _normalizePlatformWords(words, start, start + duration);
+    final valid = _validLyricWords(normalized, text);
     lines.add(
       LyricLine(
         start,
         text,
         endMs: start + duration,
-        words: valid ? List.unmodifiable(words) : const [],
+        words: valid ? List.unmodifiable(normalized) : const [],
       ),
     );
   }
   return _orderedLyrics(lines);
+}
+
+List<LyricWord> _normalizePlatformWords(
+  List<LyricWord> words,
+  int start,
+  int end,
+) {
+  const roundingToleranceMs = 20;
+  final result = <LyricWord>[];
+  var prefix = '';
+  for (final word in words) {
+    if (word.startMs < start - roundingToleranceMs ||
+        word.endMs > end + roundingToleranceMs) {
+      return const [];
+    }
+    if (word.endMs == word.startMs &&
+        RegExp(r'^[^\p{L}\p{N}]+$', unicode: true).hasMatch(word.text)) {
+      
+      if (result.isEmpty) {
+        prefix += word.text;
+      } else {
+        final previous = result.removeLast();
+        result.add(
+          LyricWord(
+            previous.startMs,
+            previous.endMs,
+            previous.text + word.text,
+          ),
+        );
+      }
+      continue;
+    }
+    if (word.endMs <= word.startMs) return const [];
+    final wordStart = word.startMs.clamp(start, end);
+    final wordEnd = word.endMs.clamp(start, end);
+    if (wordEnd <= wordStart) return const [];
+    result.add(LyricWord(wordStart, wordEnd, prefix + word.text));
+    prefix = '';
+  }
+  return prefix.isEmpty ? result : const [];
 }
 
 LyricsDocument _parseTtml(String source) {

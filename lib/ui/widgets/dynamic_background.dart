@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
 import '../../core/blurred_artwork_provider.dart';
+import '../../core/widget_diagnostics.dart';
 import 'right_artwork_surface.dart';
 import 'stable_artwork_surface.dart';
 
@@ -29,29 +31,35 @@ class CircularRevealClipper extends CustomClipper<Path> {
 
 class DitherNoisePainter extends CustomPainter {
   final Brightness brightness;
-  static Picture? _cachedDark;
-  static Picture? _cachedLight;
-  static Size? _cachedSize;
+  static final LinkedHashMap<(Size, Brightness), Picture> _pictures =
+      LinkedHashMap();
+  static const maximumRetainedBytes = 2 * 1024 * 1024;
+  static int debugBuilds = 0;
+  static int get retainedBytes => _pictures.values.fold(
+    0,
+    (total, picture) => total + picture.approximateBytesUsed,
+  );
+  static int get cachedPictures => _pictures.length;
+  static void clearCache() {
+    for (final picture in _pictures.values) {
+      picture.dispose();
+    }
+    _pictures.clear();
+  }
 
   DitherNoisePainter(this.brightness);
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (_cachedSize != size) {
-      _cachedDark?.dispose();
-      _cachedLight?.dispose();
-      _cachedDark = null;
-      _cachedLight = null;
-      _cachedSize = size;
-    }
-    if (brightness == Brightness.dark && _cachedDark != null) {
-      canvas.drawPicture(_cachedDark!);
+    if (WidgetDiagnostics.enabled && WidgetDiagnostics.suppressDither) return;
+    final key = (size, brightness);
+    final cached = _pictures.remove(key);
+    if (cached != null) {
+      _pictures[key] = cached;
+      canvas.drawPicture(cached);
       return;
     }
-    if (brightness == Brightness.light && _cachedLight != null) {
-      canvas.drawPicture(_cachedLight!);
-      return;
-    }
+    debugBuilds++;
 
     final recorder = PictureRecorder();
     final c = Canvas(recorder);
@@ -121,9 +129,15 @@ class DitherNoisePainter extends CustomPainter {
     }
 
     final picture = recorder.endRecording();
-    if (brightness == Brightness.dark) _cachedDark = picture;
-    if (brightness == Brightness.light) _cachedLight = picture;
     canvas.drawPicture(picture);
+    if (picture.approximateBytesUsed > maximumRetainedBytes) {
+      picture.dispose();
+      return;
+    }
+    _pictures[key] = picture;
+    while (_pictures.length > 6 || retainedBytes > maximumRetainedBytes) {
+      _pictures.remove(_pictures.keys.first)!.dispose();
+    }
   }
 
   @override
@@ -217,7 +231,7 @@ class DynamicBackground extends StatefulWidget {
 }
 
 class _DynamicBackgroundState extends State<DynamicBackground>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _revealController;
   late CurvedAnimation _revealAnimation;
   late bool _glowLayerVisible;
@@ -283,6 +297,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AppState.backgroundRevision.addListener(_handleBackgroundChanged);
     _glowLayerVisible = AppState.enableGlow;
     _visualState = _readVisualState();
@@ -360,12 +375,16 @@ class _DynamicBackgroundState extends State<DynamicBackground>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _heldArtworkReleaseTimer?.cancel();
     AppState.backgroundRevision.removeListener(_handleBackgroundChanged);
     _revealAnimation.dispose();
     _revealController.dispose();
     super.dispose();
   }
+
+  @override
+  void didHaveMemoryPressure() => DitherNoisePainter.clearCache();
 
   Widget _preparedGlow(
     ImageProvider source,

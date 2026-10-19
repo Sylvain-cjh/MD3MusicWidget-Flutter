@@ -32,6 +32,11 @@ class ProviderBrandMark extends StatelessWidget {
             borderRadius: BorderRadius.circular(size * .2),
             child: Image.asset('assets/brand/lrclib.png'),
           ),
+          'amll' => Icon(
+            Icons.library_music_rounded,
+            color: scheme.onPrimaryContainer,
+            size: size * .76,
+          ),
           _ => Icon(
             source == 'localLrc' ? Icons.folder_rounded : Icons.lyrics_rounded,
             color: scheme.onPrimaryContainer,
