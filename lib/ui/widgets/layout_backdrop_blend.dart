@@ -49,7 +49,10 @@ class LayoutBackdropBlend extends StatelessWidget {
               tileMode: ui.TileMode.clamp,
             ),
             child: FittedBox(
-              fit: BoxFit.fill,
+              
+              
+              
+              fit: BoxFit.cover,
               alignment: Alignment.topLeft,
               child: live,
             ),
@@ -67,7 +70,8 @@ class LayoutBackdropBlend extends StatelessWidget {
                   ),
                   child: RawImage(
                     image: previous,
-                    fit: BoxFit.fill,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.topLeft,
                     filterQuality: FilterQuality.medium,
                   ),
                 ),

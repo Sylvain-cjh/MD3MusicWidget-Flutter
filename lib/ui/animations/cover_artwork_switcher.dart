@@ -10,6 +10,7 @@ class CoverArtworkSwitcher extends StatefulWidget {
   final bool reduceMotion;
   final BorderRadius borderRadius;
   final Widget child;
+  final StackFit fit;
 
   const CoverArtworkSwitcher({
     super.key,
@@ -18,6 +19,7 @@ class CoverArtworkSwitcher extends StatefulWidget {
     required this.reduceMotion,
     required this.borderRadius,
     required this.child,
+    this.fit = StackFit.loose,
   });
 
   @override
@@ -180,6 +182,7 @@ class _CoverArtworkSwitcherState extends State<CoverArtworkSwitcher>
             : Clip.none,
         child: Stack(
           key: const ValueKey('cover_layer_stack'),
+          fit: widget.fit,
           alignment: Alignment.center,
           clipBehavior: Clip.none,
           children: behind ? [current, ...previous] : [...previous, current],

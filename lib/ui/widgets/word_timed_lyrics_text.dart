@@ -9,6 +9,7 @@ import 'package:flutter/rendering.dart';
 import '../../core/lyrics_document.dart';
 import '../../core/lyrics_highlight.dart';
 import '../animations/lyrics_smoke_motion.dart';
+import 'lyric_row_ink.dart';
 import 'word_lyrics_smoke.dart';
 
 
@@ -46,6 +47,7 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
   late final Ticker _ticker;
   final _paintRevision = ValueNotifier<int>(0);
   TextPainter? _base, _bright;
+  LyricRowInk? _rowInk;
   List<List<TextBox>> _boxes = const [];
   Object? _layoutKey;
   double _position = 0;
@@ -149,6 +151,7 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
     );
     if (key == _layoutKey) return;
     _layoutKey = key;
+    _rowInk?.dispose();
     _base?.dispose();
     _bright?.dispose();
     _smoke?.dispose();
@@ -187,10 +190,19 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
       ],
     ];
     _paragraphSize = Size(width, _base!.height);
+    _rowInk = widget.smokeEnabled
+        ? LyricRowInk.create(_bright!, _boxes, width)
+        : null;
     debugLayoutPasses++;
   }
 
   void _ensureSmoke() {
+    if (widget.smokeEnabled) {
+      _rowInk ??= LyricRowInk.create(_bright!, _boxes, _paragraphSize.width);
+    } else {
+      _rowInk?.dispose();
+      _rowInk = null;
+    }
     if (!widget.smokeEnabled || _reduced) {
       _smoke?.dispose();
       _smoke = null;
@@ -206,6 +218,7 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
         _boxes,
         _paragraphSize,
         _pixelRatio,
+        rowInk: _rowInk,
       );
     } else if (program == null && !_smokeLoading && WordLyricsSmoke.canRetry) {
       _smokeLoading = true;
@@ -264,6 +277,7 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
                     bright: _bright!,
                     line: widget.line,
                     boxes: _boxes,
+                    rowInk: _rowInk,
                     position: () => _position,
                     effect: MediaQuery.disableAnimationsOf(context)
                         ? LyricsHighlightStyle.sweep
@@ -288,6 +302,7 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
     widget.playbackChanges.removeListener(_sync);
     _ticker.dispose();
     _paintRevision.dispose();
+    _rowInk?.dispose();
     _base?.dispose();
     _bright?.dispose();
     _smoke?.dispose();
@@ -333,6 +348,7 @@ class _WordLyricsPainter extends CustomPainter {
   final TextPainter base, bright;
   final LyricLine line;
   final List<List<TextBox>> boxes;
+  final LyricRowInk? rowInk;
   final double Function() position;
   final LyricsHighlightStyle effect;
   final bool smokeEnabled, reduced;
@@ -342,6 +358,7 @@ class _WordLyricsPainter extends CustomPainter {
     required this.bright,
     required this.line,
     required this.boxes,
+    required this.rowInk,
     required this.position,
     required this.effect,
     required this.smokeEnabled,
@@ -415,7 +432,9 @@ class _WordLyricsPainter extends CustomPainter {
         hole,
       );
       canvas.save();
-      canvas.clipPath(rest);
+      
+      
+      canvas.clipPath(rest, doAntiAlias: !smokeEnabled);
       (smokeEnabled ? bright : base).paint(canvas, Offset.zero);
       canvas.restore();
     } else {
@@ -438,17 +457,14 @@ class _WordLyricsPainter extends CustomPainter {
       }
       
       final path = _pathFor(index, 1);
-      canvas.save();
-      canvas.clipPath(path);
       if (phase > 0) {
         canvas.saveLayer(
           path.getBounds(),
           Paint()..color = Color.fromRGBO(255, 255, 255, 1 - phase),
         );
       }
-      bright.paint(canvas, Offset.zero);
+      rowInk!.paintWord(canvas, index);
       if (phase > 0) canvas.restore();
-      canvas.restore();
     }
     
     

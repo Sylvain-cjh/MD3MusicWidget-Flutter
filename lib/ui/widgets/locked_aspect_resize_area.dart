@@ -201,6 +201,15 @@ class LockedAspectResizeAreaState extends State<LockedAspectResizeArea> {
     } catch (_) {}
   }
 
+  
+  
+  void cancelPendingResize() {
+    _dragSerial++;
+    _startBounds = null;
+    _pendingBounds = null;
+    _dragDelta = Offset.zero;
+  }
+
   void _endResize() {
     _dragSerial++;
     _startBounds = null;
@@ -211,10 +220,7 @@ class LockedAspectResizeAreaState extends State<LockedAspectResizeArea> {
   void didUpdateWidget(covariant LockedAspectResizeArea oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.enabled && !widget.enabled) {
-      _dragSerial++;
-      _startBounds = null;
-      _pendingBounds = null;
-      _dragDelta = Offset.zero;
+      cancelPendingResize();
     }
   }
 

@@ -13,6 +13,7 @@ import 'package:tray_manager/tray_manager.dart' as tm;
 import '../core/app_state.dart';
 import '../core/widget_diagnostics.dart';
 import '../core/native_window_geometry.dart';
+import '../core/window_geometry_queue.dart';
 import '../core/artwork_resources.dart';
 import '../core/media_provider.dart';
 import '../core/media_session_lifecycle.dart';
@@ -25,6 +26,8 @@ import 'animations/component_size_motion.dart';
 import 'animations/next_up_presence_motion.dart';
 import 'animations/lyrics_visual_motion.dart';
 import 'animations/layout_morph_motion.dart';
+import 'animations/settings_disclosure.dart';
+import 'animations/media_motion_tokens.dart';
 import 'widgets/layout_backdrop_blend.dart';
 import 'widgets/backdrop_capture_boundary.dart';
 import 'widgets/smooth_rounded_clip.dart';
@@ -131,6 +134,8 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   bool _isSettingsOpen = false;
+  bool _settingsVisualOpen = false;
+  bool _settingsTransitionActive = false;
   bool _isMenuOpen = false;
   bool _menuResizeInFlight = false;
   bool _isSystemTrayReady = false;
@@ -157,6 +162,7 @@ class _PlayerViewState extends State<PlayerView>
   bool _isTransitioning = false;
   double _leftPadding = 0.0;
   int _windowTransitionSerial = 0;
+  final _windowGeometry = WindowGeometryQueue();
   bool _nextUpResizePending = false;
   bool _nextUpResizeInFlight = false;
   bool _nextUpSyncScheduled = false;
@@ -1361,6 +1367,7 @@ class _PlayerViewState extends State<PlayerView>
   }
 
   int _beginWindowTransition() {
+    _settingsTransitionActive = false;
     if (!_layoutMotion.active &&
         !_layoutPreparing &&
         _layoutMotion.holding &&
@@ -1407,6 +1414,20 @@ class _PlayerViewState extends State<PlayerView>
       first,
       second,
       pixelRatio: MediaQuery.devicePixelRatioOf(context),
+    );
+  }
+
+  Future<Rect> _readWindowBounds() async {
+    _resizeAreaKey.currentState?.cancelPendingResize();
+    await _resizeAreaKey.currentState?.waitForIdle();
+    return _windowGeometry.read(windowManager.getBounds);
+  }
+
+  Future<void> _writeWindowBounds(Rect bounds, {int? serial}) {
+    final owner = serial ?? _windowTransitionSerial;
+    return _windowGeometry.write(
+      () => windowManager.setBounds(bounds, animate: false),
+      isCurrent: () => _isCurrentWindowTransition(owner),
     );
   }
 
@@ -1510,8 +1531,12 @@ class _PlayerViewState extends State<PlayerView>
 
   Future<void> _reserveNextUpSpace(bool occupied) async {
     if (!mounted) return;
+    final serial = _windowTransitionSerial;
     await _resizeAreaKey.currentState?.waitForIdle();
-    if (!mounted) return;
+    if (!_isCurrentWindowTransition(serial)) {
+      _nextUpResizePending = true;
+      return;
+    }
     if (occupied && !AppState.nextUpPreviewVisible.value) return;
     if (_isTransitioning) {
       AppState.nextUpPanelOccupied = occupied;
@@ -1528,8 +1553,12 @@ class _PlayerViewState extends State<PlayerView>
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
     }
-    final bounds = await windowManager.getBounds();
+    final bounds = await _readWindowBounds();
     if (!mounted) return;
+    if (!_isCurrentWindowTransition(serial)) {
+      _nextUpResizePending = true;
+      return;
+    }
     if (occupied && !AppState.nextUpPreviewVisible.value) return;
     if (_isTransitioning) {
       _nextUpResizePending = true;
@@ -1563,12 +1592,15 @@ class _PlayerViewState extends State<PlayerView>
             AppState.nextUpPanelExtentOf(AppState.widgetLayout)) *
         _frameScale;
     if ((bounds.height - targetHeight).abs() > 0.5) {
-      await windowManager.setBounds(
+      await _writeWindowBounds(
         Rect.fromLTWH(bounds.left, bounds.top, bounds.width, targetHeight),
-        animate: false,
+        serial: serial,
       );
     }
-    if (!mounted) return;
+    if (!_isCurrentWindowTransition(serial)) {
+      _nextUpResizePending = true;
+      return;
+    }
     if (occupied && !AppState.nextUpPreviewVisible.value) return;
     AppState.nextUpPanelOccupied = occupied;
     setState(() {});
@@ -1621,7 +1653,8 @@ class _PlayerViewState extends State<PlayerView>
   Future<void> _applyComponentSizeToTarget(int serial) async {
     final bool disableAnimations =
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    final Rect bounds = await windowManager.getBounds();
+    final Rect bounds = await _readWindowBounds();
+    if (!_isCurrentWindowTransition(serial)) return;
     final WidgetLayout targetLayout = AppState.widgetLayout;
     final bool targetSettingsOpen = _isSettingsOpen;
     final String targetSettingsSide = _settingsSide;
@@ -1654,7 +1687,7 @@ class _PlayerViewState extends State<PlayerView>
         _isComponentSizeTransitioning = false;
       });
       if (!_rectNearlyEquals(bounds, targetRect)) {
-        await windowManager.setBounds(targetRect, animate: false);
+        await _writeWindowBounds(targetRect, serial: serial);
       }
       return;
     } else {
@@ -1666,7 +1699,7 @@ class _PlayerViewState extends State<PlayerView>
 
       final Future<void> stageResize = _rectNearlyEquals(bounds, stage)
           ? Future<void>.value()
-          : windowManager.setBounds(stage, animate: false);
+          : _writeWindowBounds(stage, serial: serial);
       await Future.wait<void>([
         stageResize,
         WidgetsBinding.instance.endOfFrame,
@@ -1699,7 +1732,7 @@ class _PlayerViewState extends State<PlayerView>
       });
     }
     if (!_rectNearlyEquals(stage, targetRect)) {
-      await windowManager.setBounds(targetRect, animate: false);
+      await _writeWindowBounds(targetRect, serial: serial);
     }
   }
 
@@ -1779,7 +1812,7 @@ class _PlayerViewState extends State<PlayerView>
 
   Future<void> _morphOrientation(int serial) async {
     try {
-      final bounds = await windowManager.getBounds();
+      final bounds = await _readWindowBounds();
       if (!mounted || !_isCurrentWindowTransition(serial)) return;
       final targetLayout = AppState.widgetLayout;
       final targetOpen = _isSettingsOpen;
@@ -1836,7 +1869,7 @@ class _PlayerViewState extends State<PlayerView>
       });
       _retireLayoutImage(oldImage);
       if (!_rectNearlyEquals(bounds, stage)) {
-        await windowManager.setBounds(stage, animate: false);
+        await _writeWindowBounds(stage, serial: serial);
       }
       if (!_isCurrentWindowTransition(serial)) return;
       setState(() {
@@ -1845,6 +1878,7 @@ class _PlayerViewState extends State<PlayerView>
           AppState.innerPlayerHeightOf(targetLayout),
         );
         _displayLayout = targetLayout;
+        _settingsVisualOpen = targetOpen;
         _layoutPreparing = false;
         _layoutMotion.prepare(
           source: source,
@@ -1866,14 +1900,14 @@ class _PlayerViewState extends State<PlayerView>
       final completed = await _layoutMotion.play(reduced: reduced);
       if (!completed || !_isCurrentWindowTransition(serial)) return;
       await WidgetsBinding.instance.endOfFrame;
-      final current = await windowManager.getBounds();
+      final current = await _readWindowBounds();
       if (!_isCurrentWindowTransition(serial)) return;
       final moved = current.topLeft - stage.topLeft;
       final finalBounds = target.shift(moved);
       _leftPadding = targetPadding;
       _layoutMotion.requestTrim(stage.shift(moved), finalBounds);
       if (!_rectNearlyEquals(current, finalBounds)) {
-        await windowManager.setBounds(finalBounds, animate: false);
+        await _writeWindowBounds(finalBounds, serial: serial);
       }
       if (!_isCurrentWindowTransition(serial)) return;
       await WidgetsBinding.instance.endOfFrame;
@@ -1900,7 +1934,14 @@ class _PlayerViewState extends State<PlayerView>
       await _morphOrientation(serial);
       return;
     }
-    final bounds = await windowManager.getBounds();
+    final bounds = await _readWindowBounds();
+    if (!_isCurrentWindowTransition(serial)) return;
+    if (_layoutPreparing && !_layoutMotion.active) {
+      
+      
+      
+      _clearLayoutMorph();
+    }
     final double absCardLeft = bounds.left + _leftPadding;
 
     
@@ -1908,6 +1949,10 @@ class _PlayerViewState extends State<PlayerView>
     final WidgetLayout targetLayout = AppState.widgetLayout;
     final bool targetSettingsOpen = _isSettingsOpen;
     final String targetSettingsSide = _settingsSide;
+
+    final duration = _settingsTransitionActive
+        ? MediaMotionTokens.settingsDisclosure
+        : AppState.layoutSwitchDuration;
 
     final double targetW =
         (targetSettingsOpen
@@ -1936,17 +1981,23 @@ class _PlayerViewState extends State<PlayerView>
 
     _leftPadding = absCardLeft - stage.left;
     if (!_rectNearlyEquals(bounds, stage)) {
-      await windowManager.setBounds(stage, animate: false);
+      await _writeWindowBounds(stage, serial: serial);
+      
+      
+      await WidgetsBinding.instance.endOfFrame;
     }
     if (!_isCurrentWindowTransition(serial)) return;
-    setState(() {});
+    if (!mounted) return;
+    setState(() => _settingsVisualOpen = targetSettingsOpen);
     await Future.delayed(
-      AppState.layoutSwitchDuration + const Duration(milliseconds: 16),
+      (MediaQuery.disableAnimationsOf(context) ? Duration.zero : duration) +
+          const Duration(milliseconds: 16),
     );
 
     if (!_isCurrentWindowTransition(serial)) return;
 
-    final b2 = await windowManager.getBounds();
+    final b2 = await _readWindowBounds();
+    if (!_isCurrentWindowTransition(serial)) return;
     final double currentAbsCardLeft = b2.left + _leftPadding;
     _leftPadding = targetLeftPadding;
 
@@ -1958,13 +2009,14 @@ class _PlayerViewState extends State<PlayerView>
       targetH,
     );
     if (!_rectNearlyEquals(b2, finalBounds)) {
-      await windowManager.setBounds(finalBounds, animate: false);
+      await _writeWindowBounds(finalBounds, serial: serial);
     }
   }
 
   Future<void> _toggleSettings() async {
     if (_menuResizeInFlight) return;
     final int serial = _beginWindowTransition();
+    _settingsTransitionActive = true;
     try {
       if (_isMenuOpen) {
         if (MediaQuery.disableAnimationsOf(context)) {
@@ -1972,7 +2024,7 @@ class _PlayerViewState extends State<PlayerView>
         } else {
           await _menuAnimController.reverse();
         }
-        if (!mounted) return;
+        if (!_isCurrentWindowTransition(serial)) return;
         _isMenuOpen = false;
       }
       setState(() {
@@ -2108,19 +2160,18 @@ class _PlayerViewState extends State<PlayerView>
       
       
       await WidgetsBinding.instance.endOfFrame;
-      final bounds = await windowManager.getBounds();
+      final bounds = await _readWindowBounds();
       if (!mounted) return;
       final ratio = MediaQuery.devicePixelRatioOf(context);
       _menuBaseViewportWidth = bounds.width;
       _menuNativeExtra = (AppState.menuExtraSpace * ratio).round() / ratio;
-      await windowManager.setBounds(
+      await _writeWindowBounds(
         Rect.fromLTWH(
           bounds.left - (toLeft ? _menuNativeExtra : 0),
           bounds.top,
           bounds.width + _menuNativeExtra,
           bounds.height,
         ),
-        animate: false,
       );
       if (!mounted) return;
       setState(() {
@@ -2162,18 +2213,17 @@ class _PlayerViewState extends State<PlayerView>
       if (!mounted) return;
       setState(() => _isMenuOpen = false);
       await WidgetsBinding.instance.endOfFrame;
-      final bounds = await windowManager.getBounds();
+      final bounds = await _readWindowBounds();
       if (!mounted) return;
       double resetLeft = bounds.left + _leftPadding;
       _leftPadding = 0.0;
-      await windowManager.setBounds(
+      await _writeWindowBounds(
         Rect.fromLTWH(
           resetLeft,
           bounds.top,
           bounds.width - _menuNativeExtra,
           bounds.height,
         ),
-        animate: false,
       );
       await WidgetsBinding.instance.endOfFrame;
     } catch (error) {
@@ -2251,7 +2301,7 @@ class _PlayerViewState extends State<PlayerView>
   Widget build(BuildContext context) {
     _finishLayoutWhenViewportReady();
     bool isV = _displayLayout == WidgetLayout.vertical;
-    bool isOpen = _isSettingsOpen;
+    bool isOpen = _settingsVisualOpen;
     String side = _settingsSide;
 
     bool anchorRight = isV && side == "left" && (isOpen || _isTransitioning);
@@ -2300,14 +2350,16 @@ class _PlayerViewState extends State<PlayerView>
       if (isV) {
         if (side == "left") {
           pLeft = 0;
-          sLeft = 0;
+          sLeft = -innerSettingsW;
         } else {
           pLeft = 0;
           sLeft = innerPlayerW;
         }
       } else {
         pLeft = 0;
-        sTop = 0;
+        
+        
+        sTop = innerPlayerH;
       }
     }
 
@@ -2367,16 +2419,18 @@ class _PlayerViewState extends State<PlayerView>
             !_isComponentSizeTransitioning &&
             !isLiveCustomResize &&
             !reduceMotion
-        ? AppState.layoutSwitchDuration
+        ? (_settingsTransitionActive
+              ? MediaMotionTokens.settingsDisclosure
+              : AppState.layoutSwitchDuration)
         : Duration.zero;
+    final frameCurve = _settingsTransitionActive
+        ? MediaMotionTokens.settingsDisclosureCurve
+        : AppState.layoutSwitchCurve;
 
     final backgroundAnchorHeight =
-        (innerPlayerH - AppState.nextUpPanelExtentOf(_displayLayout)) *
-        (_isComponentSizeTransitioning ? 1.0 : renderFrameScale);
-    final backgroundAnchorWidth =
-        innerPlayerW * (_isComponentSizeTransitioning ? 1.0 : renderFrameScale);
-    final backgroundAnchorLeft =
-        pLeft * (_isComponentSizeTransitioning ? 1.0 : renderFrameScale);
+        innerPlayerH - AppState.nextUpPanelExtentOf(_displayLayout);
+    final backgroundAnchorWidth = innerPlayerW;
+    final backgroundAnchorLeft = pLeft;
     final backgroundAnchor = (
       backgroundAnchorWidth,
       backgroundAnchorHeight,
@@ -2404,22 +2458,17 @@ class _PlayerViewState extends State<PlayerView>
         MorphPositioned(
           motion: _layoutMotion,
           duration: frameAnimationDuration,
-          curve: AppState.layoutSwitchCurve,
+          curve: frameCurve,
           left: sLeft,
           top: sTop,
           width: innerSettingsW,
           height: innerSettingsH,
           child: _followLyrics(
-            AnimatedOpacity(
-              duration: const Duration(milliseconds: 300),
-              opacity: isOpen ? 1.0 : 0.0,
-              child: IgnorePointer(
-                ignoring: !isOpen,
-                child: TickerMode(
-                  enabled: isOpen || _isTransitioning,
-                  child: _buildSettingsPanel(),
-                ),
-              ),
+            SettingsDisclosure(
+              open: isOpen,
+              axis: isV ? Axis.horizontal : Axis.vertical,
+              fromLeft: side == 'left',
+              child: _buildSettingsPanel(),
             ),
             verticalSettings: isV,
             settingsHeight: innerSettingsH,
@@ -2428,7 +2477,7 @@ class _PlayerViewState extends State<PlayerView>
         MorphPositioned(
           motion: _layoutMotion,
           duration: frameAnimationDuration,
-          curve: AppState.layoutSwitchCurve,
+          curve: frameCurve,
           left: pLeft,
           top: pTop,
           width: innerPlayerW,
@@ -2615,9 +2664,10 @@ class _PlayerViewState extends State<PlayerView>
         final canvasH = _layoutMotion.active
             ? _layoutMotion.canvas.height
             : math.max(frameHeight, visibleH);
-        final targetBackgroundSize = transformOnly
-            ? Size(containerW, containerH)
-            : Size(frameWidth, frameHeight);
+        
+        
+        
+        final targetBackgroundSize = Size(containerW, containerH);
         final backdrop = Align(
           alignment: Alignment.topLeft,
           child: SizedBox(
@@ -2656,7 +2706,7 @@ class _PlayerViewState extends State<PlayerView>
           contentScale: animatedContentScale,
           alignment: componentAlignment,
           frameAnimationDuration: frameAnimationDuration,
-          frameAnimationCurve: AppState.layoutSwitchCurve,
+          frameAnimationCurve: frameCurve,
           transformOnly: transformOnly,
           background: backdrop,
           decoration: BoxDecoration(

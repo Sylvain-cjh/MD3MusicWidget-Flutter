@@ -836,6 +836,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     }
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return CoverArtworkSwitcher(
+      fit: StackFit.expand,
       style: AppState.coverTransitionStyle,
       direction: _coverDirection,
       reduceMotion: reduceMotion,

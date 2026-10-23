@@ -18,7 +18,7 @@ set_source_files_properties("cover_gpu_resources.rc" PROPERTIES
   OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cover_gpu_compute.hlsl")
 set_target_properties(cover_layers_gpu PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native_imports")
-apply_standard_settings(cover_layers_gpu)
+apply_standard_settings(cover_layers_gpu ENABLE_STL_EXCEPTIONS)
 target_compile_definitions(cover_layers_gpu PRIVATE NOMINMAX)
 target_include_directories(cover_layers_gpu SYSTEM PRIVATE
   "${CMAKE_SOURCE_DIR}/../third_party/onnxruntime/include"
@@ -27,7 +27,7 @@ target_link_libraries(cover_layers_gpu PRIVATE d3d12 dxgi dxcore d3dcompiler)
 
 add_library(cover_layers_gpu_dev SHARED EXCLUDE_FROM_ALL
   "cover_layers_gpu.cpp" "cover_gpu_resources.rc")
-apply_standard_settings(cover_layers_gpu_dev)
+apply_standard_settings(cover_layers_gpu_dev ENABLE_STL_EXCEPTIONS)
 target_compile_definitions(cover_layers_gpu_dev PRIVATE NOMINMAX COVER_DEV_DISCRETE_DRAFTS=1)
 target_include_directories(cover_layers_gpu_dev SYSTEM PRIVATE
   "${CMAKE_SOURCE_DIR}/../third_party/onnxruntime/include"

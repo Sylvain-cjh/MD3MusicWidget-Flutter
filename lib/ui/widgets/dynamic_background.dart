@@ -492,7 +492,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     return LayoutBuilder(
       builder: (context, constraints) {
         final headerScale =
-            constraints.maxWidth /
+            (widget.anchorWidth ?? constraints.maxWidth) /
             AppState.innerPlayerWidthOf(WidgetLayout.horizontal);
         final rightCoverHeight =
             AppState.corePlayerHeightOf(WidgetLayout.horizontal) * headerScale;
