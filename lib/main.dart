@@ -3,10 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
-import 'core/app_state.dart';
-import 'core/font_credits.dart';
-import 'core/widget_diagnostics.dart';
-import 'ui/player_view.dart';
+import 'core/appState.dart';
+import 'core/fontCredits.dart';
+import 'core/widgetDiagnostics.dart';
+import 'ui/playerView.dart';
 
 const Size _maximumWindowSize = Size(16384, 16384);
 
@@ -70,7 +70,8 @@ class MusicWidgetApp extends StatelessWidget {
       theme: AppState.buildTheme(),
       home: PlayerView(
         windowReady: windowReady,
-        startPlatformServices: !WidgetDiagnostics.enabled,
+        startPlatformServices:
+            !WidgetDiagnostics.enabled || WidgetDiagnostics.liveCapture,
       ),
     );
   }

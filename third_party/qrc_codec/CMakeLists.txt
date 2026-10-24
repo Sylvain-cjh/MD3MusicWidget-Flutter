@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.14)
 project(MD3QrcCodec LANGUAGES C)
-add_library(qrc_codec SHARED "${CMAKE_CURRENT_SOURCE_DIR}/../../windows/runner/qrc_codec.c" "des.c")
+add_library(qrc_codec SHARED "${CMAKE_CURRENT_SOURCE_DIR}/../../windows/runner/qrcCodec.c" "des.c")
 target_include_directories(qrc_codec PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 install(TARGETS qrc_codec RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
 install(FILES LICENSE NOTICE.md DESTINATION "${CMAKE_INSTALL_PREFIX}/runtime/qrc_codec" COMPONENT Runtime)

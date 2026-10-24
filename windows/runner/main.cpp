@@ -2,7 +2,7 @@
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 
-#include "flutter_window.h"
+#include "flutterWindow.h"
 #include "utils.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,

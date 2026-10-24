@@ -55,8 +55,9 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 
 
 
-
+option(MD3_BUNDLE_LEGACY_FETCHER "Bundle the legacy MusicFetcher developer backend" OFF)
 set(MUSIC_FETCHER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../MusicFetcher.exe")
+if(MD3_BUNDLE_LEGACY_FETCHER)
 file(GLOB MUSIC_FETCHER_CODE
   "${CMAKE_CURRENT_SOURCE_DIR}/../MusicFetcher/*.cs"
   "${CMAKE_CURRENT_SOURCE_DIR}/../MusicFetcher/*.csproj")
@@ -64,9 +65,10 @@ foreach(MUSIC_FETCHER_FILE ${MUSIC_FETCHER_CODE})
   if(NOT EXISTS "${MUSIC_FETCHER_SOURCE}" OR
       "${MUSIC_FETCHER_FILE}" IS_NEWER_THAN "${MUSIC_FETCHER_SOURCE}")
     message(FATAL_ERROR
-      "MusicFetcher.exe is older than its source. Run tooling/build_music_fetcher.ps1 before building Flutter.")
+      "MusicFetcher.exe is older than its source. Run tooling/buildMusicFetcher.ps1 before building Flutter.")
   endif()
 endforeach()
+endif()
 set(APP_IMAGES_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../images")
 set(PRESENTMON_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/presentmon")
 
@@ -95,14 +97,10 @@ include(flutter/generated_plugins.cmake)
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
-
-
-
-
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
-if(EXISTS "${MUSIC_FETCHER_SOURCE}")
+if(MD3_BUNDLE_LEGACY_FETCHER AND EXISTS "${MUSIC_FETCHER_SOURCE}")
   install(FILES "${MUSIC_FETCHER_SOURCE}"
     DESTINATION "${CMAKE_INSTALL_PREFIX}"
     COMPONENT Runtime)

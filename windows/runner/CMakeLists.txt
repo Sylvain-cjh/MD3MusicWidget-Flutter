@@ -1,11 +1,16 @@
 cmake_minimum_required(VERSION 3.14)
 project(runner LANGUAGES CXX)
+add_library(native_media_preview STATIC "nativeMediaBridge.cpp" "nativeAudioService.cpp")
+target_compile_features(native_media_preview PRIVATE cxx_std_20)
+target_compile_definitions(native_media_preview PRIVATE NOMINMAX UNICODE _UNICODE _HAS_EXCEPTIONS=1)
+target_compile_options(native_media_preview PRIVATE /EHsc /W4)
+target_link_libraries(native_media_preview PRIVATE flutter flutter_wrapper_app windowsapp mmdevapi ole32)
 enable_language(C)
 add_subdirectory("${CMAKE_SOURCE_DIR}/../third_party/qrc_codec" "${CMAKE_CURRENT_BINARY_DIR}/qrc_codec")
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/../tooling/system_fonts_probe.cpp")
+if(EXISTS "${CMAKE_SOURCE_DIR}/../tooling/systemFontsProbe.cpp")
   add_executable(system_fonts_probe EXCLUDE_FROM_ALL
-    "${CMAKE_SOURCE_DIR}/../tooling/system_fonts_probe.cpp" "system_fonts.cpp")
+    "${CMAKE_SOURCE_DIR}/../tooling/systemFontsProbe.cpp" "systemFonts.cpp")
   apply_standard_settings(system_fonts_probe)
   target_compile_definitions(system_fonts_probe PRIVATE NOMINMAX)
   target_link_libraries(system_fonts_probe PRIVATE dwrite)
@@ -13,9 +18,9 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/../tooling/system_fonts_probe.cpp")
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/../temp/font-diagnostics")
 endif()
 
-add_library(cover_layers_gpu SHARED "cover_layers_gpu.cpp" "cover_gpu_resources.rc")
-set_source_files_properties("cover_gpu_resources.rc" PROPERTIES
-  OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cover_gpu_compute.hlsl")
+add_library(cover_layers_gpu SHARED "coverLayersGpu.cpp" "coverGpuResources.rc")
+set_source_files_properties("coverGpuResources.rc" PROPERTIES
+  OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/coverGpuCompute.hlsl")
 set_target_properties(cover_layers_gpu PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native_imports")
 apply_standard_settings(cover_layers_gpu ENABLE_STL_EXCEPTIONS)
@@ -26,7 +31,7 @@ target_include_directories(cover_layers_gpu SYSTEM PRIVATE
 target_link_libraries(cover_layers_gpu PRIVATE d3d12 dxgi dxcore d3dcompiler)
 
 add_library(cover_layers_gpu_dev SHARED EXCLUDE_FROM_ALL
-  "cover_layers_gpu.cpp" "cover_gpu_resources.rc")
+  "coverLayersGpu.cpp" "coverGpuResources.rc")
 apply_standard_settings(cover_layers_gpu_dev ENABLE_STL_EXCEPTIONS)
 target_compile_definitions(cover_layers_gpu_dev PRIVATE NOMINMAX COVER_DEV_DISCRETE_DRAFTS=1)
 target_include_directories(cover_layers_gpu_dev SYSTEM PRIVATE
@@ -55,12 +60,12 @@ endif()
 
 
 add_executable(${BINARY_NAME} WIN32
-  "flutter_window.cpp"
-  "system_fonts.cpp"
-  "system_performance_monitor.cpp"
+  "flutterWindow.cpp"
+  "systemFonts.cpp"
+  "systemPerformanceMonitor.cpp"
   "main.cpp"
   "utils.cpp"
-  "win32_window.cpp"
+  "win32Window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"
@@ -84,6 +89,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 
 
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+target_link_libraries(${BINARY_NAME} PRIVATE native_media_preview windowsapp)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "pdh.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "dwrite.lib")
@@ -93,8 +99,7 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 add_dependencies(${BINARY_NAME} flutter_assemble)
 
 
-
-if(EXISTS "${MUSIC_FETCHER_SOURCE}")
+if(MD3_BUNDLE_LEGACY_FETCHER AND EXISTS "${MUSIC_FETCHER_SOURCE}")
   add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${MUSIC_FETCHER_SOURCE}"
