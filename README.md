@@ -179,7 +179,7 @@ flutter build windows --release
 ---
 
 <p align="center">
-  <img src="https://count.getloli.com/get/@sylvain-cjh-md3-music-widget-flutter?theme=miku" width="300" alt="初音未来主题的 README 访问计数器" />
+  <img src="https://count.getloli.com/get/@sylvain-cjh-md3musicwidget?theme=miku" width="300" alt="初音未来主题的 README 访问计数器" />
 </p>
 
 <p align="center"><sub>README 访问计数 · 由 <a href="https://github.com/journey-ad/Moe-Counter">Moe Counter</a> 提供，不代表独立访客或下载量。</sub></p>
