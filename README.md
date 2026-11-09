@@ -4,22 +4,22 @@
 
 <h1>MD3 Music Widget</h1>
 
-<p><strong>让喜欢的音乐，留在你的画面里。</strong></p>
+<p><strong>把正在听的歌，留在桌面或直播画面里。</strong></p>
 
-<p>一张适合桌面与直播的 Windows 音乐卡片。</p>
+<p>封面、歌词与真实音频频谱，一张 Material 3 风格的 Windows 音乐挂件。</p>
 
 [![版本 1.2.1](https://img.shields.io/badge/version-1.2.1-74549D?style=flat-square)](CHANGELOG.md)
 [![Windows x64](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-507765?style=flat-square)](#开始使用)
 [![Flutter](https://img.shields.io/badge/UI-Flutter-74549D?style=flat-square&logo=flutter&logoColor=white)](#工作原理)
 [![内置音乐采集](https://img.shields.io/badge/capture-SMTC%20%2B%20WASAPI-507765?style=flat-square)](docs/native_capture.md)
 
-[**下载**](#下载与版本选择) · [预览](#预览) · [功能](#核心功能) · [更新记录](CHANGELOG.md) · [使用与自定义](docs/customization.md)
+[**下载 1.2.1**](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/tag/1.2.1) · [怎么选版本](#下载与版本选择) · [界面预览](#预览) · [本版亮点](#121-版亮点) · [开始使用](#开始使用)
 
 </div>
 
 ---
 
-正在播放的歌曲、封面、歌词与频谱，不必藏在播放器里。MD3 Music Widget 把它们放进一张 Material 3 风格的卡片：日常听歌时留在桌面，直播时也可以隐藏播放按钮，只展示音乐。
+音乐仍在你常用的播放器里播放，挂件负责展示，不用换播放器。日常听歌可以保留播放按钮；直播时可以把三个按钮一起关掉，只显示想给观众看的内容。
 
 ## 预览
 
@@ -44,20 +44,28 @@
 
 ## 下载与版本选择
 
-**文档对应 1.2.1。** 首次使用，想体验封面分层就选有模型版；更在意下载大小，可以先用无模型版。下面列出本版套件内容，在线下载以 [GitHub 已发布的文件](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases) 为准。
+**第一次用，建议先选无模型版。** 它保留封面、歌词、频谱、性能监视器和普通 3D 悬浮效果。只有想让封面里的主体和背景产生不同深度的视差时，才需要分层模型。
 
-| 版本 | 适合谁 | 安装版 | 免安装版 |
+| 1.2.1 套件 | 怎么选 | 安装版（EXE） | 免安装版（ZIP） |
 | --- | --- | --- | --- |
-| **有分层模型版** | 想使用封面分层视差；包含模型、GPU 依赖和许可 | 有模型版 Setup EXE | 有模型版 Portable ZIP |
-| **无分层模型版** | 先使用歌曲、歌词、频谱与普通 3D 卡片，需要时再补装模型 | 无模型版 Setup EXE | 无模型版 Portable ZIP |
-| **独立 cover-layers** | 给匹配版本的无模型应用补装／更新分层，不是独立播放器 | [补装说明](docs/layer_models.md) | [模型仓库](https://github.com/Sylvain-cjh/cover-layers) |
+| **无分层模型版** · `Without-Layer-Models` | 先用挂件，需要时再补装模型 | [下载 · 约 25 MB](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.1/MD3MusicWidget-Without-Layer-Models-Setup-1.2.1.exe) | [下载 · 约 29 MB](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.1/MD3MusicWidget-Without-Layer-Models-Portable-1.2.1.zip) |
+| **有分层模型版** · `With-Layer-Models` | 一次装齐模型和 GPU 依赖；分层需要兼容核显 | [下载 · 约 219 MB](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.1/MD3MusicWidget-With-Layer-Models-Setup-1.2.1.exe) | [下载 · 约 231 MB](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.1/MD3MusicWidget-With-Layer-Models-Portable-1.2.1.zip) |
+| **独立模型** · `cover-layers` | 只给兼容的 **1.2.1 x64** 主程序补装，不可单独运行 | 约 196 MB | 约 202 MB |
 
-[查看全部发行版本](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases) · [本次更新了什么](CHANGELOG.md)
+应用下载链接指向 [1.2.1 发行页](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/tag/1.2.1) 的实际附件。独立模型的大小取自本地发行套件；[cover-layers 仓库](https://github.com/Sylvain-cjh/cover-layers) 可查看后端源码，目前未列出 1.2.1 独立模型的下载附件。
 
-独立模型的在线文件以模型仓库实际发布内容为准，补装前确认主程序版本。应用与模型套件分别使用文件夹区分，Portable 和源码是各自独立的 ZIP，不再套一层总压缩包。
+已经在用无模型版？不必重装主程序，按 [cover-layers 补装说明](docs/layer_models.md) 选择匹配版本即可。
 
 > [!IMPORTANT]
-> 当前支持 **Windows x64**。读取歌曲需要播放器公开 Windows 系统媒体会话（SMTC）。本机网易云测试版本能上报歌曲和封面，但没有有效总时长；缺少时间线时，不保证进度、时间驱动歌词和下一首预告可用。程序不会猜测这些数据。
+> 主程序要求 **Windows 10 2004（Build 19041）或更新版本，包括 Windows 11，x64**。播放器需要开启系统媒体控制，挂件才能读取正在播放的信息。指定进程频谱和可选分层另有系统或硬件要求。
+
+## 1.2.1 版亮点
+
+- **切歌先换封面，背景准备好再渐变。** 同一封面的准备结果可以复用；连续切歌时跳过已经过时、尚未开始的流光与分层任务。首次遇到的封面或首次分层合成仍可能出现长帧。
+- **英语歌词按字母消散。** 来源只提供整词时间时，在原词时段内依次消散，最后一个字母仍对齐原词结束点。普通扫字和整句 LRC 不受影响。
+- **分层模型沿用 1.2.0 的正式权重。** 这次改进的是封面准备与切歌衔接，不把它说成模型识别精度升级。
+
+[查看本版完整更新记录](CHANGELOG.md)
 
 ## 核心功能
 
@@ -76,20 +84,23 @@
 
 ## 开始使用
 
-1. **选版本。** 运行 Setup 安装，或将 Portable ZIP 完整解压到普通文件夹；先读包内的 `使用说明.txt`。
-2. **播放音乐。** 开启播放器的系统媒体控制。默认自动跟随当前来源，也可以在挂件设置中固定采集程序。
-3. **调成喜欢的样子。** 右键进入设置，选择布局、歌词、频谱和字体。需要只展示音乐时，可关闭三个播放控件。
+1. **打开挂件。** 运行 Setup 安装，或完整解压 Portable ZIP 后运行主程序。免安装版不要只复制 EXE；请保留同目录下的数据、资源与运行文件。
+2. **先让播放器播一首歌。** 在 QQ 音乐、网易云音乐等播放器中开启系统媒体控制。挂件默认自动跟随系统媒体会话；有多个播放器时，可以在设置里固定采集程序。
+3. **右键打开设置。** 想用作直播展示，可关闭播放控件，再按需开启歌词、频谱、下一首预告或鼠标穿透。开启穿透后，点击托盘图标可恢复交互。
 
 > [!NOTE]
-> 默认音乐采集已经内置，**不需要另开 MusicFetcher，也不需要为音乐采集安装 .NET**。FPS 所用 PresentMon 仍随程序保留。
+> 默认音乐采集已经内置，**不用另开 MusicFetcher，也不用为音乐采集安装 .NET**。FPS 监视器使用的 PresentMon 仍随程序提供。
 
-- 系统要求：Windows 10 2004（Build 19041）或更新版本，包括 Windows 11，x64。
-- 指定程序的进程级频谱额外要求 Build 20348 或更新版本，以及可用的系统／设备支持；失败时不偷偷改采整机音频。自动模式可使用系统回环。
-- 不要只复制 EXE，需保留 `data/`、`images/`、`runtime/` 和 DLL 的相对位置。
-- 鼠标穿透开启后，点击托盘图标可恢复交互；完全退出使用托盘菜单。
+挂件里的三个来源可以分别选择：
+
+| 设置 | 决定什么 |
+| --- | --- |
+| **采集程序** | 从哪个播放器读取正在播放的歌、封面和进度。 |
+| **歌词来源** | 到哪里找这首歌的歌词，不需要与播放器是同一家。 |
+| **歌单来源** | 从哪个本地歌单或 QQ／网易云公开歌单推算下一首，不会读取播放器的私人队列。 |
 
 > [!WARNING]
-> 当前签名使用自签名证书，其他电脑仍可能提示未知发布者，不等同于公共受信任签名。程序不会自动安装信任根证书；发行文件不附带哈希清单。
+> 发行文件使用自签名证书，Windows 仍可能提示未知发布者；这不等同于公共受信任签名。程序不会自动把证书加入系统信任。
 
 ## 工作原理
 
@@ -114,7 +125,7 @@
 <details>
 <summary>能看到歌名，但进度、歌词定位或下一首不正常？</summary>
 
-歌名、封面和时间线是不同字段。播放器可能只公开其中一部分；缺少可靠时间线时，不能用挂件启动时间代替歌曲进度。先确认播放器已开启 SMTC，并检查是否固定选择了其他来源。
+先确认播放器已开启系统媒体控制，并检查挂件有没有固定到另一个采集程序。如果歌名和封面正常，也可能只是播放器没有上报可靠的时间线：本机测试过的网易云客户端就出现过只上报歌曲、封面，不提供有效总时长的情况。挂件不会补造进度，依赖时间的歌词定位和下一首预告也可能暂不可用。
 
 </details>
 
@@ -128,7 +139,7 @@
 <details>
 <summary>为什么有时没有频谱或 FPS？</summary>
 
-频谱可能受独占输出、受保护内容、虚拟声卡、系统版本与设备支持影响。指定程序无法精确匹配时不会扩大采集范围。
+指定程序的频谱需要 Windows Build 20348 或更新版本，也可能受独占输出、受保护内容、虚拟声卡和设备支持影响。指定来源匹配失败时不会改采整机音频；想看系统输出的频谱，可以切回自动模式。
 
 FPS 读取所选程序的呈现事件，不是桌面帧率或显示器刷新率。没有持续呈现、路径不受支持或 ETW 权限不足时显示“—”；如设置提示权限不足，可选择手动授权管理员重启，不会静默提权。GPU 计数器不可用时也不制造读数。
 
@@ -166,5 +177,11 @@ flutter build windows --release
 - 模型、DirectML、ONNX Runtime 与其他依赖：保留各自随附的完整许可和来源，第三方许可不适用于整个应用。
 
 ---
+
+<p align="center">
+  <img src="https://count.getloli.com/get/@sylvain-cjh-md3-music-widget-flutter?theme=miku" width="300" alt="初音未来主题的 README 访问计数器" />
+</p>
+
+<p align="center"><sub>README 访问计数 · 由 <a href="https://github.com/journey-ad/Moe-Counter">Moe Counter</a> 提供，不代表独立访客或下载量。</sub></p>
 
 <p align="center"><sub>音乐照常播放，画面留给你。</sub></p>
