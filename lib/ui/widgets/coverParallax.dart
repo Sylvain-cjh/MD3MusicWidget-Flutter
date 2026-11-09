@@ -9,6 +9,7 @@ import '../animations/coverParallaxMotion.dart';
 import '../animations/coverLayerHandoff.dart';
 import '../animations/mediaMotionTokens.dart';
 import '../../core/coverLayers.dart';
+import '../../core/widgetDiagnostics.dart';
 import 'smoothRoundedClip.dart';
 
 class CoverParallax extends StatefulWidget {
@@ -23,6 +24,7 @@ class CoverParallax extends StatefulWidget {
   final bool layered;
   final Object? layerIdentity;
   final CoverLayerService? layerService;
+  final bool Function()? isCurrentArtwork;
 
   const CoverParallax({
     super.key,
@@ -37,6 +39,7 @@ class CoverParallax extends StatefulWidget {
     this.layered = false,
     this.layerIdentity,
     this.layerService,
+    this.isCurrentArtwork,
   });
 
   @override
@@ -51,6 +54,7 @@ class CoverParallaxState extends State<CoverParallax>
   late final AnimationController _layerReveal;
   late final Listenable _layerSignal;
   CoverLayerLease? _layers;
+  CoverLayerDemand? _layerDemand;
   Object? _requestedLayer;
   int _layerSerial = 0;
   Timer? _layerRetry;
@@ -95,6 +99,8 @@ class CoverParallaxState extends State<CoverParallax>
         oldWidget.enable3D != widget.enable3D ||
         oldWidget.layerService != widget.layerService) {
       _releaseLayers();
+    }
+    if (_requestedLayer == null) {
       
       
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -125,6 +131,8 @@ class CoverParallaxState extends State<CoverParallax>
   }
 
   void _releaseLayers() {
+    _layerDemand?.cancel();
+    _layerDemand = null;
     _layerRetry?.cancel();
     _layerRetry = null;
     _layerSerial++;
@@ -140,7 +148,11 @@ class CoverParallaxState extends State<CoverParallax>
 
   void _ensureLayers() {
     final image = widget.image;
-    if (!widget.layered || !widget.enable3D || _reduced || image == null) {
+    if (!widget.layered ||
+        !widget.enable3D ||
+        _reduced ||
+        image == null ||
+        widget.isCurrentArtwork?.call() == false) {
       return;
     }
     final identity = widget.layerIdentity ?? image;
@@ -148,15 +160,23 @@ class CoverParallaxState extends State<CoverParallax>
     _requestedLayer = identity;
     final serial = ++_layerSerial;
     final service = widget.layerService ?? CoverLayerService.instance;
+    _layerDemand?.cancel();
+    final demand = _layerDemand = CoverLayerDemand(
+      isCurrent: widget.isCurrentArtwork,
+    );
     
     
     unawaited(
-      service.acquire(identity, image).then((lease) {
+      service.acquire(identity, image, demand: demand).then((lease) {
         if (!mounted || serial != _layerSerial) {
           lease?.dispose();
           return;
         }
         if (lease == null) {
+          if (!demand.wanted) {
+            _requestedLayer = null;
+            return;
+          }
           if (!service.hasResult(identity)) {
             _requestedLayer = null;
             _layerRetry?.cancel();
@@ -271,6 +291,7 @@ class CoverParallaxState extends State<CoverParallax>
                 _layerSignal,
                 _sceneShader!,
                 MediaQuery.devicePixelRatioOf(context),
+                widget.layerIdentity ?? widget.image,
               ),
             ),
           ),
@@ -449,6 +470,7 @@ class _CoverLayersPainter extends CustomPainter {
   final Animation<double> reveal;
   final ui.FragmentShader shader;
   final double pixelRatio;
+  final Object? identity;
   final Paint _paint = Paint()..filterQuality = FilterQuality.medium;
   final Paint _sourcePaint = Paint()..filterQuality = FilterQuality.medium;
   final Paint _mixPaint = Paint()..blendMode = BlendMode.plus;
@@ -459,6 +481,7 @@ class _CoverLayersPainter extends CustomPainter {
     Listenable signal,
     this.shader,
     this.pixelRatio,
+    this.identity,
   ) : super(repaint: signal) {
     final filter = layers.compactProgram
         ? ui.FilterQuality.low
@@ -488,6 +511,9 @@ class _CoverLayersPainter extends CustomPainter {
       _sourcePaint.color = Colors.white;
       canvas.drawImageRect(layers.original, source, bounds, _sourcePaint);
       return;
+    }
+    if (WidgetDiagnostics.enabled) {
+      WidgetDiagnostics.markPaintOnce('firstLayerPaint:$identity');
     }
     shader
       ..setFloat(0, size.width)

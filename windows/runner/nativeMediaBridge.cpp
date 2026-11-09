@@ -1,4 +1,5 @@
 #include "nativeMediaBridge.h"
+#include "nativeArtworkPolicy.h"
 #include "nativeAudioService.h"
 #include <algorithm>
 #include <atomic>
@@ -278,18 +279,20 @@ Snapshot(const std::shared_ptr<State> &state,
     const auto source = chosen.SourceAppUserModelId();
     const auto identity =
         to_string(source + L"|" + props.Title() + L"|" + props.Artist());
-    if (identity != cache.identity ||
-        (cache.last_position > 5000 && position + 1500 < cache.last_position)) {
+    const auto artwork_policy = DecideNativeArtwork(
+        identity != cache.identity, changed, cache.last_position, position,
+        cache.cover_retry, now);
+    if (artwork_policy.advance_track)
       ++cache.track;
+    if (artwork_policy.invalidate_cover) {
       cache.cover.clear();
       cache.bytes.clear();
-      cache.cover_retry = now;
       cache.identity = identity;
     }
     cache.last_position = position;
     
     
-    if (changed || cache.cover_retry > 0 && now >= cache.cover_retry)
+    if (artwork_policy.read_thumbnail)
       try {
         if (const auto thumbnail = props.Thumbnail()) {
           ++state->cover_reads;

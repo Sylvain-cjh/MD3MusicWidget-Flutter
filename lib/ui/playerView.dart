@@ -15,6 +15,7 @@ import '../core/widgetDiagnostics.dart';
 import '../core/nativeWindowGeometry.dart';
 import '../core/windowGeometryQueue.dart';
 import '../core/artworkResources.dart';
+import '../core/artworkRequests.dart';
 import '../core/mediaProvider.dart';
 import '../core/mediaSessionLifecycle.dart';
 import '../core/demandPollingLoop.dart';
@@ -88,6 +89,7 @@ class _PlayerViewState extends State<PlayerView>
   );
   String _latestCoverVersion = "";
   bool _coverRequestInFlight = false;
+  final _artworkRequests = ArtworkRequests();
   Timer? _coverFallbackTimer;
   Timer? _missingCoverTimer;
   String? _missingCoverIdentity;
@@ -253,6 +255,13 @@ class _PlayerViewState extends State<PlayerView>
           final data = value as (String, Uint8List);
           _latestCoverVersion = data.$1;
           await _applyCoverBytes(data.$1, data.$2);
+        },
+        'artworkTheme': (value) async {
+          final (brightness, variant) =
+              value as (Brightness, DynamicSchemeVariant);
+          AppState.themeBrightness = brightness;
+          AppState.themeVariant = variant;
+          await _updateColorScheme();
         },
         'track': (value) async => _applyMediaSnapshot(value as MediaSnapshot),
       });

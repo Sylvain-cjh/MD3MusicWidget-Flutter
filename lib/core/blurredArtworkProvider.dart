@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'artworkResources.dart';
+import 'widgetDiagnostics.dart';
 
 
 
@@ -14,6 +16,9 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
   final double headerHeight;
   final double pixelScale;
   final Size canvasSize;
+
+  
+  final Rect? rasterCrop;
   static int rasterizations = 0;
   const BlurredArtworkProvider({
     required this.source,
@@ -22,7 +27,52 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
     required this.headerHeight,
     required this.pixelScale,
     this.canvasSize = const Size(700, 800),
+    this.rasterCrop,
   });
+
+  Size get rasterSize => Size(
+    (canvasSize.width * pixelScale).ceilToDouble(),
+    (canvasSize.height * pixelScale).ceilToDouble(),
+  );
+
+  static Rect? visibleRasterCrop(Rect placement, Size viewport, Size raster) {
+    final visible = placement.intersect(Offset.zero & viewport);
+    if (visible.isEmpty || !visible.isFinite || raster.isEmpty) return null;
+    final scaleX = raster.width / placement.width;
+    final scaleY = raster.height / placement.height;
+    
+    const guard = 4;
+    final crop = Rect.fromLTRB(
+      math
+          .max(0, ((visible.left - placement.left) * scaleX).floor() - guard)
+          .toDouble(),
+      math
+          .max(0, ((visible.top - placement.top) * scaleY).floor() - guard)
+          .toDouble(),
+      math.min(
+        raster.width,
+        (((visible.right - placement.left) * scaleX).ceil() + guard).toDouble(),
+      ),
+      math.min(
+        raster.height,
+        (((visible.bottom - placement.top) * scaleY).ceil() + guard).toDouble(),
+      ),
+    );
+    return crop == (Offset.zero & raster) ? null : crop;
+  }
+
+  Rect? get normalizedRegion {
+    final crop = rasterCrop;
+    if (crop == null) return null;
+    final size = rasterSize;
+    return Rect.fromLTRB(
+      crop.left / size.width,
+      crop.top / size.height,
+      crop.right / size.width,
+      crop.bottom / size.height,
+    );
+  }
+
   @override
   Future<BlurredArtworkProvider> obtainKey(ImageConfiguration configuration) =>
       SynchronousFuture(this);
@@ -54,7 +104,10 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
     try {
       original = await ready.future.timeout(const Duration(seconds: 5));
       final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder)..scale(pixelScale);
+      final crop = rasterCrop ?? (Offset.zero & rasterSize);
+      final canvas = Canvas(recorder)
+        ..translate(-crop.left, -crop.top)
+        ..scale(pixelScale);
       final bounds = Offset.zero & canvasSize;
       canvas.saveLayer(
         bounds,
@@ -121,9 +174,11 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
       try {
         rasterizations++;
         return ImageInfo(
-          image: await picture.toImage(
-            (canvasSize.width * pixelScale).ceil(),
-            (canvasSize.height * pixelScale).ceil(),
+          image: await WidgetDiagnostics.measure(
+            rasterCrop == null
+                ? 'artwork.blurFullRaster'
+                : 'artwork.blurVisibleRaster',
+            () => picture.toImage(crop.width.toInt(), crop.height.toInt()),
           ),
         );
       } finally {
@@ -144,7 +199,8 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
       other.waterfall == waterfall &&
       other.headerHeight == headerHeight &&
       other.pixelScale == pixelScale &&
-      other.canvasSize == canvasSize;
+      other.canvasSize == canvasSize &&
+      other.rasterCrop == rasterCrop;
   @override
   int get hashCode => Object.hash(
     source,
@@ -153,5 +209,6 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
     headerHeight,
     pixelScale,
     canvasSize,
+    rasterCrop,
   );
 }

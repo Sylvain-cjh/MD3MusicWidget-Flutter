@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:material_color_utilities/material_color_utilities.dart';
+import 'widgetDiagnostics.dart';
 
 Future<int> _materialSeed(Uint32List pixels) async {
   final result = await QuantizerCelebi().quantize(pixels, 128);
@@ -29,6 +30,7 @@ final class ArtworkPalette {
   
   
   static Future<Color> materialSeedFromProvider(ImageProvider provider) async {
+    WidgetDiagnostics.count('materialQuantizations');
     final stream = provider.resolve(ImageConfiguration.empty);
     final ready = Completer<ImageInfo>();
     var accepting = true;
@@ -132,6 +134,7 @@ final class ArtworkPalette {
   }
 
   static Future<ArtworkPalette> fromProvider(ImageProvider provider) async {
+    WidgetDiagnostics.count('paletteSamples');
     final stream = ResizeImage.resizeIfNeeded(
       48,
       48,

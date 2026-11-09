@@ -187,6 +187,7 @@ class DynamicBackground extends StatefulWidget {
   final double anchorLeft;
   final bool? verticalLayout;
   final bool animateArtworkReplacement;
+  final bool allowGlowCrop;
   const DynamicBackground({
     super.key,
     this.anchorHeight,
@@ -194,6 +195,7 @@ class DynamicBackground extends StatefulWidget {
     this.anchorLeft = 0,
     this.verticalLayout,
     this.animateArtworkReplacement = true,
+    this.allowGlowCrop = true,
   });
 
   
@@ -401,20 +403,44 @@ class _DynamicBackgroundState extends State<DynamicBackground>
         width: AppState.canvasWidth * zoom,
         height: AppState.canvasHeight * zoom,
       );
+      final full = BlurredArtworkProvider(
+        source: source,
+        identity: identity,
+        waterfall: waterfall,
+        headerHeight: waterfall ? headerH : 0,
+        pixelScale:
+            MediaQuery.devicePixelRatioOf(context) *
+            AppState.componentScale *
+            zoom,
+      );
+      
+      
+      final status = PaintingBinding.instance.imageCache.statusForKey(full);
+      final crop = widget.allowGlowCrop && !status.tracked
+          ? BlurredArtworkProvider.visibleRasterCrop(
+              rect,
+              constraints.biggest,
+              full.rasterSize,
+            )
+          : null;
+      final provider = crop == null
+          ? full
+          : BlurredArtworkProvider(
+              source: source,
+              identity: identity,
+              waterfall: waterfall,
+              headerHeight: full.headerHeight,
+              pixelScale: full.pixelScale,
+              rasterCrop: crop,
+            );
       return StableArtworkSurface(
         fit: BoxFit.fill,
         animateReplacement: widget.animateArtworkReplacement,
         clampedImageRect: rect,
-        provider: BlurredArtworkProvider(
-          source: source,
-          identity: identity,
-          waterfall: waterfall,
-          headerHeight: waterfall ? headerH : 0,
-          pixelScale:
-              MediaQuery.devicePixelRatioOf(context) *
-              AppState.componentScale *
-              zoom,
-        ),
+        artworkIdentity: (source, identity, waterfall),
+        normalizedImageRegion: provider.normalizedRegion,
+        deferArtworkReplacement: true,
+        provider: provider,
       );
     },
   );
@@ -435,6 +461,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
       widget.anchorHeight,
       widget.anchorLeft,
       widget.animateArtworkReplacement,
+      widget.allowGlowCrop,
     );
     if (_blurredArtworkKey != key) {
       _blurredArtworkKey = key;

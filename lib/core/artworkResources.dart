@@ -5,8 +5,10 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'artworkPalette.dart';
+import 'widgetDiagnostics.dart';
 
 typedef _SchemeKey = (String, Brightness, DynamicSchemeVariant);
+typedef ArtworkSeed = ({Color color, double contrast});
 
 
 
@@ -16,10 +18,13 @@ final class ArtworkSchemeCache {
     ImageProvider,
     Brightness,
     DynamicSchemeVariant,
-  )
+  )?
   _generate;
+  final Future<ArtworkSeed> Function(ImageProvider) _analyze;
   final LinkedHashMap<_SchemeKey, ColorScheme> _ready = LinkedHashMap();
   final Map<_SchemeKey, Future<ColorScheme>> _pending = {};
+  final LinkedHashMap<String, ArtworkSeed> _readySeeds = LinkedHashMap();
+  final Map<String, Future<ArtworkSeed>> _pendingSeeds = {};
   int _generation = 0;
 
   ArtworkSchemeCache({
@@ -30,28 +35,59 @@ final class ArtworkSchemeCache {
       DynamicSchemeVariant,
     )?
     generate,
+    Future<ArtworkSeed> Function(ImageProvider)? analyze,
   }) : assert(maximumEntries > 0),
-       _generate = generate ?? _fromImage;
+       
+       
+       _generate = generate,
+       _analyze = analyze ?? _fromImage;
 
-  static Future<ColorScheme> _fromImage(
-    ImageProvider provider,
-    Brightness brightness,
-    DynamicSchemeVariant variant,
-  ) async {
-    final palette = await ArtworkPalette.fromProvider(provider);
+  static Future<ArtworkSeed> _fromImage(ImageProvider provider) async {
+    final palette = await WidgetDiagnostics.measure(
+      'artwork.seedSample',
+      () => ArtworkPalette.fromProvider(provider),
+    );
     if (palette.whiteFraction < 0.35) {
-      return ColorScheme.fromSeed(
-        seedColor: await ArtworkPalette.materialSeedFromProvider(provider),
-        brightness: brightness,
-        dynamicSchemeVariant: variant,
+      return (
+        color: await WidgetDiagnostics.measure(
+          'artwork.materialSeed',
+          () => ArtworkPalette.materialSeedFromProvider(provider),
+        ),
+        contrast: 0.0,
       );
     }
-    return ColorScheme.fromSeed(
-      seedColor: palette.seed,
-      brightness: brightness,
-      dynamicSchemeVariant: variant,
-      contrastLevel: palette.whiteFraction > 0.55 ? 0.15 : 0,
+    return (
+      color: palette.seed,
+      contrast: palette.whiteFraction > 0.55 ? 0.15 : 0.0,
     );
+  }
+
+  Future<ArtworkSeed> _seed(String identity, ImageProvider provider) {
+    final cached = _readySeeds.remove(identity);
+    if (cached != null) {
+      _readySeeds[identity] = cached;
+      return Future.value(cached);
+    }
+    final pending = _pendingSeeds[identity];
+    if (pending != null) return pending;
+    final generation = _generation;
+    late final Future<ArtworkSeed> shared;
+    shared = Future<ArtworkSeed>.sync(() => _analyze(provider))
+        .then((seed) {
+          if (generation == _generation) {
+            _readySeeds[identity] = seed;
+            while (_readySeeds.length > maximumEntries) {
+              _readySeeds.remove(_readySeeds.keys.first);
+            }
+          }
+          return seed;
+        })
+        .whenComplete(() {
+          if (identical(_pendingSeeds[identity], shared)) {
+            _pendingSeeds.remove(identity);
+          }
+        });
+    return _pendingSeeds[identity] = shared;
   }
 
   Future<ColorScheme> resolve({
@@ -69,9 +105,19 @@ final class ArtworkSchemeCache {
     final pending = _pending[key];
     if (pending != null) return pending;
     final generation = _generation;
-    final future = Future<ColorScheme>.sync(
-      () => _generate(provider, brightness, variant),
-    );
+    final generate = _generate;
+    final future = generate == null
+        ? _seed(identity, provider).then(
+            (seed) => ColorScheme.fromSeed(
+              seedColor: seed.color,
+              brightness: brightness,
+              dynamicSchemeVariant: variant,
+              contrastLevel: seed.contrast,
+            ),
+          )
+        : Future<ColorScheme>.sync(
+            () => generate(provider, brightness, variant),
+          );
     late final Future<ColorScheme> shared;
     shared = future
         .then((scheme) {
@@ -97,6 +143,8 @@ final class ArtworkSchemeCache {
     _generation++;
     _ready.clear();
     _pending.clear();
+    _readySeeds.clear();
+    _pendingSeeds.clear();
   }
 }
 
@@ -107,11 +155,13 @@ final class CachedArtwork {
   final Set<ImageProvider> _variants = {};
   final int encodedBytes;
   Color? averageColor;
+  bool tonePrepared = false;
   Future<Color?>? _averageTask;
 
   CachedArtwork._(this.cover, this.background, this.encodedBytes);
 
   factory CachedArtwork(Uint8List bytes) {
+    WidgetDiagnostics.count('sourcePreparations');
     final cover = MemoryImage(bytes);
     final entry = CachedArtwork._(
       cover,
@@ -136,6 +186,7 @@ final class CachedArtwork {
   }
 
   Future<Color?> prepareAverageColor() => _averageTask ??= () async {
+    WidgetDiagnostics.count('toneDecodes');
     ui.Codec? codec;
     ui.Image? image;
     try {
@@ -179,6 +230,7 @@ final class ArtworkResources with WidgetsBindingObserver {
   static const int maximumEncodedBytes = 12 * 1024 * 1024;
   final LinkedHashMap<String, CachedArtwork> _artworkPool = LinkedHashMap();
   int _poolBytes = 0;
+  int _generation = 0;
   final Map<Object, Timer> _retired = {};
   bool _disposed = false;
 
@@ -194,6 +246,9 @@ final class ArtworkResources with WidgetsBindingObserver {
     if (entry != null) _artworkPool[version] = entry;
     return entry;
   }
+
+  bool hasArtwork(String version) => _artworkPool.containsKey(version);
+  int get generation => _generation;
 
   CachedArtwork? rememberArtwork(String version, Uint8List bytes) {
     return rememberPreparedArtwork(version, CachedArtwork(bytes));
@@ -269,6 +324,7 @@ final class ArtworkResources with WidgetsBindingObserver {
 
   @override
   void didHaveMemoryPressure() {
+    _generation++;
     colorSchemes.clear();
     _artworkPool.clear();
     _poolBytes = 0;
@@ -277,6 +333,7 @@ final class ArtworkResources with WidgetsBindingObserver {
   }
 
   void dispose() {
+    _generation++;
     colorSchemes.clear();
     _disposed = true;
     WidgetsBinding.instance.removeObserver(this);

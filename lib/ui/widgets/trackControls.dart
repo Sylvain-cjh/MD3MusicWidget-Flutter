@@ -834,6 +834,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
   }
 
   Widget _buildCover(double size) {
+    final coverVersion = AppState.currentCoverVersion;
     if (_directionCoverIdentity != _coverIdentity) {
       _directionCoverIdentity = _coverIdentity;
       _coverDirection = _globalSlideDirection;
@@ -862,6 +863,8 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
             enable3D: AppState.enable3DCover,
             layered: AppState.enableCoverLayers,
             layerIdentity: _coverIdentity,
+            isCurrentArtwork: () =>
+                AppState.currentCoverVersion == coverVersion,
           ),
         ),
       ),

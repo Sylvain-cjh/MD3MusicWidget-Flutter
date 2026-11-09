@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 
 import '../../core/lyricsDocument.dart';
 import '../../core/lyricsHighlight.dart';
+import '../animations/lyricsSmokeLetters.dart';
 import '../animations/lyricsSmokeMotion.dart';
 import 'lyricRowInk.dart';
 import 'wordLyricsSmoke.dart';
@@ -49,6 +50,9 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
   TextPainter? _base, _bright;
   LyricRowInk? _rowInk;
   List<List<TextBox>> _boxes = const [];
+  List<List<TextBox>>? _smokeBoxes;
+  LyricLine? _smokeLine;
+  LyricLine? _smokeSource;
   Object? _layoutKey;
   double _position = 0;
   bool _tickerMode = true;
@@ -68,13 +72,16 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
   Object? _animationEndKey;
   double _cachedAnimationEnd = 0;
   double get _animationEnd {
-    final key = (widget.line, widget.smokeEnabled, _reduced);
+    final line = widget.smokeEnabled && _smokeSource == widget.line
+        ? _smokeLine ?? widget.line
+        : widget.line;
+    final key = (line, widget.smokeEnabled, _reduced);
     if (_animationEndKey != key) {
       _animationEndKey = key;
       _cachedAnimationEnd = widget.line.words.isEmpty
           ? 0
           : widget.smokeEnabled
-          ? LyricsSmokeMotion.endAt(widget.line, reduced: _reduced)
+          ? LyricsSmokeMotion.endAt(line, reduced: _reduced)
           : widget.line.words.last.endMs.toDouble();
     }
     return _cachedAnimationEnd;
@@ -152,6 +159,10 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
     if (key == _layoutKey) return;
     _layoutKey = key;
     _rowInk?.dispose();
+    _rowInk = null;
+    _smokeLine = null;
+    _smokeBoxes = null;
+    _smokeSource = null;
     _base?.dispose();
     _bright?.dispose();
     _smoke?.dispose();
@@ -190,15 +201,85 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
       ],
     ];
     _paragraphSize = Size(width, _base!.height);
-    _rowInk = widget.smokeEnabled
-        ? LyricRowInk.create(_bright!, _boxes, width)
-        : null;
     debugLayoutPasses++;
+  }
+
+  void _layoutSmokeUnits() {
+    if (_smokeLine != null) return;
+    final words = <LyricWord>[];
+    final boxes = <List<TextBox>>[];
+    var offset = 0;
+    List<TextBox> selection(int start, int end) =>
+        _bright!.getBoxesForSelection(
+          TextSelection(baseOffset: start, extentOffset: end),
+        );
+    for (var i = 0; i < widget.line.words.length; i++) {
+      final word = widget.line.words[i];
+      final wordStart = offset;
+      final end = offset + word.text.length;
+      final original = _boxes[i];
+      if (!original.any((box) => !box.toRect().isEmpty)) {
+        offset = end;
+        continue;
+      }
+      final units = LyricsSmokeLetters.split(word);
+      if (units.length == 1) {
+        words.add(word);
+        boxes.add(original);
+        offset = end;
+        continue;
+      }
+      
+      
+      var first = 0;
+      var start = offset;
+      int? inkStart;
+      for (var j = 0; j < units.length; j++) {
+        final (letterStart, letterEnd) = LyricsSmokeLetters.letterRange(
+          units[j].text,
+        );
+        inkStart ??= offset + letterStart;
+        final inkEnd = offset + letterEnd;
+        offset += units[j].text.length;
+        if (j + 1 < units.length &&
+            !selection(inkStart, inkEnd).any((box) => !box.toRect().isEmpty)) {
+          continue;
+        }
+        final visible = selection(start, offset);
+        if (!visible.any((box) => !box.toRect().isEmpty)) break;
+        words.add(
+          first == j
+              ? units[j]
+              : LyricWord(
+                  units[first].startMs,
+                  units[j].endMs,
+                  word.text.substring(start - wordStart, offset - wordStart),
+                ),
+        );
+        boxes.add(visible);
+        first = j + 1;
+        start = offset;
+        inkStart = null;
+      }
+    }
+    _smokeLine = LyricLine(
+      widget.line.startMs,
+      widget.line.text,
+      endMs: widget.line.endMs,
+      words: words,
+    );
+    _smokeBoxes = boxes;
+    _smokeSource = widget.line;
   }
 
   void _ensureSmoke() {
     if (widget.smokeEnabled) {
-      _rowInk ??= LyricRowInk.create(_bright!, _boxes, _paragraphSize.width);
+      _layoutSmokeUnits();
+      _rowInk ??= LyricRowInk.create(
+        _bright!,
+        _smokeBoxes!,
+        _paragraphSize.width,
+      );
     } else {
       _rowInk?.dispose();
       _rowInk = null;
@@ -215,7 +296,7 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
       _smoke ??= WordLyricsSmoke.create(
         program,
         _bright!,
-        _boxes,
+        _smokeBoxes!,
         _paragraphSize,
         _pixelRatio,
         rowInk: _rowInk,
@@ -275,8 +356,8 @@ class _WordTimedLyricsTextState extends State<WordTimedLyricsText>
                   painter: _WordLyricsPainter(
                     base: _base!,
                     bright: _bright!,
-                    line: widget.line,
-                    boxes: _boxes,
+                    line: widget.smokeEnabled ? _smokeLine! : widget.line,
+                    boxes: widget.smokeEnabled ? _smokeBoxes! : _boxes,
                     rowInk: _rowInk,
                     position: () => _position,
                     effect: MediaQuery.disableAnimationsOf(context)
@@ -412,6 +493,10 @@ class _WordLyricsPainter extends CustomPainter {
         } else {
           complete.addPath(_pathFor(i, 1), Offset.zero);
         }
+      } else if (smokeEnabled) {
+        
+        
+        continue;
       } else if (now >= word.startMs) {
         current = i;
         break;
@@ -440,10 +525,12 @@ class _WordLyricsPainter extends CustomPainter {
     } else {
       base.paint(canvas, Offset.zero);
     }
-    canvas.save();
-    canvas.clipPath(complete);
-    bright.paint(canvas, Offset.zero);
-    canvas.restore();
+    if (!smokeEnabled) {
+      canvas.save();
+      canvas.clipPath(complete);
+      bright.paint(canvas, Offset.zero);
+      canvas.restore();
+    }
     for (final index in smokeWords) {
       final phase = LyricsSmokeMotion.phaseAt(
         line.words[index],

@@ -8,7 +8,7 @@
 
 <p>一张适合桌面与直播的 Windows 音乐卡片。</p>
 
-[![版本 1.2.0](https://img.shields.io/badge/version-1.2.0-74549D?style=flat-square)](CHANGELOG.md)
+[![版本 1.2.1](https://img.shields.io/badge/version-1.2.1-74549D?style=flat-square)](CHANGELOG.md)
 [![Windows x64](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-507765?style=flat-square)](#开始使用)
 [![Flutter](https://img.shields.io/badge/UI-Flutter-74549D?style=flat-square&logo=flutter&logoColor=white)](#工作原理)
 [![内置音乐采集](https://img.shields.io/badge/capture-SMTC%20%2B%20WASAPI-507765?style=flat-square)](docs/native_capture.md)
@@ -44,12 +44,12 @@
 
 ## 下载与版本选择
 
-**文档对应 1.2.0。** 首次使用，想体验封面分层就选有模型版；更在意下载大小，可以先用无模型版。
+**文档对应 1.2.1。** 首次使用，想体验封面分层就选有模型版；更在意下载大小，可以先用无模型版。下面列出本版套件内容，在线下载以 [GitHub 已发布的文件](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases) 为准。
 
 | 版本 | 适合谁 | 安装版 | 免安装版 |
 | --- | --- | --- | --- |
-| **有分层模型版** | 想使用封面分层视差；包含模型、GPU 依赖和许可 | [下载 Setup](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.0/MD3MusicWidget-With-Layer-Models-Setup-1.2.0.exe) | [下载 Portable ZIP](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.0/MD3MusicWidget-With-Layer-Models-Portable-1.2.0.zip) |
-| **无分层模型版** | 先使用歌曲、歌词、频谱与普通 3D 卡片，需要时再补装模型 | [下载 Setup](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.0/MD3MusicWidget-Without-Layer-Models-Setup-1.2.0.exe) | [下载 Portable ZIP](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.0/MD3MusicWidget-Without-Layer-Models-Portable-1.2.0.zip) |
+| **有分层模型版** | 想使用封面分层视差；包含模型、GPU 依赖和许可 | 有模型版 Setup EXE | 有模型版 Portable ZIP |
+| **无分层模型版** | 先使用歌曲、歌词、频谱与普通 3D 卡片，需要时再补装模型 | 无模型版 Setup EXE | 无模型版 Portable ZIP |
 | **独立 cover-layers** | 给匹配版本的无模型应用补装／更新分层，不是独立播放器 | [补装说明](docs/layer_models.md) | [模型仓库](https://github.com/Sylvain-cjh/cover-layers) |
 
 [查看全部发行版本](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases) · [本次更新了什么](CHANGELOG.md)

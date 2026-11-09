@@ -195,9 +195,9 @@ extension _PlayerMedia on _PlayerViewState {
     }
     if (snapshot.coverVersion.isNotEmpty &&
         snapshot.coverVersion != AppState.currentCoverVersion) {
-      if (_artworkResources.findArtwork(snapshot.coverVersion) != null) {
+      if (_artworkResources.hasArtwork(snapshot.coverVersion)) {
         unawaited(
-          _restoreCachedArtwork(snapshot.coverVersion).then((hit) {
+          _requestArtwork(snapshot.coverVersion).then((hit) {
             if (!hit &&
                 mounted &&
                 snapshot.coverVersion == _latestCoverVersion &&

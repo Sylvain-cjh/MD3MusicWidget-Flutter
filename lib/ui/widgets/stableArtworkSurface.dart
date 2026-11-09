@@ -1,11 +1,21 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import '../animations/mediaMotionTokens.dart';
 
 final class _ArtworkFrame {
   final ui.Image image;
   final double weight;
-  const _ArtworkFrame(this.image, this.weight);
+  final Rect? normalizedRegion;
+  final Object? identity;
+  const _ArtworkFrame(
+    this.image,
+    this.weight, [
+    this.normalizedRegion,
+    this.identity,
+  ]);
+  _ArtworkFrame weighted(double weight) =>
+      _ArtworkFrame(image, weight, normalizedRegion, identity);
 }
 
 
@@ -19,6 +29,9 @@ class StableArtworkSurface extends StatefulWidget {
   
   
   final Rect? clampedImageRect;
+  final Rect? normalizedImageRegion;
+  final Object? artworkIdentity;
+  final bool deferArtworkReplacement;
   const StableArtworkSurface({
     super.key,
     required this.provider,
@@ -26,6 +39,9 @@ class StableArtworkSurface extends StatefulWidget {
     this.alignment = Alignment.center,
     this.animateReplacement = true,
     this.clampedImageRect,
+    this.normalizedImageRegion,
+    this.artworkIdentity,
+    this.deferArtworkReplacement = false,
   });
   @override
   State<StableArtworkSurface> createState() => StableArtworkSurfaceState();
@@ -35,11 +51,12 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
     with SingleTickerProviderStateMixin {
   late final AnimationController _motion;
   final List<_ArtworkFrame> _base = [];
-  ui.Image? _incoming;
+  _ArtworkFrame? _incoming;
   ImageStream? _stream;
   ImageStreamListener? _listener;
   int _serial = 0;
   Object? _request;
+  Object? _requestedIdentity;
   Size _paintSize = Size.zero;
   double _dpi = 1;
   bool _reduced = false;
@@ -67,7 +84,7 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
     }
     _base
       ..clear()
-      ..add(_ArtworkFrame(_incoming!, 1));
+      ..add(_incoming!.weighted(1));
     _incoming = null;
   }
 
@@ -99,12 +116,57 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
 
   void _resolve() {
     final configuration = createLocalImageConfiguration(context);
-    final request = (widget.provider, configuration);
+    final request = (
+      widget.provider,
+      configuration,
+      widget.normalizedImageRegion,
+      widget.artworkIdentity,
+    );
     if (_request == request) return;
+    final defer =
+        widget.deferArtworkReplacement &&
+        widget.animateReplacement &&
+        !_reduced &&
+        _request != null &&
+        _requestedIdentity != widget.artworkIdentity;
     _request = request;
+    _requestedIdentity = widget.artworkIdentity;
     final serial = ++_serial;
     _detach();
-    _stream = widget.provider.resolve(configuration);
+    if (!defer) {
+      _beginResolve(serial, request.$1, configuration, request.$3, request.$4);
+      return;
+    }
+    final scheduler = SchedulerBinding.instance;
+    
+    
+    scheduler.addPostFrameCallback((_) {
+      if (!mounted || serial != _serial) return;
+      scheduler.scheduleFrameCallback((_) {
+        if (!mounted || serial != _serial) return;
+        scheduler.addPostFrameCallback((_) {
+          _beginResolve(
+            serial,
+            request.$1,
+            configuration,
+            request.$3,
+            request.$4,
+          );
+        });
+      });
+    });
+    scheduler.ensureVisualUpdate();
+  }
+
+  void _beginResolve(
+    int serial,
+    ImageProvider provider,
+    ImageConfiguration configuration,
+    Rect? region,
+    Object? identity,
+  ) {
+    if (!mounted || serial != _serial) return;
+    _stream = provider.resolve(configuration);
     var delivered = false;
     _listener = ImageStreamListener(
       (info, synchronous) {
@@ -127,7 +189,7 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
             return;
           }
           _detach();
-          _accept(image, serial);
+          _accept(_ArtworkFrame(image, 1, region, identity), serial);
         });
         WidgetsBinding.instance.ensureVisualUpdate();
       },
@@ -143,14 +205,17 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
     if (_incoming == null) return List.of(_base);
     final p = MediaMotionTokens.curve.transform(_motion.value);
     return [
-      for (final frame in _base)
-        _ArtworkFrame(frame.image, frame.weight * (1 - p)),
-      _ArtworkFrame(_incoming!, p),
+      for (final frame in _base) frame.weighted(frame.weight * (1 - p)),
+      _incoming!.weighted(p),
     ];
   }
 
-  Future<void> _accept(ui.Image image, int serial) async {
+  Future<void> _accept(_ArtworkFrame incoming, int serial) async {
     final current = _visibleFrames();
+    final sameArtwork =
+        incoming.identity != null &&
+        current.length == 1 &&
+        current.single.identity == incoming.identity;
     _motion.stop();
     if (current.length >= 4 && !_paintSize.isEmpty) {
       
@@ -175,6 +240,9 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
         current,
         widget.fit,
         widget.alignment,
+        clampedImageRect: widget.clampedImageRect == null
+            ? null
+            : Offset.zero & snapshotSize,
       );
       final picture = recorder.endRecording();
       ui.Image? snapshot;
@@ -185,7 +253,7 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
         );
         if (!mounted || serial != _serial) {
           snapshot.dispose();
-          image.dispose();
+          incoming.image.dispose();
           return;
         }
         for (final frame in current) {
@@ -197,7 +265,7 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
         _incoming = null;
       } catch (_) {
         
-        image.dispose();
+        incoming.image.dispose();
         if (mounted && _incoming != null) _motion.forward();
         return;
       } finally {
@@ -210,13 +278,16 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
       _incoming = null;
     }
     if (!mounted || serial != _serial) {
-      image.dispose();
+      incoming.image.dispose();
       return;
     }
     setState(() {
-      _incoming = image;
+      _incoming = incoming;
     });
-    if (_base.isEmpty || _reduced || !widget.animateReplacement) {
+    if (_base.isEmpty ||
+        _reduced ||
+        !widget.animateReplacement ||
+        sameArtwork) {
       _motion.value = 1;
       
       _settleFrames();
@@ -252,14 +323,14 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
     for (final frame in _base) {
       frame.image.dispose();
     }
-    _incoming?.dispose();
+    _incoming?.image.dispose();
     super.dispose();
   }
 }
 
 class _ArtworkPainter extends CustomPainter {
   final List<_ArtworkFrame> base;
-  final ui.Image? incoming;
+  final _ArtworkFrame? incoming;
   final Animation<double> motion;
   final BoxFit fit;
   final Alignment alignment;
@@ -299,7 +370,16 @@ class _ArtworkPainter extends CustomPainter {
         ..filterQuality = FilterQuality.medium
         ..color = Colors.white.withValues(alpha: frame.weight)
         ..blendMode = active.length > 1 ? BlendMode.plus : BlendMode.srcOver;
-      if (clampedImageRect case final rect?) {
+      if (clampedImageRect case final placement?) {
+        final region = frame.normalizedRegion;
+        final rect = region == null
+            ? placement
+            : Rect.fromLTRB(
+                placement.left + region.left * placement.width,
+                placement.top + region.top * placement.height,
+                placement.left + region.right * placement.width,
+                placement.top + region.bottom * placement.height,
+              );
         
         
         
@@ -350,11 +430,10 @@ class _ArtworkPainter extends CustomPainter {
       size,
       [
         for (final frame in base)
-          _ArtworkFrame(
-            frame.image,
+          frame.weighted(
             incoming == null ? frame.weight : frame.weight * (1 - p),
           ),
-        if (incoming != null) _ArtworkFrame(incoming!, p),
+        if (incoming != null) incoming!.weighted(p),
       ],
       fit,
       alignment,

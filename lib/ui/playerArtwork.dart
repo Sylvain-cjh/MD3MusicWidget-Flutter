@@ -11,11 +11,14 @@ extension _PlayerArtwork on _PlayerViewState {
         final coverIdentity = AppState.currentCoverVersion == 'legacy'
             ? _legacyCoverFingerprint
             : AppState.currentCoverVersion;
-        final newScheme = await _artworkResources.colorSchemes.resolve(
-          identity: coverIdentity,
-          provider: provider,
-          brightness: AppState.themeBrightness,
-          variant: AppState.themeVariant,
+        final newScheme = await WidgetDiagnostics.measure(
+          'artwork.palette',
+          () => _artworkResources.colorSchemes.resolve(
+            identity: coverIdentity,
+            provider: provider,
+            brightness: AppState.themeBrightness,
+            variant: AppState.themeVariant,
+          ),
         );
         if (mounted &&
             serial == _colorSchemeRequestSerial &&
@@ -74,18 +77,17 @@ extension _PlayerArtwork on _PlayerViewState {
       await _clearCover();
       return;
     }
+    if (!AppState.mediaBackend.supportsLegacyPolling) {
+      await _requestArtwork(version);
+      return;
+    }
     if (version == AppState.currentCoverVersion || _coverRequestInFlight) {
       return;
     }
 
     _coverRequestInFlight = true;
     try {
-      if (await _restoreCachedArtwork(version)) return;
-      final bytes = await _readLocalResponse(
-        Uri.http('localhost:12580', '/cover'),
-        timeout: const Duration(milliseconds: 700),
-      );
-      await _applyCoverBytes(version, bytes);
+      await _requestArtwork(version, allowLegacyFetch: true);
     } catch (_) {
       
     } finally {
@@ -105,40 +107,113 @@ extension _PlayerArtwork on _PlayerViewState {
     }
   }
 
-  Future<bool> _restoreCachedArtwork(String version) async {
-    var entry = _artworkResources.findArtwork(version);
-    if (entry == null) {
-      final bytes = await AppState.backgroundCacheStore.get(version);
-      if (!mounted || version != _latestCoverVersion) return true;
-      if (bytes != null) entry = CachedArtwork(bytes);
+  bool _wantsArtwork(String version) =>
+      mounted && version.isNotEmpty && version == _latestCoverVersion;
+
+  Future<bool> _requestArtwork(
+    String version, {
+    Uint8List? bytes,
+    bool allowLegacyFetch = false,
+  }) {
+    if (!_wantsArtwork(version)) return Future.value(false);
+    if (version == AppState.currentCoverVersion &&
+        AppState.coverProvider != null) {
+      return Future.value(true);
     }
-    if (entry == null) return false;
-    if (!await _precacheArtwork(entry.cover) ||
-        !await _precacheArtwork(entry.background)) {
-      _artworkResources.forgetArtwork(version);
-      unawaited(AppState.backgroundCacheStore.remove(version));
-      return false;
-    }
-    if (!mounted || version != _latestCoverVersion) return true;
-    _artworkResources.rememberPreparedArtwork(version, entry);
-    if (version != AppState.currentCoverVersion) {
-      await _activateArtwork(version, entry, persistSource: false);
-    }
-    return true;
+    return _artworkRequests.run(
+      version,
+      (request) => _prepareArtwork(version, request),
+      bytes: bytes,
+      allowLegacyFetch: allowLegacyFetch,
+    );
   }
 
-  Future<void> _activateArtwork(
+  Future<bool> _prepareArtwork(String version, ArtworkRequest request) async {
+    final generation = _artworkResources.generation;
+    try {
+      var entry = _artworkResources.findArtwork(version);
+      if (entry == null) {
+        final saved = await WidgetDiagnostics.measure(
+          'artwork.diskLookup',
+          () => AppState.backgroundCacheStore.get(version),
+        );
+        if (!_wantsArtwork(version)) return false;
+        if (saved != null && saved.isNotEmpty) entry = CachedArtwork(saved);
+      }
+      if (entry != null) {
+        if (await _tryActivateArtwork(
+          version,
+          entry,
+          generation,
+          request,
+          persistSource: false,
+        )) {
+          return true;
+        }
+        if (!_wantsArtwork(version)) return false;
+        
+        
+        _artworkResources.forgetArtwork(version);
+        unawaited(AppState.backgroundCacheStore.remove(version));
+      }
+      var bytes = request.bytes;
+      if (bytes == null && request.allowLegacyFetch) {
+        final fetched = await _readLocalResponse(
+          Uri.http('localhost:12580', '/cover'),
+          timeout: const Duration(milliseconds: 700),
+        );
+        bytes = request.bytes ?? fetched;
+      }
+      if (!_wantsArtwork(version) || bytes == null || bytes.isEmpty) {
+        return false;
+      }
+      return await _tryActivateArtwork(
+        version,
+        CachedArtwork(bytes),
+        generation,
+        request,
+        persistSource: true,
+      );
+    } catch (_) {
+      
+      return false;
+    }
+  }
+
+  Future<bool> _tryActivateArtwork(
     String version,
-    CachedArtwork entry, {
-    bool persistSource = true,
+    CachedArtwork entry,
+    int generation,
+    ArtworkRequest request, {
+    required bool persistSource,
   }) async {
+    if (!await WidgetDiagnostics.measure(
+          'artwork.mainImageReady',
+          () => _precacheArtwork(entry.cover),
+        ) ||
+        !_wantsArtwork(version) ||
+        !await WidgetDiagnostics.measure(
+          'artwork.backgroundImageReady',
+          () => _precacheArtwork(entry.background),
+        ) ||
+        !_wantsArtwork(version)) {
+      unawaited(_artworkResources.retire(entry.cover));
+      unawaited(_artworkResources.retire(entry.background));
+      return false;
+    }
     Color? tone = entry.averageColor;
-    if (tone == null) {
-      final saved = await AppState.backgroundCacheStore.get('tone|$version');
+    if (tone == null && !entry.tonePrepared) {
+      final saved = await WidgetDiagnostics.measure(
+        'artwork.toneLookup',
+        () => AppState.backgroundCacheStore.get('tone|$version'),
+      );
       if (saved?.length == 4) {
         tone = Color(ByteData.sublistView(saved!).getUint32(0));
       }
-      tone ??= await entry.prepareAverageColor();
+      tone ??= await WidgetDiagnostics.measure(
+        'artwork.averageTone',
+        entry.prepareAverageColor,
+      );
       if (tone != null && saved?.length != 4) {
         final bytes = Uint8List(4);
         ByteData.sublistView(bytes).setUint32(0, tone.toARGB32());
@@ -146,56 +221,43 @@ extension _PlayerArtwork on _PlayerViewState {
       }
       entry.averageColor = tone;
     }
-    if (!mounted || version != _latestCoverVersion) return;
+    entry.tonePrepared = true;
+    if (!_wantsArtwork(version)) {
+      unawaited(_artworkResources.retire(entry.cover));
+      unawaited(_artworkResources.retire(entry.background));
+      return false;
+    }
+    if (generation == _artworkResources.generation) {
+      _artworkResources.rememberPreparedArtwork(version, entry);
+    }
     AppState.setArtworkTone(tone);
     final previousCover = AppState.coverProvider;
     final previousBackground = AppState.bgBlurProvider;
     AppState.currentCoverVersion = version;
     AppState.currentRawBase64 = "";
+    _artworkRequests.committed(version, request);
     _updateState(() {
       AppState.coverProvider = entry.cover;
       AppState.bgBlurProvider = entry.background;
     });
     AppState.notifyBackgroundChanged();
     WidgetDiagnostics.markOnce('firstArtworkActivated');
+    if (WidgetDiagnostics.enabled) {
+      WidgetDiagnostics.markOnce('artworkActivated:$version');
+    }
     if (persistSource) {
       unawaited(AppState.backgroundCacheStore.put(version, entry.cover.bytes));
     }
     unawaited(_artworkResources.retire(previousCover));
     unawaited(_artworkResources.retire(previousBackground));
     await _updateColorScheme();
+    return true;
   }
 
   Future<void> _applyCoverBytes(String version, Uint8List bytes) async {
-    if (!mounted ||
-        version.isEmpty ||
-        bytes.isEmpty ||
-        version != _latestCoverVersion) {
-      return;
-    }
+    if (bytes.isEmpty || !_wantsArtwork(version)) return;
     _coverFallbackTimer?.cancel();
-    if (version == AppState.currentCoverVersion &&
-        AppState.coverProvider != null) {
-      return;
-    }
-    if (await _restoreCachedArtwork(version)) return;
-
-    final entry = CachedArtwork(bytes);
-    final coverReady = await _precacheArtwork(entry.cover);
-    if (!mounted || version != _latestCoverVersion || !coverReady) {
-      unawaited(_artworkResources.retire(entry.cover));
-      
-      
-      return;
-    }
-    final backgroundReady = await _precacheArtwork(entry.background);
-    if (!mounted || version != _latestCoverVersion || !backgroundReady) {
-      unawaited(_artworkResources.retire(entry.cover));
-      unawaited(_artworkResources.retire(entry.background));
-      return;
-    }
-    _artworkResources.rememberPreparedArtwork(version, entry);
-    await _activateArtwork(version, entry);
+    await _requestArtwork(version, bytes: bytes);
   }
 
   Future<bool> _precacheArtwork(ImageProvider provider) async {

@@ -146,6 +146,14 @@ extension _PlayerRendering on _PlayerViewState {
         innerPlayerH - AppState.nextUpPanelExtentOf(_displayLayout);
     final backgroundAnchorWidth = innerPlayerW;
     final backgroundAnchorLeft = pLeft;
+    final cropGlow =
+        !isOpen &&
+        retainedSettingsCanvas == null &&
+        !_isTransitioning &&
+        !_layoutMotion.active &&
+        !_layoutPreparing &&
+        !_isComponentSizeTransitioning &&
+        !isLiveCustomResize;
     final backgroundAnchor = (
       backgroundAnchorWidth,
       backgroundAnchorHeight,
@@ -154,6 +162,7 @@ extension _PlayerRendering on _PlayerViewState {
       _layoutMotion.active || _layoutPreparing,
       frameAnimationDuration,
       frameCurve,
+      cropGlow,
     );
     if (_backgroundAnchor != backgroundAnchor) {
       _backgroundAnchor = backgroundAnchor;
@@ -169,6 +178,7 @@ extension _PlayerRendering on _PlayerViewState {
             verticalLayout: isV,
             animateArtworkReplacement:
                 !(_layoutMotion.active || _layoutPreparing),
+            allowGlowCrop: cropGlow,
           ),
         ),
       );

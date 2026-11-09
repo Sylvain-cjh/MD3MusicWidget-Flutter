@@ -222,6 +222,11 @@ extension _PlayerTransitions on _PlayerViewState {
     if (_menuResizeInFlight) return;
     final int serial = _beginWindowTransition();
     _settingsTransitionActive = true;
+    if (!_isSettingsOpen) {
+      
+      
+      unawaited(DynamicBackground.prepareLayout(context, _displayLayout));
+    }
     try {
       if (_isMenuOpen) {
         if (MediaQuery.disableAnimationsOf(context)) {
