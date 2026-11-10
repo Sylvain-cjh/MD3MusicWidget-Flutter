@@ -214,7 +214,12 @@ class _SettingsPanelState extends State<SettingsPanel>
         : null;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 16, 16),
+      padding: const EdgeInsets.fromLTRB(
+        20,
+        18,
+        SmoothSurfaceCorners.settingsEdge,
+        SmoothSurfaceCorners.settingsEdge,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -264,7 +269,12 @@ class _SettingsPanelState extends State<SettingsPanel>
                     
                     
                     
-                    padding: const EdgeInsets.fromLTRB(8, 12, 8, 40),
+                    padding: const EdgeInsets.fromLTRB(
+                      SmoothSurfaceCorners.settingsGroupInset,
+                      12,
+                      SmoothSurfaceCorners.settingsGroupInset,
+                      40,
+                    ),
                     children: [
                       if (_selectedSection == _SettingsSection.window)
                         _buildWindowGroupSettings(),

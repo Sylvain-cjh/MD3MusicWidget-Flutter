@@ -35,16 +35,18 @@ class SlideMenu extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 4),
           child: IntrinsicWidth(
             child: SmoothRoundedClip(
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: SmoothSurfaceCorners.menu,
               child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
+                padding: const EdgeInsets.all(SmoothSurfaceCorners.menuInset),
+                decoration: ShapeDecoration(
                   color: AppState.currentScheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    width: RoundedRasterScale.hairline(context),
-                    color: AppState.currentScheme.outlineVariant.withValues(
-                      alpha: 0.5,
+                  shape: SmoothSurfaceCorners.shape(
+                    SmoothSurfaceCorners.menu,
+                    side: BorderSide(
+                      width: RoundedRasterScale.hairline(context),
+                      color: AppState.currentScheme.outlineVariant.withValues(
+                        alpha: 0.5,
+                      ),
                     ),
                   ),
                   
@@ -86,7 +88,7 @@ class SlideMenu extends StatelessWidget {
         : AppState.currentScheme.onSurface;
     return InkWell(
       onTap: onClick,
-      borderRadius: BorderRadius.circular(14),
+      customBorder: SmoothSurfaceCorners.shape(SmoothSurfaceCorners.menuItem),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(

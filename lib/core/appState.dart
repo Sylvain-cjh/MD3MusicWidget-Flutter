@@ -100,6 +100,7 @@ class AppState {
   static int fetcherPid = 0;
   static String trackTitle = "未在播放";
   static String artistName = "无媒体会话";
+  static MediaCaptureRoute captureRoute = MediaCaptureRoute.smtc;
   static String trackVersion = "";
   static bool isPlaying = false;
   static int mediaCapabilities = MediaCapability.smtcDefault;
@@ -215,14 +216,22 @@ class AppState {
   }
 
   static PlatformQueueItem? get nextQueueItem {
-    if (!showNextUp || isShuffleActive == true || autoRepeatMode == 'track') {
+    if (!showNextUp ||
+        captureRoute == MediaCaptureRoute.neteaseUia ||
+        isShuffleActive == true ||
+        autoRepeatMode == 'track') {
       return null;
     }
-    return queue.queue?.nextItem(wrap: autoRepeatMode == 'list');
+    return queue
+        .queueForTrack(currentPlatformTrack)
+        ?.nextItem(wrap: autoRepeatMode == 'list');
   }
 
   static bool get shouldPreviewNext {
-    if (!isPlaying || nextQueueItem == null || playbackDurationMs <= 0) {
+    if (!isPlaying ||
+        !_playbackPositionKnown ||
+        nextQueueItem == null ||
+        playbackDurationMs <= 0) {
       return false;
     }
     final remaining = playbackDurationMs - estimatedPlaybackPositionMs;
@@ -430,7 +439,7 @@ class AppState {
       readInput: () => NextUpPreviewInput(
         trackIdentity: currentPlatformTrack?.contextIdentity,
         next: nextQueueItem,
-        enabled: showNextUp && hasPlaylistConfigured,
+        enabled: showNextUp && hasPlaylistConfigured && _playbackPositionKnown,
         playing: isPlaying,
         durationMs: playbackDurationMs,
         positionMs: estimatedPlaybackPositionMs,
@@ -500,8 +509,12 @@ class AppState {
     if (changed) spectrumRevision.value++;
   }
 
+  static bool _playbackPositionKnown = true;
+
   static double get estimatedPlaybackPositionMs {
-    if (!isPlaying || playbackUpdatedAtMs <= 0) return playbackPositionMs;
+    if (!isPlaying || !_playbackPositionKnown || playbackUpdatedAtMs <= 0) {
+      return playbackPositionMs;
+    }
     final int elapsedMs =
         _playbackClock.elapsedMilliseconds - _playbackReceivedAtMonotonicMs;
     final double estimated =
@@ -515,6 +528,7 @@ class AppState {
     required double positionMs,
     required double durationMs,
     required int updatedAtMs,
+    bool positionKnown = true,
   }) {
     final double safeDuration = durationMs.isFinite && durationMs > 0
         ? durationMs
@@ -522,6 +536,7 @@ class AppState {
     final double safePosition = positionMs.isFinite && positionMs > 0
         ? positionMs
         : 0.0;
+    _playbackPositionKnown = positionKnown;
     playbackDurationMs = safeDuration;
     playbackPositionMs = safeDuration > 0
         ? safePosition.clamp(0.0, safeDuration)
@@ -535,6 +550,25 @@ class AppState {
         : 0;
     _playbackReceivedAtMonotonicMs = _playbackClock.elapsedMilliseconds;
     playbackRevision.value++;
+  }
+
+  static void commitPlaybackContext(
+    MediaSnapshot snapshot,
+    PlatformTrack? track,
+  ) {
+    currentPlatformTrack = track;
+    captureRoute = snapshot.captureRoute;
+    isShuffleActive = snapshot.isShuffleActive;
+    autoRepeatMode = snapshot.autoRepeatMode;
+    updatePlaybackTimeline(
+      positionMs: snapshot.positionMs,
+      durationMs: snapshot.durationMs,
+      updatedAtMs: snapshot.timelineUpdatedAtMs,
+      positionKnown: snapshot.timelinePositionKnown ?? true,
+    );
+    refreshQueue();
+    refreshLyrics();
+    if (showLyrics) lyrics.setPositionMs(lyricsPlaybackPositionMs);
   }
 
   static ColorScheme currentScheme = ColorScheme.fromSeed(

@@ -15,14 +15,14 @@ class SpectrumGlassSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = AppState.currentScheme;
-    final radius = BorderRadius.circular(24);
+    const radius = SmoothSurfaceCorners.mediaStrip;
     return ClipRect(
       child: SmoothRoundedClip(
         borderRadius: radius,
         child: BackdropFilter(
           filter: _blur,
           child: DecoratedBox(
-            decoration: BoxDecoration(
+            decoration: ShapeDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
@@ -32,10 +32,12 @@ class SpectrumGlassSurface extends StatelessWidget {
                   scheme.surface.withValues(alpha: 0.48),
                 ],
               ),
-              borderRadius: radius,
-              border: Border.all(
-                width: RoundedRasterScale.hairline(context),
-                color: scheme.outlineVariant.withValues(alpha: 0.42),
+              shape: SmoothSurfaceCorners.shape(
+                radius,
+                side: BorderSide(
+                  width: RoundedRasterScale.hairline(context),
+                  color: scheme.outlineVariant.withValues(alpha: 0.28),
+                ),
               ),
             ),
             child: child,

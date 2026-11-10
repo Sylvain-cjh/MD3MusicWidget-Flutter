@@ -12,6 +12,8 @@ import 'coverParallax.dart';
 import 'spectrumGlassSurface.dart';
 import 'playbackTimeLabel.dart';
 import 'adaptiveMediaText.dart';
+import 'captureRouteNotice.dart';
+import 'smoothRoundedClip.dart';
 import '../animations/coverArtworkSwitcher.dart';
 import '../animations/mediaMotionTokens.dart';
 import '../animations/layoutMorphMotion.dart';
@@ -511,6 +513,18 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         );
         final double playL = takeButtonLeft(canPlayPause, playW, canNext);
         final double nextL = takeButtonLeft(canNext, nextW, false);
+        final double noticeInset = coverL;
+        final double noticeLeft = !isV && hasControls
+            ? buttonCursor + 8
+            : titleL;
+        final double noticeWidth = math.max(
+          0,
+          availableW - noticeInset - noticeLeft,
+        );
+        const noticeHeight = CaptureRouteNotice.height;
+        final double noticeTop = !isV && hasControls
+            ? playT + (playH - noticeHeight) / 2
+            : availableH - noticeHeight - (isV ? 3 : 5);
 
         
         
@@ -576,7 +590,10 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               top: coverT,
               width: coverSize,
               height: coverSize,
-              child: _buildCover(coverSize),
+              child: _buildCover(
+                coverSize,
+                SmoothSurfaceCorners.artwork(inset: math.max(coverL, coverT)),
+              ),
             ),
 
             MorphPositioned(
@@ -827,13 +844,29 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                     )
                   : const SizedBox.shrink(),
             ),
+            MorphPositioned(
+              motion: widget.layoutMotion,
+              duration: AppState.layoutSwitchDuration,
+              curve: AppState.layoutSwitchCurve,
+              left: noticeLeft,
+              top: noticeTop,
+              width: noticeWidth,
+              height: noticeHeight,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: CaptureRouteNotice(
+                  route: AppState.captureRoute,
+                  compact: noticeWidth < 82,
+                ),
+              ),
+            ),
           ],
         );
       },
     );
   }
 
-  Widget _buildCover(double size) {
+  Widget _buildCover(double size, BorderRadius radius) {
     final coverVersion = AppState.currentCoverVersion;
     if (_directionCoverIdentity != _coverIdentity) {
       _directionCoverIdentity = _coverIdentity;
@@ -845,16 +878,14 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
       style: AppState.coverTransitionStyle,
       direction: _coverDirection,
       reduceMotion: reduceMotion,
-      borderRadius: BorderRadius.circular((size * 0.055).clamp(14.0, 20.0)),
+      borderRadius: radius,
       child: IgnorePointer(
         key: ValueKey(_coverIdentity),
         ignoring: !AppState.isPlaying,
         child: RepaintBoundary(
           child: CoverParallax(
             size: size,
-            borderRadius: BorderRadius.circular(
-              (size * 0.055).clamp(14.0, 20.0),
-            ),
+            borderRadius: radius,
             backgroundColor: AppState.currentScheme.surface,
             accentColor: AppState.currentScheme.primary,
             image: AppState.coverProvider,

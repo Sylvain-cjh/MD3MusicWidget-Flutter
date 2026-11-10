@@ -8,6 +8,7 @@ import '../../core/appState.dart';
 import '../animations/componentSizeMotion.dart';
 import '../animations/settingsNavigationMotion.dart';
 import 'settingsControlShape.dart';
+import 'smoothRoundedClip.dart';
 
 class SettingsSectionDestination {
   final String id;
@@ -358,11 +359,15 @@ class _SettingsSectionNavigationState extends State<SettingsSectionNavigation>
                   Positioned.fill(
                     child: DecoratedBox(
                       key: const ValueKey('settings_section_navigation_track'),
-                      decoration: BoxDecoration(
+                      decoration: ShapeDecoration(
                         color: scheme.surfaceContainerHighest.withValues(
                           alpha: 0.72,
                         ),
-                        borderRadius: BorderRadius.circular(18),
+                        shape: shape is StadiumBorder
+                            ? const StadiumBorder()
+                            : SmoothSurfaceCorners.shape(
+                                SmoothSurfaceCorners.navigation,
+                              ),
                       ),
                     ),
                   ),

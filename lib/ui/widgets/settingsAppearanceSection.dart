@@ -6,28 +6,32 @@ extension _SettingsAppearanceSection on _SettingsPanelState {
     title: SettingsLabels.themeGroup,
     icon: Icons.palette_rounded,
     children: [
-      _buildSegmentedRow(
+      _buildDropdownRow<DynamicSchemeVariant>(
         SettingsLabels.colorTheme,
         SettingsDescriptions.colorTheme,
-        [
-          const ButtonSegment(
-            value: DynamicSchemeVariant.tonalSpot,
-            label: Text(SettingsLabels.themeSoft),
-          ),
-          const ButtonSegment(
-            value: DynamicSchemeVariant.vibrant,
-            label: Text(SettingsLabels.themeVibrant),
-          ),
-          const ButtonSegment(
-            value: DynamicSchemeVariant.fidelity,
-            label: Text(SettingsLabels.themeFidelity),
-          ),
-        ],
         AppState.themeVariant,
         (val) {
           _updateState(() => AppState.themeVariant = val);
           widget.onThemeChanged();
         },
+        const [
+          DropdownMenuEntry(
+            value: DynamicSchemeVariant.tonalSpot,
+            label: SettingsLabels.themeSoft,
+          ),
+          DropdownMenuEntry(
+            value: DynamicSchemeVariant.vibrant,
+            label: SettingsLabels.themeVibrant,
+          ),
+          DropdownMenuEntry(
+            value: DynamicSchemeVariant.fidelity,
+            label: SettingsLabels.themeFidelity,
+          ),
+          DropdownMenuEntry(
+            value: DynamicSchemeVariant.expressive,
+            label: SettingsLabels.themeExpressive,
+          ),
+        ],
       ),
       _buildDivider(),
       _buildSwitchRow(

@@ -194,14 +194,29 @@ class ComponentSizeStage extends StatelessWidget {
     child: SizedBox(width: designWidth, height: designHeight, child: child),
   );
 
-  Widget _frame(Widget fullCanvas) => SmoothRoundedClip(
-    borderRadius: decoration.borderRadius ?? BorderRadius.zero,
-    child: DecoratedBox(
-      decoration: decoration,
-      position: DecorationPosition.foreground,
-      child: fullCanvas,
-    ),
-  );
+  Widget _frame(Widget fullCanvas) {
+    final radius = decoration.borderRadius ?? BorderRadius.zero;
+    final border = decoration.border;
+    return SmoothRoundedClip(
+      borderRadius: radius,
+      child: DecoratedBox(
+        decoration: border == null || (border is Border && border.isUniform)
+            ? ShapeDecoration(
+                color: decoration.color,
+                gradient: decoration.gradient,
+                image: decoration.image,
+                shadows: decoration.boxShadow,
+                shape: SmoothSurfaceCorners.shape(
+                  radius,
+                  side: border is Border ? border.top : BorderSide.none,
+                ),
+              )
+            : decoration,
+        position: DecorationPosition.foreground,
+        child: fullCanvas,
+      ),
+    );
+  }
 
   Widget _stage(double inset) {
     if (transformOnly) {

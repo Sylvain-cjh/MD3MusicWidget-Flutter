@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'lyricsDocument.dart';
 import 'lyricsHttpClient.dart';
 import 'lyricsPrimaryAttempt.dart';
+import 'lyricsRequestError.dart';
 import 'lyricsSongMatcher.dart';
 import 'platformProvider.dart';
 
@@ -24,6 +25,7 @@ List<String> _artists(Map song) {
 
 final class NeteasePublicClient {
   final HttpClient _client;
+  LyricsRateLimitException? _lyricLimit;
   final Future<Object?> Function(Uri)? fetchJson;
   NeteasePublicClient({HttpClient? client, this.fetchJson})
     : _client =
@@ -37,8 +39,13 @@ final class NeteasePublicClient {
     Map<String, String> query, {
     LyricsPrimaryAttempt? attempt,
   }) async {
+    final lyricLookup = attempt != null;
+    if (lyricLookup) _throwIfLyricsLimited();
     final uri = Uri.https('music.163.com', path, query);
-    if (fetchJson != null) return fetchJson!(uri);
+    if (fetchJson != null) {
+      final payload = await fetchJson!(uri);
+      return lyricLookup ? _checkLyricPayload(payload) : payload;
+    }
     HttpClientRequest? request;
     final deadline = Timer(
       const Duration(seconds: 8),
@@ -48,6 +55,7 @@ final class NeteasePublicClient {
       request = attempt == null
           ? await _client.getUrl(uri).timeout(const Duration(seconds: 5))
           : await attempt.open(_client, uri);
+      if (lyricLookup) _throwIfLyricsLimited();
       request.followRedirects = false;
       request.headers.set(HttpHeaders.refererHeader, 'https://music.163.com/');
       request.headers.set(
@@ -57,6 +65,12 @@ final class NeteasePublicClient {
       final response = await request.close().timeout(
         attempt?.remaining ?? const Duration(seconds: 5),
       );
+      if (lyricLookup && response.statusCode == HttpStatus.tooManyRequests) {
+        _limitLyrics(
+          response.headers.value(HttpHeaders.retryAfterHeader),
+          response.headers.value(HttpHeaders.dateHeader),
+        );
+      }
       if (response.statusCode != HttpStatus.ok) {
         throw HttpException('网易云公开接口不可用：${response.statusCode}');
       }
@@ -69,7 +83,8 @@ final class NeteasePublicClient {
         if (size > 4 * 1024 * 1024) throw const FormatException('网易云响应过大');
         bytes.add(chunk);
       }
-      return jsonDecode(utf8.decode(bytes.takeBytes()));
+      final payload = jsonDecode(utf8.decode(bytes.takeBytes()));
+      return lyricLookup ? _checkLyricPayload(payload) : payload;
     } catch (_) {
       request?.abort();
       rethrow;
@@ -77,6 +92,32 @@ final class NeteasePublicClient {
       deadline.cancel();
       if (request != null) attempt?.release(request);
     }
+  }
+
+  void _throwIfLyricsLimited() {
+    final limited = _lyricLimit;
+    if (limited != null && limited.retryAt.isAfter(DateTime.now())) {
+      throw limited;
+    }
+  }
+
+  Object? _checkLyricPayload(Object? payload) {
+    if (payload is Map && payload['code']?.toString() == '429') _limitLyrics();
+    return payload;
+  }
+
+  Never _limitLyrics([String? retryAfter, String? serverDate]) {
+    final error = LyricsRateLimitException(
+      providerId: NeteaseLyricsProvider.providerId,
+      retryAt: lyricsRetryDeadline(
+        retryAfter,
+        now: DateTime.now(),
+        serverDate: serverDate,
+      ),
+      fromServer: true,
+    );
+    _lyricLimit = error;
+    throw error;
   }
 
   void close() => _client.close(force: true);
@@ -165,6 +206,7 @@ final class NeteaseLyricsProvider
   }
 
   Future<LyricsDocument?> _load(PlatformTrack track, String key) async {
+    LyricsRateLimitException? primaryLimit;
     final cached = _cache[key];
     if (cached != null && DateTime.now().isBefore(cached.$2)) {
       _cache.remove(key);
@@ -176,26 +218,38 @@ final class NeteaseLyricsProvider
       try {
         final attempt = LyricsPrimaryAttempt(primaryBudget);
         document = await attempt.run(() => _loadPublic(track, attempt));
+      } on LyricsRateLimitException catch (error) {
+        primaryLimit = error;
       } catch (_) {
         failed = true;
       }
       _cache.remove(key);
-      _cache[key] = (
-        document,
-        DateTime.now().add(
-          document != null
-              ? const Duration(hours: 2)
-              : failed
-              ? const Duration(minutes: 1)
-              : const Duration(minutes: 5),
-        ),
-      );
+      if (primaryLimit == null) {
+        _cache[key] = (
+          document,
+          DateTime.now().add(
+            document != null
+                ? const Duration(hours: 2)
+                : failed
+                ? const Duration(minutes: 1)
+                : const Duration(minutes: 5),
+          ),
+        );
+      }
       while (_cache.length > 8) {
         _cache.remove(_cache.keys.first);
       }
       if (document != null) return document;
     }
-    final document = await fallback.loadLyrics(track);
+    LyricsDocument? document;
+    try {
+      document = await fallback.loadLyrics(track);
+    } on LyricsRateLimitException {
+      rethrow;
+    } catch (_) {
+      if (primaryLimit != null) throw primaryLimit;
+      rethrow;
+    }
     final sourced = document == null
         ? null
         : document.sourceProviderId.isEmpty
@@ -214,6 +268,7 @@ final class NeteaseLyricsProvider
       }
       return resolved;
     }
+    if (primaryLimit != null) throw primaryLimit;
     return null;
   }
 
@@ -280,6 +335,8 @@ final class NeteaseLyricsProvider
           'yrv': '0',
         }, attempt: wordAttempt),
       );
+    } on LyricsRateLimitException {
+      rethrow;
     } catch (_) {
       
     }

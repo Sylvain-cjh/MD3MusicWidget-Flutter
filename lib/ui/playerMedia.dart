@@ -133,6 +133,9 @@ extension _PlayerMedia on _PlayerViewState {
     );
 
     final nextTrack = update.track;
+    if (AppState.currentPlatformTrack?.sourceAppId != nextTrack?.sourceAppId) {
+      AppState.clearSpectrum();
+    }
     AppState.trackNavigation.observe(
       nextTrack,
       queue: AppState.queue.queue,
@@ -151,40 +154,30 @@ extension _PlayerMedia on _PlayerViewState {
     final bool playbackStateChanged = AppState.isPlaying != snapshot.isPlaying;
     final bool capabilitiesChanged =
         AppState.mediaCapabilities != snapshot.capabilities;
+    final bool captureRouteChanged =
+        AppState.captureRoute != snapshot.captureRoute;
     if (update.startsTrack && AppState.playbackDurationMs > 0) {
       AppState.notifyTrackTransition();
     }
 
     if (versionChanged) AppState.trackVersion = snapshot.trackVersion;
-    if (metadataChanged || playbackStateChanged || capabilitiesChanged) {
+    if (metadataChanged ||
+        playbackStateChanged ||
+        capabilitiesChanged ||
+        captureRouteChanged) {
       _updateState(() {
         AppState.trackTitle = snapshot.title;
         AppState.artistName = snapshot.artist;
         AppState.trackVersion = snapshot.trackVersion;
         AppState.isPlaying = snapshot.isPlaying;
         AppState.mediaCapabilities = snapshot.capabilities;
+        AppState.captureRoute = snapshot.captureRoute;
       });
       if (playbackStateChanged) AppState.notifyBackgroundChanged();
     }
 
-    AppState.currentPlatformTrack = nextTrack;
-    AppState.isShuffleActive = snapshot.isShuffleActive;
-    AppState.autoRepeatMode = snapshot.autoRepeatMode;
-    AppState.updatePlaybackTimeline(
-      positionMs: snapshot.positionMs,
-      durationMs: snapshot.durationMs,
-      updatedAtMs: snapshot.timelineUpdatedAtMs > 0
-          ? snapshot.timelineUpdatedAtMs
-          : DateTime.now().millisecondsSinceEpoch,
-    );
-    
-    
-    AppState.refreshQueue();
+    AppState.commitPlaybackContext(snapshot, nextTrack);
     if (playbackStateChanged) _syncSpectrumPolling();
-    AppState.refreshLyrics();
-    if (AppState.showLyrics) {
-      AppState.lyrics.setPositionMs(AppState.lyricsPlaybackPositionMs);
-    }
 
     _latestCoverVersion = snapshot.coverVersion;
     if (snapshot.coverVersion.isNotEmpty ||
@@ -237,6 +230,18 @@ extension _PlayerMedia on _PlayerViewState {
         unawaited(_applyCoverBytes(version, bytes));
       case MediaHeartbeatEvent():
         _recordFetcherHeartbeat();
+        if (_mediaProvider case NativeMediaBackend provider
+            when provider.isConnected &&
+                RuntimeCapabilities
+                        .instance[RuntimeCapability.mediaStream]
+                        ?.phase !=
+                    CapabilityPhase.ready) {
+          RuntimeCapabilities.instance.set(
+            RuntimeCapability.mediaStream,
+            const CapabilityStatus(CapabilityPhase.ready),
+          );
+          _syncSpectrumPolling();
+        }
       case MediaDisconnectedEvent():
         RuntimeCapabilities.instance.set(
           RuntimeCapability.mediaStream,
@@ -264,8 +269,13 @@ extension _PlayerMedia on _PlayerViewState {
     );
     _mediaProviderConnectInFlight = true;
     try {
-      if (await provider.connect() && mounted) {
-        if (!provider.usesExternalProcess) await _applySavedSource();
+      final connected = provider is NativeMediaBackend
+          ? await provider.connect(initialSource: AppState.selectedSourceAppId)
+          : await provider.connect();
+      if (connected && mounted) {
+        if (provider is! NativeMediaBackend && !provider.usesExternalProcess) {
+          await _applySavedSource();
+        }
         if (!mounted) return;
         RuntimeCapabilities.instance.set(
           RuntimeCapability.mediaStream,

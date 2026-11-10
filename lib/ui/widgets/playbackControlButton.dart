@@ -4,6 +4,7 @@ import 'package:flutter/physics.dart';
 
 import '../animations/coverParallaxMotion.dart';
 import '../animations/transportTactileMotion.dart';
+import 'smoothRoundedClip.dart';
 
 
 
@@ -164,13 +165,12 @@ class PlaybackControlButtonState extends State<PlaybackControlButton>
   Widget build(BuildContext context) {
     builds++;
     final reduced = MediaQuery.disableAnimationsOf(context);
-    final shape = RoundedRectangleBorder(borderRadius: widget.borderRadius);
+    final ShapeBorder shape = widget.borderRadius.topLeft.x >= widget.height / 2
+        ? const StadiumBorder()
+        : SmoothSurfaceCorners.shape(widget.borderRadius);
     final surface = RepaintBoundary(
       child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: widget.background,
-          borderRadius: widget.borderRadius,
-        ),
+        decoration: ShapeDecoration(color: widget.background, shape: shape),
         child: const SizedBox.expand(),
       ),
     );
@@ -197,9 +197,9 @@ class PlaybackControlButtonState extends State<PlaybackControlButton>
       child: Padding(
         padding: const EdgeInsets.all(shadowMargin),
         child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: widget.borderRadius,
-            boxShadow: [
+          decoration: ShapeDecoration(
+            shape: shape,
+            shadows: [
               BoxShadow(
                 color: Theme.of(
                   context,

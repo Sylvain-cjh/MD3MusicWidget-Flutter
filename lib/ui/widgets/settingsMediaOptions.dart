@@ -156,13 +156,30 @@ extension _SettingsMediaOptions on _SettingsPanelState {
 
   List<DropdownMenuEntry<String>> _sourceEntries() {
     final selected = AppState.selectedSourceAppId;
+    bool neteaseDesktop(String id) {
+      final normalized = id.toLowerCase().replaceAll('/', '\\');
+      return normalized == 'cloudmusic' ||
+          normalized.split('\\').last == 'cloudmusic.exe';
+    }
+
+    final selectedListed = _sources.any(
+      (source) => source.id.toLowerCase() == selected.toLowerCase(),
+    );
     return [
       const DropdownMenuEntry(value: '', label: SettingsLabels.sourceAutomatic),
-      if (selected.isNotEmpty &&
-          !_sources.any(
-            (source) => source.id.toLowerCase() == selected.toLowerCase(),
-          ))
-        DropdownMenuEntry(value: selected, label: '未运行 · $selected'),
+      if (selected.isNotEmpty && !selectedListed)
+        DropdownMenuEntry(
+          value: selected,
+          label: neteaseDesktop(selected)
+              ? '网易云音乐 · 支持备用采集'
+              : '未运行 · $selected',
+        ),
+      if (!neteaseDesktop(selected) &&
+          !_sources.any((source) => neteaseDesktop(source.id)))
+        const DropdownMenuEntry(
+          value: 'cloudmusic.exe',
+          label: '网易云音乐 · 支持备用采集',
+        ),
       for (final source in _sources)
         DropdownMenuEntry(
           value: source.id,

@@ -47,15 +47,6 @@ final class ArtworkSchemeCache {
       'artwork.seedSample',
       () => ArtworkPalette.fromProvider(provider),
     );
-    if (palette.whiteFraction < 0.35) {
-      return (
-        color: await WidgetDiagnostics.measure(
-          'artwork.materialSeed',
-          () => ArtworkPalette.materialSeedFromProvider(provider),
-        ),
-        contrast: 0.0,
-      );
-    }
     return (
       color: palette.seed,
       contrast: palette.whiteFraction > 0.55 ? 0.15 : 0.0,

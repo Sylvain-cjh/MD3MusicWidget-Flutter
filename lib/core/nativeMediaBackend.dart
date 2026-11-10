@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'mediaCaptureBackend.dart';
 import 'mediaProvider.dart';
 import 'musicSourceService.dart';
+import 'platformProvider.dart';
 
 
 final class NativeMediaBackend implements MediaCaptureBackend {
@@ -25,7 +26,13 @@ final class NativeMediaBackend implements MediaCaptureBackend {
   bool _closed = false, _connected = false;
   bool _playing = false;
   int _generation = 0;
+  int? _selectionGeneration;
   String _source = '', _cover = '';
+  String _committedSource = '';
+  MediaSnapshot? _diagnosticSnapshot;
+  String? _bridgeError;
+  int? _lastCommand;
+  String? _lastCommandResult;
   MusicSourceSnapshot _sources = const MusicSourceSnapshot(
     selectedSourceAppId: '',
     sources: [],
@@ -52,23 +59,105 @@ final class NativeMediaBackend implements MediaCaptureBackend {
   bool get isConnected => !_closed && _connected;
   @override
   Stream<MediaProviderEvent> get events => _events.stream;
+
+  
+  Map<String, Object?> captureDiagnostics() {
+    final snapshot = _diagnosticSnapshot;
+    final hasSession =
+        snapshot?.hasMediaSession ?? (snapshot?.sourceAppId.isNotEmpty == true);
+    final uia = snapshot?.captureRoute.usesUiAutomation == true;
+    final hasPlayback = hasSession || uia;
+    final positionKnown =
+        hasPlayback &&
+        (snapshot?.timelinePositionKnown ??
+            ((snapshot?.timelineUpdatedAtMs ?? 0) > 0));
+    final duration = snapshot?.durationMs;
+    final durationKnown =
+        hasPlayback && duration != null && duration.isFinite && duration > 0;
+    return {
+      'sourceMode': _source.isEmpty ? 'automatic' : 'strict',
+      'selectedSource': _source,
+      'activeSource': hasPlayback ? snapshot!.sourceAppId : null,
+      'captureRoute': snapshot?.captureRoute.name,
+      'session': !isConnected
+          ? (_bridgeError ?? 'awaitingSnapshot')
+          : uia && !hasSession
+          ? 'uiaWithoutSmtc'
+          : hasSession
+          ? 'available'
+          : _source.isEmpty
+          ? 'noSession'
+          : 'selectedSessionMissing',
+      'hasTrack':
+          snapshot != null && PlatformTrack.fromSnapshot(snapshot) != null,
+      'hasArtwork': _cover.isNotEmpty && snapshot?.coverVersion == _cover,
+      'timeline': switch ((positionKnown, durationKnown)) {
+        (true, true) => 'positionAndDuration',
+        (true, false) => 'positionOnly',
+        (false, true) => 'durationOnly',
+        (false, false) => 'unavailable',
+      },
+      'controls': {
+        for (final entry in {
+          'playPause': MediaCapability.playPause,
+          'previous': MediaCapability.previous,
+          'next': MediaCapability.next,
+        }.entries)
+          entry.key: MediaCapability.supports(
+            snapshot?.capabilities ?? 0,
+            entry.value,
+          ),
+      },
+      if (_lastCommand != null)
+        'lastCommand': {
+          'wireValue': _lastCommand,
+          'result': _lastCommandResult,
+        },
+      'spectrum': !_spectrumEnabled
+          ? 'disabled'
+          : !hasPlayback
+          ? 'noSession'
+          : !_playing
+          ? 'paused'
+          : audioStatus.isEmpty
+          ? 'awaitingAudio'
+          : audioStatus,
+      'audioFrames': audioFrames,
+      'audioProcessId': audioProcessId,
+    };
+  }
+
   @override
-  Future<bool> connect() {
+  Future<bool> connect({String? initialSource}) {
     if (_closed) return Future.value(false);
+    if (initialSource != null && _timer == null && _generation == 0) {
+      _source = _committedSource = initialSource;
+    }
     _timer ??= Timer.periodic(interval, (_) => unawaited(_refresh()));
     return _refresh();
   }
 
-  Future<bool> _refresh() {
+  Future<bool> _refresh({bool forSelection = false}) {
     if (_closed) return Future.value(false);
+    if (_selectionGeneration != null && !forSelection) {
+      _refreshQueued = true;
+      return Future.value(false);
+    }
     if (_commandsPending > 0) return Future.value(isConnected);
     return _reading ??= _read().whenComplete(() {
       _reading = null;
-      if (_refreshQueued && !_closed && _commandsPending == 0) {
-        _refreshQueued = false;
-        scheduleMicrotask(() => unawaited(_refresh()));
-      }
+      _drainRefresh();
     });
+  }
+
+  void _drainRefresh() {
+    if (_refreshQueued &&
+        !_closed &&
+        _selectionGeneration == null &&
+        _commandsPending == 0) {
+      _refreshQueued = false;
+      scheduleMicrotask(() => unawaited(_refresh()));
+    }
   }
 
   Future<bool> _read() async {
@@ -95,26 +184,33 @@ final class NativeMediaBackend implements MediaCaptureBackend {
         jsonDecode(response['sources'] as String),
       );
       final artwork = response['artwork'];
-      
-      if (snapshot.coverVersion.isNotEmpty &&
-          snapshot.coverVersion != _cover &&
-          (artwork is! Uint8List || artwork.isEmpty)) {
-        throw const FormatException('Native artwork missing for a new version');
-      }
+      final hasNewArtwork =
+          artwork is Uint8List &&
+          artwork.isNotEmpty &&
+          snapshot.coverVersion.isNotEmpty &&
+          snapshot.coverVersion != _cover;
       _sources = sources;
       _connected = true;
+      if (_diagnosticSnapshot?.sourceAppId != snapshot.sourceAppId) {
+        _audioGeneration++;
+        _clearAudioSample();
+      }
+      _diagnosticSnapshot = snapshot;
+      _bridgeError = null;
       if (_playing != snapshot.isPlaying) {
         _playing = snapshot.isPlaying;
         if (_spectrumEnabled) _startSpectrumTimer();
       }
       _events.add(MediaSnapshotEvent(snapshot));
       if (_closed || generation != _generation) return false;
-      if (artwork is Uint8List &&
-          artwork.isNotEmpty &&
-          snapshot.coverVersion != _cover) {
+      
+      
+      if (hasNewArtwork) {
+        _cover = snapshot.coverVersion;
         _events.add(MediaArtworkEvent(snapshot.coverVersion, artwork));
+      } else if (snapshot.coverVersion.isEmpty) {
+        _cover = '';
       }
-      _cover = snapshot.coverVersion;
       if (!_closed && generation == _generation) {
         _events.add(const MediaHeartbeatEvent());
       }
@@ -123,6 +219,12 @@ final class NativeMediaBackend implements MediaCaptureBackend {
       if (!_closed && generation == _generation) {
         final wasConnected = _connected;
         _connected = false;
+        _diagnosticSnapshot = null;
+        _bridgeError = switch (error) {
+          TimeoutException() => 'bridgeTimeout',
+          FormatException() => 'invalidSnapshot',
+          _ => 'bridgeUnavailable',
+        };
         if (wasConnected ||
             error is MissingPluginException ||
             error is PlatformException) {
@@ -145,29 +247,41 @@ final class NativeMediaBackend implements MediaCaptureBackend {
   Future<void> selectSource(String id) async {
     if (_closed) throw StateError('Native backend closed');
     if (id.length > 512) throw ArgumentError('Source ID too long');
+    if (isConnected && _selectionGeneration == null && id == _source) return;
     final generation = ++_generation;
+    _selectionGeneration = generation;
     _audioGeneration++;
-    audioFrames = 0;
-    audioProcessId = 0;
-    audioLookupOpenedProcesses = 0;
-    audioStatus = '';
+    _clearAudioSample();
     _source = id;
     _cover = '';
     _connected = false;
-    if (_spectrumEnabled) await _demand(false);
-    if (_closed || generation != _generation) {
-      throw StateError('Source selection superseded');
-    }
-    
-    await _reading;
-    if (_closed || generation != _generation) {
-      throw StateError('Source selection superseded');
-    }
-    if (!await _refresh()) {
-      throw StateError('Native source selection unavailable');
-    }
-    if (_spectrumEnabled && !_closed && generation == _generation) {
-      await _demand(true);
+    _diagnosticSnapshot = null;
+    _bridgeError = null;
+    _lastCommand = null;
+    _lastCommandResult = null;
+    try {
+      
+      
+      await _reading;
+      await _commandTail;
+      if (_closed || generation != _generation) {
+        throw StateError('Source selection superseded');
+      }
+      final connected = await _refresh(forSelection: true);
+      if (_closed || generation != _generation) {
+        throw StateError('Source selection superseded');
+      }
+      if (!connected) {
+        _source = _committedSource;
+        _refreshQueued = true;
+        throw StateError('Native source selection unavailable');
+      }
+      _committedSource = id;
+    } finally {
+      if (_selectionGeneration == generation) {
+        _selectionGeneration = null;
+        _drainRefresh();
+      }
     }
   }
 
@@ -176,15 +290,20 @@ final class NativeMediaBackend implements MediaCaptureBackend {
     if (_closed || _spectrumEnabled == enabled) return;
     _spectrumEnabled = enabled;
     _audioGeneration++;
-    audioFrames = 0;
-    audioProcessId = 0;
-    audioLookupOpenedProcesses = 0;
+    _clearAudioSample();
     _spectrumTimer?.cancel();
     unawaited(_demand(enabled));
     if (enabled) {
       _startSpectrumTimer();
       unawaited(_pollSpectrum());
     }
+  }
+
+  void _clearAudioSample() {
+    audioFrames = 0;
+    audioProcessId = 0;
+    audioLookupOpenedProcesses = 0;
+    audioStatus = '';
   }
 
   void _startSpectrumTimer() {
@@ -197,17 +316,26 @@ final class NativeMediaBackend implements MediaCaptureBackend {
 
   Future<void> _demand(bool enabled) async {
     if (_closed) return;
+    final generation = _audioGeneration;
     try {
       await channel
           .invokeMethod<void>('spectrumDemand', {'enabled': enabled})
           .timeout(const Duration(seconds: 2));
     } catch (_) {
-      audioStatus = 'audio_channel_unavailable';
+      if (!_closed && generation == _audioGeneration) {
+        audioStatus = 'audio_channel_unavailable';
+      }
     }
   }
 
   Future<void> _pollSpectrum() async {
-    if (_closed || !_spectrumEnabled || _spectrumReading) return;
+    if (_closed ||
+        !_spectrumEnabled ||
+        !isConnected ||
+        _selectionGeneration != null ||
+        _spectrumReading) {
+      return;
+    }
     _spectrumReading = true;
     final generation = _audioGeneration;
     try {
@@ -228,7 +356,9 @@ final class NativeMediaBackend implements MediaCaptureBackend {
       final packet = result['packet'];
       if (packet is Uint8List) _events.add(MediaSpectrumEvent(packet));
     } catch (_) {
-      if (!_closed) audioStatus = 'audio_channel_unavailable';
+      if (!_closed && generation == _audioGeneration) {
+        audioStatus = 'audio_channel_unavailable';
+      }
     } finally {
       _spectrumReading = false;
     }
@@ -243,7 +373,9 @@ final class NativeMediaBackend implements MediaCaptureBackend {
 
   Future<bool> setPlaying(bool playing) => _dispatch(playing ? 4 : 5);
   Future<bool> _dispatch(int command) {
-    if (_closed || _commandsPending >= 4) return Future.value(false);
+    if (_closed || _selectionGeneration != null || _commandsPending >= 4) {
+      return Future.value(false);
+    }
     final result = Completer<bool>();
     final generation = _generation;
     _commandsPending++;
@@ -260,10 +392,18 @@ final class NativeMediaBackend implements MediaCaptureBackend {
               'command': command,
             })
             .timeout(const Duration(seconds: 10));
+        if (!_closed && generation == _generation) {
+          _lastCommand = command;
+          _lastCommandResult = accepted == true ? 'accepted' : 'notAccepted';
+        }
         result.complete(
           !_closed && generation == _generation && accepted == true,
         );
       } catch (_) {
+        if (!_closed && generation == _generation) {
+          _lastCommand = command;
+          _lastCommandResult = 'channelUnavailable';
+        }
         result.complete(false);
       } finally {
         _commandsPending--;
@@ -282,6 +422,7 @@ final class NativeMediaBackend implements MediaCaptureBackend {
     _closed = true;
     _generation++;
     _connected = false;
+    _diagnosticSnapshot = null;
     _timer?.cancel();
     _spectrumTimer?.cancel();
     channel.setMethodCallHandler(null);

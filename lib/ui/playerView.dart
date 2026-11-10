@@ -20,6 +20,7 @@ import '../core/mediaProvider.dart';
 import '../core/mediaSessionLifecycle.dart';
 import '../core/demandPollingLoop.dart';
 import '../core/mediaCaptureBackend.dart';
+import '../core/nativeMediaBackend.dart';
 import '../core/musicFetcherRuntime.dart';
 import '../core/runtimeCapabilities.dart';
 import '../core/spectrumPacket.dart';

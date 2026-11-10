@@ -13,7 +13,7 @@ class SettingsScrollViewport extends StatefulWidget {
   const SettingsScrollViewport({
     super.key,
     required this.child,
-    this.radius = 24,
+    this.radius = SmoothSurfaceCorners.settingsViewportRadius,
     this.fadeExtent = 28,
   });
 

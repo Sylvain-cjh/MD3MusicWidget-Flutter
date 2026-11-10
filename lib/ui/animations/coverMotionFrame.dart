@@ -190,7 +190,7 @@ class CoverFrameView extends StatelessWidget {
         style == CoverTransitionStyle.filmHorizontal;
     return IgnorePointer(
       ignoring: exiting,
-      child: ClipRRect(
+      child: ClipRSuperellipse(
         borderRadius: borderRadius,
         clipBehavior: film && frame.offset != Offset.zero
             ? Clip.antiAlias

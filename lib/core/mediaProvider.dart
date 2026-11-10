@@ -1,5 +1,13 @@
 import 'dart:typed_data';
 
+enum MediaCaptureRoute {
+  smtc,
+  neteaseUia,
+  neteaseUiaTimeline;
+
+  bool get usesUiAutomation => this != smtc;
+}
+
 abstract final class MediaCapability {
   static const int metadata = 1 << 0;
   static const int artwork = 1 << 1;
@@ -48,6 +56,9 @@ final class MediaSnapshot {
   final String legacyCoverBase64;
   final double positionMs;
   final double durationMs;
+  final bool? timelinePositionKnown;
+  final bool? hasMediaSession;
+  final MediaCaptureRoute captureRoute;
   final int timelineUpdatedAtMs;
   final int fetcherUpdatedAtMs;
   final int capabilities;
@@ -65,6 +76,9 @@ final class MediaSnapshot {
     required this.legacyCoverBase64,
     required this.positionMs,
     required this.durationMs,
+    this.timelinePositionKnown,
+    this.hasMediaSession,
+    this.captureRoute = MediaCaptureRoute.smtc,
     required this.timelineUpdatedAtMs,
     required this.fetcherUpdatedAtMs,
     required this.capabilities,
@@ -83,6 +97,19 @@ final class MediaSnapshot {
     legacyCoverBase64: data['coverBase64']?.toString() ?? '',
     positionMs: (data['positionMs'] as num?)?.toDouble() ?? 0.0,
     durationMs: (data['durationMs'] as num?)?.toDouble() ?? 0.0,
+    timelinePositionKnown: switch (data['timelinePositionKnown']) {
+      final bool value => value,
+      _ => null,
+    },
+    hasMediaSession: switch (data['hasMediaSession']) {
+      final bool value => value,
+      _ => null,
+    },
+    captureRoute: switch (data['captureRoute']) {
+      'neteaseUia' => MediaCaptureRoute.neteaseUia,
+      'neteaseUiaTimeline' => MediaCaptureRoute.neteaseUiaTimeline,
+      _ => MediaCaptureRoute.smtc,
+    },
     timelineUpdatedAtMs: (data['timelineUpdatedAtMs'] as num?)?.toInt() ?? 0,
     fetcherUpdatedAtMs: (data['fetcherUpdatedAtMs'] as num?)?.toInt() ?? 0,
     capabilities:
@@ -108,6 +135,9 @@ final class MediaSnapshot {
     legacyCoverBase64: legacyCoverBase64,
     positionMs: positionMs,
     durationMs: durationMs ?? this.durationMs,
+    timelinePositionKnown: timelinePositionKnown,
+    hasMediaSession: hasMediaSession,
+    captureRoute: captureRoute,
     timelineUpdatedAtMs: timelineUpdatedAtMs,
     fetcherUpdatedAtMs: fetcherUpdatedAtMs,
     capabilities: capabilities,

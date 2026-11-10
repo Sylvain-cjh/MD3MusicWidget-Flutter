@@ -8,12 +8,12 @@
 
 <p>封面、歌词与真实音频频谱，一张 Material 3 风格的 Windows 音乐挂件。</p>
 
-[![版本 1.2.1](https://img.shields.io/badge/version-1.2.1-74549D?style=flat-square)](CHANGELOG.md)
+[![版本 1.2.2](https://img.shields.io/badge/version-1.2.2-74549D?style=flat-square)](CHANGELOG.md)
 [![Windows x64](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-507765?style=flat-square)](#开始使用)
 [![Flutter](https://img.shields.io/badge/UI-Flutter-74549D?style=flat-square&logo=flutter&logoColor=white)](#工作原理)
 [![内置音乐采集](https://img.shields.io/badge/capture-SMTC%20%2B%20WASAPI-507765?style=flat-square)](docs/native_capture.md)
 
-[**下载 1.2.1**](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/tag/1.2.1) · [怎么选版本](#下载与版本选择) · [界面预览](#预览) · [本版亮点](#121-版亮点) · [开始使用](#开始使用)
+[**GitHub 发行页**](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases) · [怎么选版本](#下载与版本选择) · [界面预览](#预览) · [本版亮点](#122-版亮点) · [开始使用](#开始使用)
 
 </div>
 
@@ -46,24 +46,23 @@
 
 **第一次用，建议先选无模型版。** 它保留封面、歌词、频谱、性能监视器和普通 3D 悬浮效果。只有想让封面里的主体和背景产生不同深度的视差时，才需要分层模型。
 
-| 1.2.1 套件 | 怎么选 | 安装版（EXE） | 免安装版（ZIP） |
+| 1.2.2 套件 | 怎么选 | 安装版（EXE） | 免安装版（ZIP） |
 | --- | --- | --- | --- |
-| **无分层模型版** · `Without-Layer-Models` | 先用挂件，需要时再补装模型 | [下载 · 约 25 MB](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.1/MD3MusicWidget-Without-Layer-Models-Setup-1.2.1.exe) | [下载 · 约 29 MB](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.1/MD3MusicWidget-Without-Layer-Models-Portable-1.2.1.zip) |
-| **有分层模型版** · `With-Layer-Models` | 一次装齐模型和 GPU 依赖；分层需要兼容核显 | [下载 · 约 219 MB](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.1/MD3MusicWidget-With-Layer-Models-Setup-1.2.1.exe) | [下载 · 约 231 MB](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/download/1.2.1/MD3MusicWidget-With-Layer-Models-Portable-1.2.1.zip) |
-| **独立模型** · `cover-layers` | 只给兼容的 **1.2.1 x64** 主程序补装，不可单独运行 | 约 196 MB | 约 202 MB |
+| **无分层模型版** · `Without-Layer-Models` | 先用挂件，需要时再补装模型 | `MD3MusicWidget-Without-Layer-Models-Setup-1.2.2.exe` | `MD3MusicWidget-Without-Layer-Models-Portable-1.2.2.zip` |
+| **有分层模型版** · `With-Layer-Models` | 一次装齐正式模型和 GPU 依赖；分层需要兼容核显 | `MD3MusicWidget-With-Layer-Models-Setup-1.2.2.exe` | `MD3MusicWidget-With-Layer-Models-Portable-1.2.2.zip` |
 
-应用下载链接指向 [1.2.1 发行页](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases/tag/1.2.1) 的实际附件。独立模型的大小取自本地发行套件；[cover-layers 仓库](https://github.com/Sylvain-cjh/cover-layers) 可查看后端源码，目前未列出 1.2.1 独立模型的下载附件。
+本地发行目录按套件分文件夹。线上已发布的附件以 [GitHub 发行页](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases) 为准；[cover-layers 仓库](https://github.com/Sylvain-cjh/cover-layers) 可查看后端源码。
 
-已经在用无模型版？不必重装主程序，按 [cover-layers 补装说明](docs/layer_models.md) 选择匹配版本即可。
+1.2.2 的有模型版沿用 1.2.1 正式模型；模型没有变化，本次不单独发行 cover-layers。需要模型请选有模型版，详见 [分层模型说明](docs/layer_models.md)。
 
 > [!IMPORTANT]
 > 主程序要求 **Windows 10 2004（Build 19041）或更新版本，包括 Windows 11，x64**。播放器需要开启系统媒体控制，挂件才能读取正在播放的信息。指定进程频谱和可选分层另有系统或硬件要求。
 
-## 1.2.1 版亮点
+## 1.2.2 版亮点
 
-- **切歌先换封面，背景准备好再渐变。** 同一封面的准备结果可以复用；连续切歌时跳过已经过时、尚未开始的流光与分层任务。首次遇到的封面或首次分层合成仍可能出现长帧。
-- **英语歌词按字母消散。** 来源只提供整词时间时，在原词时段内依次消散，最后一个字母仍对齐原词结束点。普通扫字和整句 LRC 不受影响。
-- **分层模型沿用 1.2.0 的正式权重。** 这次改进的是封面准备与切歌衔接，不把它说成模型识别精度升级。
+- **网易云有一条备用采集路径。** 手动指定网易云桌面程序后，系统媒体会话缺失或进度不完整时，可以按需尝试只读 UI Automation；切入备用路径会短暂显示提示。[网易云支持与限制](docs/netease_support.md)
+- **封面主题更有辨识度。** 动态配色统一使用 Celebi 聚类与 HCT 评分，设置新增「表现力（Expressive）」。[动态配色说明](docs/monet-artwork-colors.md)
+- **圆角按留白重新设计。** 封面、歌词、频谱和设置各有适合自己的圆角比例，外窗和内层更协调。现有背景、播放按钮形状和正式分层模型保留。
 
 [查看本版完整更新记录](CHANGELOG.md)
 

@@ -63,6 +63,7 @@ final class LyricsCoordinator extends ChangeNotifier {
   );
   String? _trackIdentity;
   String? _displayTrackIdentity;
+  String? _stateTrackIdentity;
   int _providerRevision = -1;
   String? _selectedProviderId;
   int _generation = 0;
@@ -172,6 +173,10 @@ final class LyricsCoordinator extends ChangeNotifier {
       _resetReconnect();
     }
     final generation = ++_generation;
+    final retainReady =
+        sameContext &&
+        _stateTrackIdentity == displayIdentity &&
+        _state.status == LyricsStatus.ready;
     if (!sameContext) _positionMs = 0;
     final provider = track == null
         ? null
@@ -209,21 +214,23 @@ final class LyricsCoordinator extends ChangeNotifier {
         }
         
         
-        _setState(
-          LyricsState(
-            status: LyricsStatus.loading,
-            providerId: cooldownRecovery
-                ? (_reconnectProviderId ?? provider.id)
-                : provider.id,
-            maximumAttempts: attemptLimit,
-            reconnectUntil: _reconnectUntil,
-            reconnectAttempt: _reconnectAttempts,
-            maximumReconnectAttempts: reconnectPolicy.maximumAttempts,
-          ),
-        );
+        if (!retainReady) {
+          _setState(
+            LyricsState(
+              status: LyricsStatus.loading,
+              providerId: cooldownRecovery
+                  ? (_reconnectProviderId ?? provider.id)
+                  : provider.id,
+              maximumAttempts: attemptLimit,
+              reconnectUntil: _reconnectUntil,
+              reconnectAttempt: _reconnectAttempts,
+              maximumReconnectAttempts: reconnectPolicy.maximumAttempts,
+            ),
+          );
+        }
         for (var attempt = 1; attempt <= attemptLimit; attempt++) {
           if (_disposed || generation != _generation) return;
-          if (attempt > 1) {
+          if (attempt > 1 && !retainReady) {
             _setState(
               LyricsState(
                 status: LyricsStatus.loading,
@@ -273,6 +280,7 @@ final class LyricsCoordinator extends ChangeNotifier {
       if (_disposed || generation != _generation) return;
       _resetReconnect();
       if (document == null || document.isEmpty) {
+        if (retainReady) return;
         _setState(
           LyricsState(
             status: LyricsStatus.unavailable,
@@ -311,6 +319,10 @@ final class LyricsCoordinator extends ChangeNotifier {
       }
     } catch (error) {
       if (_disposed || generation != _generation) return;
+      if (retainReady) {
+        _resetReconnect();
+        return;
+      }
       final issue = switch (error) {
         LyricsRateLimitException() => LyricsIssue.rateLimited,
         HttpException(message: final message)
@@ -500,6 +512,7 @@ final class LyricsCoordinator extends ChangeNotifier {
     if (!positionMs.isFinite) return;
     _positionMs = positionMs < 0 ? 0 : positionMs;
     if (_cacheLookupGeneration == _generation) return;
+    if (_stateTrackIdentity != _displayTrackIdentity) return;
     final document = _state.document;
     if (document == null) return;
     final index = document.lineIndexAt(_positionMs);
@@ -517,6 +530,7 @@ final class LyricsCoordinator extends ChangeNotifier {
   void _setState(LyricsState next) {
     if (_disposed) return;
     _state = next;
+    _stateTrackIdentity = _displayTrackIdentity;
     notifyListeners();
   }
 

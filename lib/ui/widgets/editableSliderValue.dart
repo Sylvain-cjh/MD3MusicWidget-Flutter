@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'smoothRoundedClip.dart';
 
 
 class EditableSliderValue extends StatefulWidget {
@@ -193,14 +194,14 @@ class _EditableSliderValueState extends State<EditableSliderValue> {
                             ? null
                             : ' ${widget.suffix}',
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: SmoothSurfaceCorners.small,
                         ),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: SmoothSurfaceCorners.small,
                           borderSide: BorderSide(color: scheme.outlineVariant),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: SmoothSurfaceCorners.small,
                           borderSide: BorderSide(
                             color: _error == null
                                 ? scheme.primary
@@ -242,8 +243,10 @@ class _EditableSliderValueState extends State<EditableSliderValue> {
                       behavior: HitTestBehavior.opaque,
                       onDoubleTap: _begin,
                       child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
+                        decoration: ShapeDecoration(
+                          shape: SmoothSurfaceCorners.shape(
+                            SmoothSurfaceCorners.small,
+                          ),
                           color: _focused
                               ? scheme.primary.withValues(alpha: .10)
                               : null,

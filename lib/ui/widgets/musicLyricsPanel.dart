@@ -235,7 +235,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
             actual.status == LyricsStatus.unavailable);
     if (!hiding) _retainedState = actual;
     final state = hiding ? (_retainedState ?? actual) : actual;
-    final radius = BorderRadius.circular(24);
+    const radius = SmoothSurfaceCorners.mediaStrip;
     final displayText = _displayText(state);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return SmoothRoundedClip(
@@ -243,7 +243,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
       child: BackdropFilter(
         filter: _glassBlur,
         child: DecoratedBox(
-          decoration: BoxDecoration(
+          decoration: ShapeDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -253,10 +253,12 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                 scheme.surface.withValues(alpha: 0.46),
               ],
             ),
-            borderRadius: radius,
-            border: Border.all(
-              width: RoundedRasterScale.hairline(context),
-              color: scheme.outlineVariant.withValues(alpha: 0.42),
+            shape: SmoothSurfaceCorners.shape(
+              radius,
+              side: BorderSide(
+                width: RoundedRasterScale.hairline(context),
+                color: scheme.outlineVariant.withValues(alpha: 0.28),
+              ),
             ),
           ),
           child: Padding(

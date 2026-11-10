@@ -317,6 +317,7 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
     uint64_t deviceRevision = devices->load();
     try {
       bool processMode = false;
+      HRESULT processActivation = HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
       WAVEFORMATEX processFormat{};
       processFormat.wFormatTag = WAVE_FORMAT_PCM;
       processFormat.nChannels = 2;
@@ -339,6 +340,7 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
         HRESULT result = ActivateAudioInterfaceAsync(
             VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, __uuidof(IAudioClient),
             &activation->variant, activation.Get(), &operation);
+        processActivation = result;
         if (SUCCEEDED(result)) {
           const auto deadline = GetTickCount64() + 2500;
           while (!state->stop &&
@@ -347,10 +349,14 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
                  GetTickCount64() < deadline) {
           }
           if (WaitForSingleObject(activation->ready.value, 0) ==
-                  WAIT_OBJECT_0 &&
-              SUCCEEDED(activation->status)) {
-            client = activation->client;
-            processMode = true;
+              WAIT_OBJECT_0) {
+            processActivation = activation->status;
+            if (SUCCEEDED(processActivation)) {
+              client = activation->client;
+              processMode = true;
+            }
+          } else {
+            processActivation = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
           }
         }
       }
@@ -358,7 +364,7 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
         break;
       if (strict && !processMode)
         throw winrt::hresult_error(
-            HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED),
+            processActivation,
             L"Strict source process capture unavailable");
       Format mix;
       WAVEFORMATEX *format = &processFormat;
@@ -412,8 +418,14 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
           if (state->revision != revision)
             break;
         }
-        if (devices->load() != deviceRevision)
+        if (devices->load() != deviceRevision) {
+          std::lock_guard lock(state->mutex);
+          if (state->revision == revision) {
+            state->reading = {};
+            state->reading.status = "audio_device_recovering";
+          }
           break;
+        }
         if (target.value &&
             WaitForSingleObject(target.value, 0) == WAIT_OBJECT_0)
           break;
@@ -485,9 +497,11 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
         std::lock_guard lock(state->mutex);
         if (state->revision == revision) {
           state->reading = {};
-          state->reading.status =
-              (strict ? "strict_capture_unavailable:" : "audio_retry:") +
-              std::to_string(error.code().value);
+          state->reading.status = strict && !pid
+                                      ? "strict_process_not_matched"
+                                      : (strict ? "strict_capture_unavailable:"
+                                                : "audio_retry:") +
+                                            std::to_string(error.code().value);
         }
       }
       const int waits = std::min(1500, 25 * (1 << std::min(failures++, 6)));

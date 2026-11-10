@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'lawniconsBrandGeometry.dart';
+import 'smoothRoundedClip.dart';
 
 
 
@@ -18,9 +19,9 @@ class ProviderBrandMark extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox.square(
     dimension: size,
     child: DecoratedBox(
-      decoration: BoxDecoration(
+      decoration: ShapeDecoration(
         color: scheme.primaryContainer,
-        borderRadius: BorderRadius.circular(size * .34),
+        shape: SmoothSurfaceCorners.shape(BorderRadius.circular(size * .34)),
       ),
       child: Padding(
         padding: EdgeInsets.all(size * .06),
@@ -28,7 +29,7 @@ class ProviderBrandMark extends StatelessWidget {
           'qqMusic' || 'neteaseCloud' => CustomPaint(
             painter: ProviderBrandPainter(source, scheme.onPrimaryContainer),
           ),
-          'lrclib' => ClipRRect(
+          'lrclib' => ClipRSuperellipse(
             borderRadius: BorderRadius.circular(size * .2),
             child: Image.asset('assets/brand/lrclib.png'),
           ),

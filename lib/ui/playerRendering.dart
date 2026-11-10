@@ -456,11 +456,12 @@ extension _PlayerRendering on _PlayerViewState {
           background: backdrop,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(
-              transformOnly ? 28.0 : 28.0 * animatedFrameScale,
+              SmoothSurfaceCorners.windowRadius *
+                  (transformOnly ? 1.0 : animatedFrameScale),
             ),
             border: Border.all(
               color: AppState.currentScheme.outlineVariant.withValues(
-                alpha: 0.4,
+                alpha: 0.28,
               ),
               width: RoundedRasterScale.hairline(
                 context,

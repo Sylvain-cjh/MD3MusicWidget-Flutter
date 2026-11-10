@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'smoothRoundedClip.dart';
+
 class Md3AnchoredSelect<T> extends StatefulWidget {
   final T value;
   final List<DropdownMenuEntry<T>> entries;
@@ -96,7 +98,7 @@ class _Md3AnchoredSelectState<T> extends State<Md3AnchoredSelect<T>> {
         color: widget.enabled
             ? scheme.surfaceContainerHighest
             : scheme.onSurface.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
+        shape: SmoothSurfaceCorners.shape(SmoothSurfaceCorners.control),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: widget.enabled ? _openMenu : null,
@@ -345,7 +347,9 @@ class _Md3SelectMenuState<T> extends State<_Md3SelectMenu<T>> {
       elevation: 2 * widget.visualScale,
       shadowColor: scheme.shadow.withValues(alpha: 0.18),
       surfaceTintColor: Colors.transparent,
-      borderRadius: BorderRadius.circular(12 * widget.visualScale),
+      shape: SmoothSurfaceCorners.shape(
+        SmoothSurfaceCorners.popover * widget.visualScale,
+      ),
       clipBehavior: Clip.antiAliasWithSaveLayer,
       child: SingleChildScrollView(
         controller: _scrollController,
@@ -358,7 +362,8 @@ class _Md3SelectMenuState<T> extends State<_Md3SelectMenu<T>> {
               final bool selected = index == widget.selectedIndex;
               final Widget row = Padding(
                 padding: EdgeInsets.symmetric(
-                  horizontal: 4 * widget.visualScale,
+                  horizontal:
+                      SmoothSurfaceCorners.popoverRowInset * widget.visualScale,
                 ),
                 child: MenuItemButton(
                   autofocus: selected,
@@ -392,10 +397,8 @@ class _Md3SelectMenuState<T> extends State<_Md3SelectMenu<T>> {
                       ),
                     ),
                     shape: WidgetStatePropertyAll(
-                      RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(
-                          8 * widget.visualScale,
-                        ),
+                      SmoothSurfaceCorners.shape(
+                        SmoothSurfaceCorners.popoverItem * widget.visualScale,
                       ),
                     ),
                     backgroundColor: WidgetStateProperty.resolveWith((states) {

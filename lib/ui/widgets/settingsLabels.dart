@@ -38,6 +38,7 @@ final class SettingsLabels {
   static const themeSoft = '柔和';
   static const themeVibrant = '艳丽';
   static const themeFidelity = '真实';
+  static const themeExpressive = '表现力';
   static const darkMode = '深色模式';
   static const settingsNavigationShape = '设置导航形状';
   static const oled = 'OLED 模式';

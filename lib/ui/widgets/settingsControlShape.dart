@@ -6,19 +6,19 @@ final class SettingsControlShape {
   static const referenceHeight = 50.0;
   static ShapeBorder borderFor(MD3Shape shape) => switch (shape) {
     MD3Shape.stadium || MD3Shape.circle => const StadiumBorder(),
-    MD3Shape.roundedExtraSmall => const RoundedRectangleBorder(
+    MD3Shape.roundedExtraSmall => const RoundedSuperellipseBorder(
       borderRadius: BorderRadius.all(Radius.circular(4)),
     ),
-    MD3Shape.roundedSmall => const RoundedRectangleBorder(
+    MD3Shape.roundedSmall => const RoundedSuperellipseBorder(
       borderRadius: BorderRadius.all(Radius.circular(8)),
     ),
-    MD3Shape.roundedMedium => const RoundedRectangleBorder(
+    MD3Shape.roundedMedium => const RoundedSuperellipseBorder(
       borderRadius: BorderRadius.all(Radius.circular(12)),
     ),
-    MD3Shape.roundedLarge => const RoundedRectangleBorder(
+    MD3Shape.roundedLarge => const RoundedSuperellipseBorder(
       borderRadius: BorderRadius.all(Radius.circular(20)),
     ),
-    MD3Shape.roundedExtraLarge => const RoundedRectangleBorder(
+    MD3Shape.roundedExtraLarge => const RoundedSuperellipseBorder(
       borderRadius: BorderRadius.all(Radius.circular(28)),
     ),
   };

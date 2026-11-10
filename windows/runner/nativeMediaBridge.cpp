@@ -1,9 +1,12 @@
 #include "nativeMediaBridge.h"
 #include "nativeArtworkPolicy.h"
 #include "nativeAudioService.h"
+#include "nativeNeteaseUia.h"
+#include "nativeNeteaseUiaPolicy.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
@@ -43,10 +46,19 @@ struct State {
       session_binds{0}, notifications{0};
   std::shared_ptr<NativeAudioService> audio =
       std::make_shared<NativeAudioService>();
+  NativeNeteaseUia netease_uia;
   std::string selected, known_cover;
   std::unique_ptr<Payload> completed;
   HWND window = nullptr;
 };
+bool MatchesSource(const std::wstring &id, const std::wstring &selected) {
+  if (_wcsicmp(id.c_str(), selected.c_str()) == 0) return true;
+  const auto key = NativeIdentityKey(selected);
+  
+  
+  return (key == L"cloudmusic.exe" || key == L"cloudmusic") &&
+         netease_uia::IsExplicitNetEaseSource(id);
+}
 void Notify(const std::weak_ptr<State> &weak, bool metadata) {
   if (auto state = weak.lock(); state && !state->stop && state->active) {
     ++state->notifications;
@@ -142,9 +154,9 @@ Choose(const GlobalSystemMediaTransportControlsSessionManager &manager,
   if (source.empty())
     return manager.GetCurrentSession();
   GlobalSystemMediaTransportControlsSession chosen{nullptr};
+  const auto selected = to_hstring(source);
   for (const auto &s : manager.GetSessions())
-    if (_wcsicmp(s.SourceAppUserModelId().c_str(),
-                 to_hstring(source).c_str()) == 0) {
+    if (MatchesSource(s.SourceAppUserModelId().c_str(), selected.c_str())) {
       if (!chosen)
         chosen = s;
       try {
@@ -194,8 +206,10 @@ Snapshot(const std::shared_ptr<State> &state,
     }
   };
   std::map<std::wstring, bool, IdLess> unique;
+  const std::wstring selectedId = to_hstring(selected).c_str();
+  const bool neteaseSelected = netease_uia::IsExplicitNetEaseSource(selectedId);
   GlobalSystemMediaTransportControlsSession chosen{nullptr};
-  for (const auto &session : manager.GetSessions()) {
+  if (manager) for (const auto &session : manager.GetSessions()) {
     const auto id = session.SourceAppUserModelId();
     bool playing = false;
     try {
@@ -208,7 +222,7 @@ Snapshot(const std::shared_ptr<State> &state,
     if (!key.empty())
       unique[key] = unique[key] || playing;
     if (!selected.empty() &&
-        _wcsicmp(id.c_str(), to_hstring(selected).c_str()) == 0 &&
+        MatchesSource(id.c_str(), selectedId) &&
         (!chosen || playing))
       chosen = session;
   }
@@ -218,7 +232,7 @@ Snapshot(const std::shared_ptr<State> &state,
     entry.SetNamedValue(L"isPlaying", JsonValue::CreateBooleanValue(playing));
     entries.Append(entry);
   }
-  if (selected.empty())
+  if (manager && selected.empty())
     chosen = manager.GetCurrentSession();
   cache.Observe(chosen, state);
   
@@ -237,6 +251,10 @@ Snapshot(const std::shared_ptr<State> &state,
                      JsonValue::CreateNumberValue(static_cast<double>(now)));
   info.SetNamedValue(L"capabilities", JsonValue::CreateNumberValue(7 | 128));
   info.SetNamedValue(L"sourceAppId", JsonValue::CreateStringValue(L""));
+  info.SetNamedValue(L"hasMediaSession",
+                     JsonValue::CreateBooleanValue(static_cast<bool>(chosen)));
+  info.SetNamedValue(L"timelinePositionKnown",
+                     JsonValue::CreateBooleanValue(false));
   info.SetNamedValue(L"title", JsonValue::CreateStringValue(L"暂无音乐播放"));
   info.SetNamedValue(L"artist",
                      JsonValue::CreateStringValue(L"请打开播放软件"));
@@ -246,6 +264,10 @@ Snapshot(const std::shared_ptr<State> &state,
   info.SetNamedValue(L"autoRepeatMode", JsonValue::CreateStringValue(L""));
   info.SetNamedValue(L"trackVersion",
                      JsonValue::CreateStringValue(L"native-empty"));
+  bool hasTrack = false, positionAvailable = false;
+  bool audioPlaying = false;
+  double smtcDuration = 0, smtcPosition = 0;
+  std::wstring smtcTitle, smtcArtist, audioSource;
   if (chosen) {
     const auto revision = state->metadata_revision.load();
     const bool changed = !cache.props || cache.revision != revision;
@@ -265,18 +287,30 @@ Snapshot(const std::shared_ptr<State> &state,
         std::max(0.0, std::chrono::duration<double, std::milli>(
                           timeline.EndTime() - timeline.StartTime())
                           .count());
-    auto position =
-        std::max(0.0, std::chrono::duration<double, std::milli>(
-                          timeline.Position() - timeline.StartTime())
-                          .count());
+    const auto rawPosition = std::chrono::duration<double, std::milli>(
+                                 timeline.Position() - timeline.StartTime())
+                                 .count();
+    auto position = std::max(0.0, rawPosition);
+    const bool positionKnown =
+        timeline.LastUpdatedTime().time_since_epoch().count() > 0 &&
+        rawPosition >= 0;
     const auto age = std::chrono::duration<double, std::milli>(
                          winrt::clock::now() - timeline.LastUpdatedTime())
                          .count();
-    if (playing && age >= 0 && age < 86400000)
+    if (positionKnown && playing && age >= 0 && age < 86400000)
       position += age;
     if (duration > 0)
       position = std::min(position, duration);
-    const auto source = chosen.SourceAppUserModelId();
+    const auto source = neteaseSelected ? hstring{selectedId}
+                                        : chosen.SourceAppUserModelId();
+    smtcTitle = props.Title().c_str();
+    smtcArtist = props.Artist().c_str();
+    hasTrack = !netease_uia::TrimText(smtcTitle).empty() &&
+               smtcTitle != L"暂无音乐播放" && smtcTitle != L"未在播放" &&
+               smtcTitle != L"未知歌曲";
+    positionAvailable = positionKnown;
+    smtcDuration = duration;
+    smtcPosition = position;
     const auto identity =
         to_string(source + L"|" + props.Title() + L"|" + props.Artist());
     const auto artwork_policy = DecideNativeArtwork(
@@ -320,8 +354,8 @@ Snapshot(const std::shared_ptr<State> &state,
     const auto &cover = cache.cover;
     if (cover != known_cover)
       result.artwork = cache.bytes;
-    state->audio->Target(std::wstring(source.c_str()), playing,
-                         !selected.empty());
+    audioSource = source.c_str();
+    audioPlaying = playing;
     const auto controls = playback.Controls();
     
     
@@ -371,10 +405,49 @@ Snapshot(const std::shared_ptr<State> &state,
                            identity + "|" + std::to_string(cache.track))));
     info.SetNamedValue(L"durationMs", JsonValue::CreateNumberValue(duration));
     info.SetNamedValue(L"positionMs", JsonValue::CreateNumberValue(position));
+    info.SetNamedValue(L"timelinePositionKnown",
+                       JsonValue::CreateBooleanValue(positionKnown));
     info.SetNamedValue(L"timelineUpdatedAtMs",
                        JsonValue::CreateNumberValue(static_cast<double>(now)));
-  } else
-    state->audio->Target(L"", false, !selected.empty());
+  }
+  const bool tryUia = state->active && neteaseSelected &&
+      (!hasTrack || !positionAvailable || smtcDuration <= 0);
+  const auto uia = state->netease_uia.Read(tryUia ? selectedId : L"");
+  if (tryUia && uia) {
+    const double uiaPosition = uia->positionSeconds * 1000.0;
+    const double uiaDuration = uia->durationSeconds * 1000.0;
+    const auto route = netease_uia::SelectRoute(
+        selectedId, hasTrack, positionAvailable, smtcDuration, smtcPosition,
+        smtcTitle, smtcArtist, uia->title, uia->artist, uiaDuration, uiaPosition);
+    if (route != netease_uia::Route::smtc) {
+      info.SetNamedValue(
+          L"captureRoute", JsonValue::CreateStringValue(
+              hasTrack ? L"neteaseUiaTimeline" : L"neteaseUia"));
+      if (!hasTrack) {
+        info.SetNamedValue(L"sourceAppId", JsonValue::CreateStringValue(hstring{selectedId}));
+        info.SetNamedValue(L"title", JsonValue::CreateStringValue(hstring{uia->title}));
+        info.SetNamedValue(L"artist", JsonValue::CreateStringValue(hstring{uia->artist}));
+        const auto track = selectedId + L"|" + uia->title + L"|" + uia->artist + L"|uia";
+        info.SetNamedValue(L"trackVersion", JsonValue::CreateStringValue(hstring{track}));
+        info.SetNamedValue(L"isPlaying",
+                           JsonValue::CreateBooleanValue(uia->playing == true));
+        info.SetNamedValue(L"capabilities", JsonValue::CreateNumberValue(1 | 4 | 128));
+        info.SetNamedValue(L"coverVersion", JsonValue::CreateStringValue(L""));
+        result.artwork.clear();
+        audioSource = selectedId;
+        audioPlaying = uia->playing == true;
+      }
+      if (!hasTrack || !positionAvailable) {
+        info.SetNamedValue(L"positionMs", JsonValue::CreateNumberValue(uiaPosition));
+        info.SetNamedValue(L"timelinePositionKnown", JsonValue::CreateBooleanValue(true));
+        info.SetNamedValue(L"timelineUpdatedAtMs",
+                           JsonValue::CreateNumberValue(static_cast<double>(uia->updatedAtMs)));
+      }
+      if (!hasTrack || smtcDuration <= 0)
+        info.SetNamedValue(L"durationMs", JsonValue::CreateNumberValue(uiaDuration));
+    }
+  }
+  state->audio->Target(audioSource, audioPlaying, !selected.empty());
   result.info = to_string(info.Stringify());
   return result;
 }
@@ -394,6 +467,7 @@ void Worker(std::shared_ptr<State> state) {
         break;
       if (state->cleanup.exchange(false)) {
         lock.unlock();
+        state->netease_uia.Read(L"");
         cache.Reset();
         manager = nullptr;
         continue;
@@ -462,6 +536,12 @@ void Worker(std::shared_ptr<State> state) {
       payload->error = "native_media_failed";
       cache.Reset();
       manager = nullptr;
+    }
+    if (!command && !payload->error.empty() && initialized &&
+        netease_uia::IsExplicitNetEaseSource(to_hstring(selected).c_str()) &&
+        !state->stop) {
+      try { *payload = Snapshot(state, nullptr, selected, known, cache); }
+      catch (...) {}
     }
     if (state->stop)
       break;
@@ -541,6 +621,7 @@ NativeMediaBridge::NativeMediaBridge(flutter::BinaryMessenger *messenger,
     if (call.method_name() == "stop") {
       impl_->state->active = false;
       impl_->state->audio->Demand(false);
+      impl_->state->netease_uia.Read(L"");
       impl_->state->cleanup = true;
       impl_->state->wake.notify_one();
       result->Success();

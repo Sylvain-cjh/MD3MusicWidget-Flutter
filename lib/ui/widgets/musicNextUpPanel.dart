@@ -127,19 +127,21 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
                 ? const SizedBox.shrink(key: ValueKey('next_up_hidden'))
                 : SmoothRoundedClip(
                     key: ValueKey('next_up_${next.id}'),
-                    borderRadius: BorderRadius.circular(24),
+                    borderRadius: SmoothSurfaceCorners.mediaStrip,
                     child: BackdropFilter(
                       filter: _glassBlur,
                       child: DecoratedBox(
-                        decoration: BoxDecoration(
+                        decoration: ShapeDecoration(
                           color: scheme.surfaceContainerHigh.withValues(
                             alpha: 0.62,
                           ),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(
-                            width: RoundedRasterScale.hairline(context),
-                            color: scheme.outlineVariant.withValues(
-                              alpha: 0.40,
+                          shape: SmoothSurfaceCorners.shape(
+                            SmoothSurfaceCorners.mediaStrip,
+                            side: BorderSide(
+                              width: RoundedRasterScale.hairline(context),
+                              color: scheme.outlineVariant.withValues(
+                                alpha: 0.28,
+                              ),
                             ),
                           ),
                         ),

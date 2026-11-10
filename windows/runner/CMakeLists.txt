@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.14)
 project(runner LANGUAGES CXX)
-add_library(native_media_preview STATIC "nativeMediaBridge.cpp" "nativeAudioService.cpp")
+add_library(native_media_preview STATIC "nativeMediaBridge.cpp" "nativeAudioService.cpp" "nativeNeteaseUia.cpp")
 target_compile_features(native_media_preview PRIVATE cxx_std_20)
 target_compile_definitions(native_media_preview PRIVATE NOMINMAX UNICODE _UNICODE _HAS_EXCEPTIONS=1)
 target_compile_options(native_media_preview PRIVATE /EHsc /W4)
-target_link_libraries(native_media_preview PRIVATE flutter flutter_wrapper_app windowsapp mmdevapi ole32)
+target_link_libraries(native_media_preview PRIVATE flutter flutter_wrapper_app windowsapp mmdevapi ole32 oleaut32)
 enable_language(C)
 add_subdirectory("${CMAKE_SOURCE_DIR}/../third_party/qrc_codec" "${CMAKE_CURRENT_BINARY_DIR}/qrc_codec")
 

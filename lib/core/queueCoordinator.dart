@@ -41,6 +41,10 @@ final class QueueCoordinator extends ChangeNotifier {
   }
 
   PlatformQueue? get queue => _queue;
+  
+  
+  PlatformQueue? queueForTrack(PlatformTrack? track) =>
+      track != null && track.contextIdentity == _trackIdentity ? _queue : null;
   String? get error => _error;
   bool get isLoading => _loading;
   String? get providerId => _providerId;

@@ -23,9 +23,11 @@ extension _SettingsRows on _SettingsPanelState {
                     key: ValueKey('settings_category_badge_$title'),
                     width: 32,
                     height: 32,
-                    decoration: BoxDecoration(
+                    decoration: ShapeDecoration(
                       color: AppState.currentScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(12),
+                      shape: SmoothSurfaceCorners.shape(
+                        SmoothSurfaceCorners.small,
+                      ),
                     ),
                     alignment: Alignment.center,
                     child: Icon(
@@ -63,15 +65,17 @@ extension _SettingsRows on _SettingsPanelState {
             ),
           ),
           DecoratedBox(
-            decoration: BoxDecoration(
+            decoration: ShapeDecoration(
               color: AppState.currentScheme.surfaceContainerLow.withValues(
                 alpha: 0.82,
               ),
-              borderRadius: BorderRadius.circular(24),
+              shape: SmoothSurfaceCorners.shape(
+                SmoothSurfaceCorners.settingsCard,
+              ),
             ),
             child: SmoothRoundedClip(
               composite: false,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: SmoothSurfaceCorners.settingsCard,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -178,9 +182,9 @@ extension _SettingsRows on _SettingsPanelState {
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 8, 18, 16),
       child: DecoratedBox(
-        decoration: BoxDecoration(
+        decoration: ShapeDecoration(
           color: AppState.currentScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(18),
+          shape: SmoothSurfaceCorners.shape(SmoothSurfaceCorners.control),
         ),
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -418,7 +422,7 @@ extension _SettingsRows on _SettingsPanelState {
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             side: const WidgetStatePropertyAll(BorderSide.none),
             shape: WidgetStatePropertyAll(
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              SmoothSurfaceCorners.shape(SmoothSurfaceCorners.control),
             ),
             backgroundColor: WidgetStateProperty.resolveWith((states) {
               return states.contains(WidgetState.selected)

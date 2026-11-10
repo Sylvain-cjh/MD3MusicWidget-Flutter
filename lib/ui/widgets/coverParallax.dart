@@ -299,9 +299,9 @@ class CoverParallaxState extends State<CoverParallax>
     );
     Widget shadow(double alpha, double blur, double y) => RepaintBoundary(
       child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: widget.borderRadius,
-          boxShadow: [
+        decoration: ShapeDecoration(
+          shape: SmoothSurfaceCorners.shape(widget.borderRadius),
+          shadows: [
             BoxShadow(
               color: Colors.black.withValues(alpha: alpha),
               blurRadius: blur,
