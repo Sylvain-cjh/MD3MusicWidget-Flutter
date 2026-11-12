@@ -36,21 +36,15 @@ class SlideMenu extends StatelessWidget {
           child: IntrinsicWidth(
             child: SmoothRoundedClip(
               borderRadius: SmoothSurfaceCorners.menu,
+              side: BorderSide(
+                width: RoundedRasterScale.hairline(context),
+                color: AppState.currentScheme.outlineVariant.withValues(
+                  alpha: 0.5,
+                ),
+              ),
               child: Container(
                 padding: const EdgeInsets.all(SmoothSurfaceCorners.menuInset),
-                decoration: ShapeDecoration(
-                  color: AppState.currentScheme.surfaceContainerHigh,
-                  shape: SmoothSurfaceCorners.shape(
-                    SmoothSurfaceCorners.menu,
-                    side: BorderSide(
-                      width: RoundedRasterScale.hairline(context),
-                      color: AppState.currentScheme.outlineVariant.withValues(
-                        alpha: 0.5,
-                      ),
-                    ),
-                  ),
-                  
-                ),
+                color: AppState.currentScheme.surfaceContainerHigh,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,

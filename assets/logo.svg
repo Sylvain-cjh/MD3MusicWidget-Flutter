@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">Floating Beat — a desktop music widget seen from above</title>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#E6FBF3"/><stop offset="1" stop-color="#BFE8D8"/>
+    </linearGradient>
+    <linearGradient id="player" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#7853BA"/><stop offset="1" stop-color="#55358D"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="244" height="244" rx="58" fill="url(#paper)"/>
+  <rect x="6.8" y="6.8" width="242.4" height="242.4" rx="57.2" fill="none" stroke="#FFFFFF" stroke-opacity=".62" stroke-width="1.6"/>
+  <rect x="40" y="92" width="188" height="106" rx="32" fill="#67B7A0"/>
+  <rect x="29" y="62" width="185" height="116" rx="34" fill="url(#player)"/>
+  <rect x="49" y="83" width="73" height="73" rx="22" fill="#C5F8E4"/>
+  <path d="M77 109c0-3 3.3-4.9 5.9-3.2l19.5 13.4a3.8 3.8 0 0 1 0 6.2l-19.5 13.3a3.8 3.8 0 0 1-5.9-3.1Z" fill="#6541A6"/>
+  <path d="M143 111h43m-43 24h25" fill="none" stroke="#F7F0FF" stroke-width="12" stroke-linecap="round"/>
+</svg>

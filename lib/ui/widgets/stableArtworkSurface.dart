@@ -55,6 +55,7 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
   ImageStream? _stream;
   ImageStreamListener? _listener;
   int _serial = 0;
+  int _paintRevision = 0;
   Object? _request;
   Object? _requestedIdentity;
   Size _paintSize = Size.zero;
@@ -86,6 +87,7 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
       ..clear()
       ..add(_incoming!.weighted(1));
     _incoming = null;
+    _paintRevision++;
   }
 
   @override
@@ -283,6 +285,7 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
     }
     setState(() {
       _incoming = incoming;
+      _paintRevision++;
     });
     if (_base.isEmpty ||
         _reduced ||
@@ -309,6 +312,7 @@ class StableArtworkSurfaceState extends State<StableArtworkSurface>
             widget.fit,
             widget.alignment,
             widget.clampedImageRect,
+            _paintRevision,
           ),
           size: Size.infinite,
         ),
@@ -335,6 +339,7 @@ class _ArtworkPainter extends CustomPainter {
   final BoxFit fit;
   final Alignment alignment;
   final Rect? clampedImageRect;
+  final int revision;
   _ArtworkPainter(
     this.base,
     this.incoming,
@@ -342,6 +347,7 @@ class _ArtworkPainter extends CustomPainter {
     this.fit,
     this.alignment,
     this.clampedImageRect,
+    this.revision,
   ) : super(repaint: motion);
   static void draw(
     Canvas canvas,
@@ -350,26 +356,37 @@ class _ArtworkPainter extends CustomPainter {
     BoxFit fit,
     Alignment alignment, {
     Rect? clampedImageRect,
+    _ArtworkFrame? incoming,
+    double progress = 0,
   }) {
-    if (size.isEmpty || frames.isEmpty) return;
+    if (size.isEmpty) return;
     final bounds = Offset.zero & size;
-    final active = frames.where((f) => f.weight > 0).toList();
-    if (active.isEmpty) return;
-    if (active.length > 1) canvas.saveLayer(bounds, Paint());
-    for (final frame in active) {
+    final outgoingOpacity = incoming == null ? 1.0 : 1.0 - progress;
+    final drawIncoming = incoming != null && progress > 0;
+    var active = drawIncoming ? 1 : 0;
+    if (outgoingOpacity > 0) {
+      for (final frame in frames) {
+        if (frame.weight > 0) active++;
+      }
+    }
+    if (active == 0) return;
+    if (active > 1) canvas.saveLayer(bounds, Paint());
+    if (clampedImageRect != null) {
+      canvas.save();
+      canvas.clipRect(bounds);
+    }
+    final paint = Paint()
+      
+      ..isAntiAlias = clampedImageRect == null
+      ..filterQuality = FilterQuality.medium
+      ..blendMode = active > 1 ? BlendMode.plus : BlendMode.srcOver;
+
+    void drawFrame(_ArtworkFrame frame, double opacity) {
       final input = Size(
         frame.image.width.toDouble(),
         frame.image.height.toDouble(),
       );
-      final fitted = applyBoxFit(fit, input, size);
-      final paint = Paint()
-        
-        
-        
-        ..isAntiAlias = clampedImageRect == null
-        ..filterQuality = FilterQuality.medium
-        ..color = Colors.white.withValues(alpha: frame.weight)
-        ..blendMode = active.length > 1 ? BlendMode.plus : BlendMode.srcOver;
+      paint.color = Colors.white.withValues(alpha: opacity);
       if (clampedImageRect case final placement?) {
         final region = frame.normalizedRegion;
         final rect = region == null
@@ -380,11 +397,14 @@ class _ArtworkPainter extends CustomPainter {
                 placement.left + region.right * placement.width,
                 placement.top + region.bottom * placement.height,
               );
+        if (rect.left <= bounds.left &&
+            rect.top <= bounds.top &&
+            rect.right >= bounds.right &&
+            rect.bottom >= bounds.bottom) {
+          canvas.drawImageRect(frame.image, Offset.zero & input, rect, paint);
+          return;
+        }
         
-        
-        
-        canvas.save();
-        canvas.clipRect(bounds);
         final xs = [
           (bounds.left, rect.left, 0.0, 1.0),
           (rect.left, rect.right, 0.0, input.width),
@@ -409,8 +429,8 @@ class _ArtworkPainter extends CustomPainter {
             );
           }
         }
-        canvas.restore();
       } else {
+        final fitted = applyBoxFit(fit, input, size);
         canvas.drawImageRect(
           frame.image,
           alignment.inscribe(fitted.source, Offset.zero & input),
@@ -419,28 +439,37 @@ class _ArtworkPainter extends CustomPainter {
         );
       }
     }
-    if (active.length > 1) canvas.restore();
+
+    if (outgoingOpacity > 0) {
+      for (final frame in frames) {
+        if (frame.weight > 0) drawFrame(frame, frame.weight * outgoingOpacity);
+      }
+    }
+    if (drawIncoming) drawFrame(incoming, progress);
+    if (clampedImageRect != null) canvas.restore();
+    if (active > 1) canvas.restore();
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    final p = MediaMotionTokens.curve.transform(motion.value);
     draw(
       canvas,
       size,
-      [
-        for (final frame in base)
-          frame.weighted(
-            incoming == null ? frame.weight : frame.weight * (1 - p),
-          ),
-        if (incoming != null) incoming!.weighted(p),
-      ],
+      base,
       fit,
       alignment,
       clampedImageRect: clampedImageRect,
+      incoming: incoming,
+      progress: incoming == null
+          ? 0
+          : MediaMotionTokens.curve.transform(motion.value),
     );
   }
 
   @override
-  bool shouldRepaint(_ArtworkPainter old) => true;
+  bool shouldRepaint(_ArtworkPainter old) =>
+      revision != old.revision ||
+      fit != old.fit ||
+      alignment != old.alignment ||
+      clampedImageRect != old.clampedImageRect;
 }

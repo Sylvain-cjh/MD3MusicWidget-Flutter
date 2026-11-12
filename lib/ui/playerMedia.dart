@@ -14,6 +14,7 @@ extension _PlayerMedia on _PlayerViewState {
         return StatefulBuilder(
           builder: (context, dialogSetState) {
             return AlertDialog(
+              shape: SmoothSurfaceCorners.dialog,
               title: const Text('.NET 运行环境缺失'),
               content: SizedBox(
                 width: 360,
@@ -399,11 +400,12 @@ extension _PlayerMedia on _PlayerViewState {
         _servicesStarted &&
         AppState.spectrumMode != SpectrumMode.off;
     final provider = _mediaProvider;
+    if (!shouldPoll) provider?.setSpectrumEnabled(false);
     if (provider?.isConnected == true) {
       _spectrumTimer?.cancel();
       _spectrumTimer = null;
       _spectrumPollingInterval = null;
-      provider!.setSpectrumEnabled(shouldPoll);
+      if (shouldPoll) provider!.setSpectrumEnabled(true);
       if (!shouldPoll) AppState.clearSpectrum();
       return;
     }

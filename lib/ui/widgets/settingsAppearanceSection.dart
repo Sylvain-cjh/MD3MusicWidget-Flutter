@@ -48,6 +48,16 @@ extension _SettingsAppearanceSection on _SettingsPanelState {
         },
       ),
       _buildDivider(),
+      _buildSwitchRow(
+        SettingsLabels.navigationGlass,
+        SettingsDescriptions.navigationGlass,
+        AppState.enableNavigationGlass,
+        (value) {
+          _updateState(() => AppState.enableNavigationGlass = value);
+          widget.onVisualChanged();
+        },
+      ),
+      _buildDivider(),
       _buildDropdownRow<MD3Shape>(
         SettingsLabels.settingsNavigationShape,
         SettingsDescriptions.settingsNavigationShape,
@@ -497,6 +507,7 @@ extension _SettingsAppearanceSection on _SettingsPanelState {
                 final clear = await showDialog<bool>(
                   context: context,
                   builder: (context) => AlertDialog(
+                    shape: SmoothSurfaceCorners.dialog,
                     title: const Text(SettingsLabels.clearCaches),
                     content: const Text(
                       '只清理本程序保存的歌词和背景源图，不会删除你的歌单、LRC 文件或当前画面。',

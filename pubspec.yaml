@@ -17,7 +17,7 @@ publish_to: 'none'
 
 
 
-version: 1.2.2+1
+version: 1.3.0+1
 
 environment:
   sdk: ^3.12.2
@@ -73,10 +73,13 @@ flutter:
     - shaders/coverLayers.frag
     - shaders/coverSubject.frag
     - shaders/lyricsSmoke.frag
+    - shaders/navigationGlass.frag
+    - shaders/switchGlass.frag
 
   assets:
     - images/tray_icon.ico
     - images/tray_icon.png
+    - images/tray_icon_dark.png
     - assets/brand/qq_music.png
     - assets/brand/netease_cloud.png
     - assets/brand/lrclib.png

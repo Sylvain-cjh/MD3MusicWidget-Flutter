@@ -240,10 +240,14 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return SmoothRoundedClip(
       borderRadius: radius,
+      side: BorderSide(
+        width: RoundedRasterScale.hairline(context),
+        color: scheme.outlineVariant.withValues(alpha: 0.28),
+      ),
       child: BackdropFilter(
         filter: _glassBlur,
         child: DecoratedBox(
-          decoration: ShapeDecoration(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -252,13 +256,6 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                 scheme.primaryContainer.withValues(alpha: 0.20),
                 scheme.surface.withValues(alpha: 0.46),
               ],
-            ),
-            shape: SmoothSurfaceCorners.shape(
-              radius,
-              side: BorderSide(
-                width: RoundedRasterScale.hairline(context),
-                color: scheme.outlineVariant.withValues(alpha: 0.28),
-              ),
             ),
           ),
           child: Padding(

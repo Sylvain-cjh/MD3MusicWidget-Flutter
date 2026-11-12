@@ -391,9 +391,10 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         late double btnH;
         late double titleFontSize;
         late double artistFontSize;
+        const metadataGap = MediaLayoutSpacing.metadataGap;
+        final padding = MediaLayoutSpacing.edge(isV);
 
         if (isV) {
-          final double padding = (availableW * 0.07).clamp(16.0, 24.0);
           infoW = math.max(1.0, availableW - padding * 2.0);
           titleL = padding;
           artistL = padding;
@@ -408,31 +409,27 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
           playH = hasControls ? (availableH * 0.116).clamp(52.0, 60.0) : 0.0;
           btnH = playH * 0.83;
 
-          final int gapCount =
-              2 + (hasProgress ? 1 : 0) + (hasControls ? 1 : 0);
-          final double desiredGap = (availableH * 0.024).clamp(8.0, 14.0);
+          const coverGap = MediaLayoutSpacing.portraitArtworkGap;
+          final progressGap = hasProgress
+              ? MediaLayoutSpacing.portraitProgressGap
+              : 0.0;
+          final transportGap = hasControls
+              ? MediaLayoutSpacing.portraitTransportGap
+              : 0.0;
+          final totalSpacing =
+              coverGap + metadataGap + progressGap + transportGap;
           final double nonCoverHeight = titleH + artistH + progressH + playH;
           final double coverSpace =
-              availableH -
-              padding * 2.0 -
-              nonCoverHeight -
-              desiredGap * gapCount;
+              availableH - padding * 2 - nonCoverHeight - totalSpacing;
           coverSize = math.min(infoW, math.max(96.0, coverSpace));
-          final double freeHeight =
-              availableH - padding * 2.0 - coverSize - nonCoverHeight;
-          final double gap = (freeHeight / gapCount).clamp(6.0, 24.0);
-          final double groupHeight =
-              coverSize + nonCoverHeight + gap * gapCount;
+          final double groupHeight = coverSize + nonCoverHeight + totalSpacing;
           coverT = math.max(padding, (availableH - groupHeight) / 2.0);
-          titleT = coverT + coverSize + gap;
-          artistT = titleT + titleH + gap;
-          progressT = artistT + artistH + (hasProgress ? gap : 0.0);
-          playT = hasProgress
-              ? progressT + progressH + gap
-              : artistT + artistH + gap;
+          titleT = coverT + coverSize + coverGap;
+          artistT = titleT + titleH + metadataGap;
+          progressT = artistT + artistH + progressGap;
+          playT = progressT + progressH + transportGap;
           btnT = playT + (playH - btnH) / 2.0;
         } else {
-          final double padding = (availableH * 0.10).clamp(12.0, 16.0);
           coverSize = math.min(
             math.max(72.0, availableH - padding * 2.0),
             math.max(72.0, availableW * 0.30),
@@ -457,20 +454,20 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
           playH = hasControls ? (contentHeight * 0.44).clamp(48.0, 58.0) : 0.0;
           btnH = playH * 0.83;
 
-          final int gapCount =
-              1 + (hasProgress ? 1 : 0) + (hasControls ? 1 : 0);
+          final int actionGaps = (hasProgress ? 1 : 0) + (hasControls ? 1 : 0);
           final double fixedHeight = titleH + artistH + progressH + playH;
-          final double gap = ((contentHeight - fixedHeight) / gapCount).clamp(
-            2.0,
-            16.0,
-          );
-          final double groupHeight = fixedHeight + gap * gapCount;
+          final double gap = actionGaps == 0
+              ? 0
+              : ((contentHeight - fixedHeight - metadataGap) / actionGaps)
+                    .clamp(2.0, 16.0);
+          final double groupHeight =
+              fixedHeight + metadataGap + gap * actionGaps;
           titleT = (availableH - groupHeight) / 2.0;
-          artistT = titleT + titleH + gap;
+          artistT = titleT + titleH + metadataGap;
           progressT = artistT + artistH + (hasProgress ? gap : 0.0);
           playT = hasProgress
               ? progressT + progressH + gap
-              : artistT + artistH + gap;
+              : artistT + artistH + (hasControls ? gap : 0.0);
           btnT = playT + (playH - btnH) / 2.0;
         }
 
@@ -592,7 +589,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               height: coverSize,
               child: _buildCover(
                 coverSize,
-                SmoothSurfaceCorners.artwork(inset: math.max(coverL, coverT)),
+                SmoothSurfaceCorners.artwork(inset: coverL, topInset: coverT),
               ),
             ),
 

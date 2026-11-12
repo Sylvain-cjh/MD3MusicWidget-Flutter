@@ -5,11 +5,13 @@
 #include "nativeSpectrumDsp.h"
 #include "nativeSourceIdentity.h"
 #include <appmodel.h>
+#include <audiopolicy.h>
 #include <atomic>
 #include <audioclient.h>
 #include <audioclientactivationparams.h>
 #include <chrono>
 #include <condition_variable>
+#include <endpointvolume.h>
 #include <ksmedia.h>
 #include <limits>
 #include <mmdeviceapi.h>
@@ -42,6 +44,89 @@ struct Format {
   WAVEFORMATEX *value = nullptr;
   ~Format() { CoTaskMemFree(value); }
 };
+bool MatchesAppIdentity(HANDLE process, const std::wstring &source) {
+  UINT32 size = 0;
+  GetApplicationUserModelId(process, &size, nullptr);
+  if (size == 0 || size >= 4096)
+    return false;
+  std::wstring id(size, L'\0');
+  return GetApplicationUserModelId(process, &size, id.data()) == ERROR_SUCCESS &&
+         _wcsicmp(id.c_str(), source.c_str()) == 0;
+}
+
+bool MatchesAudioProcess(HANDLE process, const std::wstring &source,
+                         const std::wstring &executable) {
+  wchar_t image[32768];
+  DWORD length = static_cast<DWORD>(std::size(image));
+  if (QueryFullProcessImageNameW(process, 0, image, &length) &&
+      NativeSourceMatchesExecutable(executable, std::wstring(image, length)))
+    return true;
+  
+  return MatchesAppIdentity(process, source);
+}
+
+
+
+uint32_t FindActiveAudioProcess(IMMDeviceEnumerator *enumerator,
+                                const std::wstring &source, Handle &retained,
+                                uint32_t &opened, bool audibleOnly = false) {
+  if (!enumerator || source.empty())
+    return 0;
+  const auto executable = NativeAudioExecutableSource(source);
+  ComPtr<IMMDeviceCollection> devices;
+  if (FAILED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE,
+                                            &devices)))
+    return 0;
+  UINT count = 0;
+  devices->GetCount(&count);
+  uint32_t best = 0;
+  float bestPeak = -1;
+  for (UINT d = 0; d < count; ++d) {
+    ComPtr<IMMDevice> device;
+    ComPtr<IAudioSessionManager2> manager;
+    ComPtr<IAudioSessionEnumerator> sessions;
+    if (FAILED(devices->Item(d, &device)) ||
+        FAILED(device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL,
+                                nullptr, reinterpret_cast<void **>(
+                                             manager.GetAddressOf()))) ||
+        FAILED(manager->GetSessionEnumerator(&sessions)))
+      continue;
+    int sessionCount = 0;
+    sessions->GetCount(&sessionCount);
+    for (int i = 0; i < sessionCount; ++i) {
+      ComPtr<IAudioSessionControl> session;
+      ComPtr<IAudioSessionControl2> control;
+      AudioSessionState status{};
+      DWORD pid = 0;
+      if (FAILED(sessions->GetSession(i, &session)) ||
+          FAILED(session->GetState(&status)) || status != AudioSessionStateActive ||
+          FAILED(session.As(&control)) ||
+          control->IsSystemSoundsSession() == S_OK ||
+          control->GetProcessId(&pid) != S_OK || pid == 0)
+        continue;
+      ComPtr<IAudioMeterInformation> meter;
+      float peak = 0;
+      if (SUCCEEDED(session.As(&meter)))
+        meter->GetPeakValue(&peak);
+      if (peak <= bestPeak || (audibleOnly && peak <= .001f))
+        continue;
+      ++opened;
+      Handle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+                                 FALSE, pid)};
+      if (!process.value ||
+          !MatchesAudioProcess(process.value, source, executable))
+        continue;
+      if (retained.value)
+        CloseHandle(retained.value);
+      retained.value = process.value;
+      process.value = nullptr;
+      best = pid;
+      bestPeak = peak;
+    }
+  }
+  return best;
+}
+
 uint32_t FindProcess(const std::wstring &source, Handle &retained,
                      uint32_t &opened) {
   if (source.empty())
@@ -53,8 +138,10 @@ uint32_t FindProcess(const std::wstring &source, Handle &retained,
   entry.dwSize = sizeof(entry);
   uint32_t best = 0;
   uint64_t oldest = std::numeric_limits<uint64_t>::max();
-  const auto split = source.find_last_of(L"\\/");
-  const auto name = source.substr(split == std::wstring::npos ? 0 : split + 1);
+  const auto executable = NativeAudioExecutableSource(source);
+  const auto split = executable.find_last_of(L'\\');
+  const auto name =
+      executable.substr(split == std::wstring::npos ? 0 : split + 1);
   
   
   for (int pass = 0; pass < 2 && best == 0; ++pass) {
@@ -69,26 +156,16 @@ uint32_t FindProcess(const std::wstring &source, Handle &retained,
       if (!process.value)
         continue;
       bool matches =
-          pass == 0 && NativeSourceMatchesExecutable(source, entry.szExeFile);
-      if (pass == 0 && !matches &&
-          (source.find(L'\\') != std::wstring::npos ||
-           source.find(L'/') != std::wstring::npos)) {
+          pass == 0 && NativeSourceMatchesExecutable(executable, entry.szExeFile);
+      if (pass == 0 && !matches && split != std::wstring::npos) {
         wchar_t image[32768];
         DWORD length = static_cast<DWORD>(std::size(image));
         if (QueryFullProcessImageNameW(process.value, 0, image, &length))
-          matches = NativeSourceMatchesExecutable(source,
+          matches = NativeSourceMatchesExecutable(executable,
                                                   std::wstring(image, length));
       }
-      if (pass == 1) {
-        UINT32 size = 0;
-        GetApplicationUserModelId(process.value, &size, nullptr);
-        if (size > 0 && size < 4096) {
-          std::wstring id(size, L'\0');
-          if (GetApplicationUserModelId(process.value, &size, id.data()) ==
-              ERROR_SUCCESS)
-            matches = _wcsicmp(id.c_str(), source.c_str()) == 0;
-        }
-      }
+      if (pass == 1)
+        matches = MatchesAppIdentity(process.value, source);
       if (!matches)
         continue;
       FILETIME creation{}, exit{}, kernel{}, user{};
@@ -283,6 +360,7 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
                                  CLSCTX_ALL, IID_PPV_ARGS(&enumerator))))
     enumerator->RegisterEndpointNotificationCallback(notifications.Get());
   int failures = 0;
+  bool preferSystem = false;
   uint64_t previousRevision = ~uint64_t{0};
   while (!state->stop) {
     uint64_t revision;
@@ -307,16 +385,22 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
     }
     if (revision != previousRevision) {
       failures = 0;
+      preferSystem = false;
       previousRevision = revision;
     }
     ComPtr<IAudioClient> client;
     ComPtr<IAudioCaptureClient> capture;
     Handle target;
     uint32_t opened = 0;
-    uint32_t pid = FindProcess(source, target, opened);
+    uint32_t pid = 0;
+    if (!preferSystem) {
+      pid = FindActiveAudioProcess(enumerator.Get(), source, target, opened);
+      if (!pid)
+        pid = FindProcess(source, target, opened);
+    }
     uint64_t deviceRevision = devices->load();
+    bool processMode = false;
     try {
-      bool processMode = false;
       HRESULT processActivation = HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
       WAVEFORMATEX processFormat{};
       processFormat.wFormatTag = WAVE_FORMAT_PCM;
@@ -366,6 +450,8 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
         throw winrt::hresult_error(
             processActivation,
             L"Strict source process capture unavailable");
+      if (!strict && pid && !processMode)
+        preferSystem = true;
       Format mix;
       WAVEFORMATEX *format = &processFormat;
       if (!processMode) {
@@ -410,6 +496,8 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
       uint64_t frames = 0;
       int64_t lastPublished = 0;
       const auto started = GetTickCount64();
+      auto lastSignal = started;
+      auto nextTargetCheck = started + 1800;
       std::vector<float> mono;
       mono.reserve(16384);
       while (!state->stop) {
@@ -419,6 +507,7 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
             break;
         }
         if (devices->load() != deviceRevision) {
+          preferSystem = false;
           std::lock_guard lock(state->mutex);
           if (state->revision == revision) {
             state->reading = {};
@@ -438,6 +527,7 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
         UINT32 packet = 0;
         Check(capture->GetNextPacketSize(&packet));
         mono.clear();
+        bool signal = false;
         while (packet) {
           BYTE *data = nullptr;
           UINT32 count = 0;
@@ -455,6 +545,7 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
                               bytes, floating);
                 v /= channels;
               }
+              signal = signal || std::abs(v) > .0005f;
               mono.push_back(v);
             }
           } catch (...) {
@@ -464,6 +555,23 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
           Check(capture->ReleaseBuffer(count));
           frames += count;
           Check(capture->GetNextPacketSize(&packet));
+        }
+        const auto tick = GetTickCount64();
+        if (signal)
+          lastSignal = tick;
+        const bool waitingForProcess =
+            !processMode && !preferSystem && !source.empty();
+        if (tick >= nextTargetCheck &&
+            (waitingForProcess || (processMode && tick - lastSignal >= 1800))) {
+          nextTargetCheck = tick + 3000;
+          Handle audible;
+          const auto activePid = FindActiveAudioProcess(
+              enumerator.Get(), source, audible, opened, true);
+          if (activePid && activePid != pid) {
+            
+            
+            break;
+          }
         }
         const auto now = Now();
         const bool changed = dsp.Push(mono.data(), mono.size(), now);
@@ -493,6 +601,10 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
     } catch (const winrt::hresult_error &error) {
       if (client)
         client->Stop();
+      if (!strict && processMode && !preferSystem) {
+        preferSystem = true;
+        continue;
+      }
       {
         std::lock_guard lock(state->mutex);
         if (state->revision == revision) {
@@ -504,8 +616,8 @@ void NativeAudioService::Run(std::shared_ptr<State> state) {
                                             std::to_string(error.code().value);
         }
       }
-      const int waits = std::min(1500, 25 * (1 << std::min(failures++, 6)));
-      for (int i = 0; i < waits && !state->stop; ++i) {
+      const int delay = std::min(1500, 100 * (1 << std::min(failures++, 4)));
+      for (int i = 0; i < delay && !state->stop; i += 20) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         std::lock_guard lock(state->mutex);
         if (state->revision != revision || devices->load() != deviceRevision)

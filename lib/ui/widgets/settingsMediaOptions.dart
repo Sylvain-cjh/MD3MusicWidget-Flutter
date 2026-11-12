@@ -74,6 +74,7 @@ extension _SettingsMediaOptions on _SettingsPanelState {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, updateDialog) => AlertDialog(
+          shape: SmoothSurfaceCorners.dialog,
           title: const Text(SettingsLabels.qqPlaylist),
           content: SizedBox(
             width: 340,
@@ -91,7 +92,9 @@ extension _SettingsMediaOptions on _SettingsPanelState {
                     labelText: SettingsLabels.qqPlaylistLink,
                     hintText: 'https://y.qq.com/n/ryqq/playlist/…',
                     errorText: error,
-                    border: const OutlineInputBorder(),
+                    border: const OutlineInputBorder(
+                      borderRadius: SmoothSurfaceCorners.control,
+                    ),
                   ),
                   onChanged: (value) {
                     input = value;
@@ -293,6 +296,7 @@ extension _SettingsMediaOptions on _SettingsPanelState {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
+          shape: SmoothSurfaceCorners.dialog,
           title: const Text(SettingsLabels.neteasePlaylist),
           content: SizedBox(
             width: 340,
@@ -309,6 +313,9 @@ extension _SettingsMediaOptions on _SettingsPanelState {
                     labelText: SettingsLabels.qqPlaylistLink,
                     hintText: 'https://music.163.com/#/playlist?id=…',
                     errorText: error,
+                    border: const OutlineInputBorder(
+                      borderRadius: SmoothSurfaceCorners.control,
+                    ),
                   ),
                 ),
               ],

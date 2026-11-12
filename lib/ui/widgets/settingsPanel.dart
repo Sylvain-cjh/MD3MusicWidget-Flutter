@@ -12,11 +12,15 @@ import '../../core/platformProvider.dart';
 import 'md3AnchoredSelect.dart';
 import 'settingsDescriptions.dart';
 import 'settingsLabels.dart';
+import 'settingsGlassBackdrop.dart';
 import 'settingsSectionNavigation.dart';
 import 'settingsScrollViewport.dart';
+import 'settingsAboutPage.dart';
+import 'settingsLicensesPage.dart';
 import 'adaptiveMediaText.dart';
 import 'jellySlider.dart';
 import 'editableSliderValue.dart';
+import 'liquidSettingsSwitch.dart';
 import 'smoothRoundedClip.dart';
 import '../../core/coverLayers.dart';
 
@@ -30,7 +34,14 @@ part 'settingsChoiceEntries.dart';
 part 'settingsMediaOptions.dart';
 part 'settingsRows.dart';
 
-enum _SettingsSection { window, appearance, playback, lyrics, typography }
+enum _SettingsSection {
+  window,
+  appearance,
+  playback,
+  lyrics,
+  typography,
+  about,
+}
 
 extension on _SettingsSection {
   String get label => switch (this) {
@@ -39,6 +50,7 @@ extension on _SettingsSection {
     _SettingsSection.playback => SettingsLabels.playbackTab,
     _SettingsSection.lyrics => SettingsLabels.lyricsTab,
     _SettingsSection.typography => SettingsLabels.typographyTab,
+    _SettingsSection.about => SettingsLabels.aboutTab,
   };
 
   IconData get icon => switch (this) {
@@ -47,6 +59,7 @@ extension on _SettingsSection {
     _SettingsSection.playback => Icons.music_note_rounded,
     _SettingsSection.lyrics => Icons.lyrics_rounded,
     _SettingsSection.typography => Icons.text_fields_rounded,
+    _SettingsSection.about => Icons.info_outline_rounded,
   };
 }
 
@@ -58,6 +71,8 @@ class SettingsPanel extends StatefulWidget {
   final VoidCallback onWindowBehaviorChanged;
   final bool isMousePassthroughAvailable;
   final Future<String?> Function(String)? resolveQqPlaylistLink;
+  final GlobalKey? glassBackdropKey;
+  final bool glassCaptureReady;
 
   const SettingsPanel({
     super.key,
@@ -68,6 +83,8 @@ class SettingsPanel extends StatefulWidget {
     required this.onWindowBehaviorChanged,
     required this.isMousePassthroughAvailable,
     this.resolveQqPlaylistLink,
+    this.glassBackdropKey,
+    this.glassCaptureReady = false,
   });
 
   @override
@@ -159,6 +176,10 @@ class _SettingsPanelState extends State<SettingsPanel>
         ],
         selectedIndex: _selectedSection.index,
         shape: AppState.settingsNavigationShape,
+        glassBackdropKey: AppState.enableNavigationGlass
+            ? widget.glassBackdropKey
+            : null,
+        glassCaptureReady: widget.glassCaptureReady,
         onSelected: (index) => _selectSection(sections[index]),
       ),
     );
@@ -215,8 +236,8 @@ class _SettingsPanelState extends State<SettingsPanel>
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
+        SmoothSurfaceCorners.settingsEdge,
         20,
-        18,
         SmoothSurfaceCorners.settingsEdge,
         SmoothSurfaceCorners.settingsEdge,
       ),
@@ -224,7 +245,9 @@ class _SettingsPanelState extends State<SettingsPanel>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(
+              horizontal: SmoothSurfaceCorners.settingsGroupInset,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -236,10 +259,10 @@ class _SettingsPanelState extends State<SettingsPanel>
                             color: headingColor,
                             shadows: headingShadows,
                             fontWeight: FontWeight.w600,
-                            letterSpacing: 0.0,
+                            letterSpacing: -0.3,
                           ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 4),
                 AdaptiveMediaText(
                   SettingsDescriptions.overview,
                   style: (textTheme.bodySmall ?? const TextStyle(fontSize: 12))
@@ -252,60 +275,72 @@ class _SettingsPanelState extends State<SettingsPanel>
               ],
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _buildSectionNavigation(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Expanded(
             child: RepaintBoundary(
               key: const ValueKey('settings_scroll_surface'),
-              child: SettingsScrollViewport(
-                key: ValueKey(_selectedSection),
-                child: ScrollConfiguration(
-                  behavior: ScrollConfiguration.of(
-                    context,
-                  ).copyWith(scrollbars: false),
-                  child: ListView(
-                    physics: const BouncingScrollPhysics(),
-                    
-                    
-                    
-                    padding: const EdgeInsets.fromLTRB(
-                      SmoothSurfaceCorners.settingsGroupInset,
-                      12,
-                      SmoothSurfaceCorners.settingsGroupInset,
-                      40,
+              child: SettingsGlassBackdrop(
+                sourceKey:
+                    AppState.enableNavigationGlass &&
+                        _selectedSection != _SettingsSection.about
+                    ? widget.glassBackdropKey
+                    : null,
+                ready: widget.glassCaptureReady,
+                backgroundRevision: AppState.backgroundRevision,
+                child: SettingsScrollViewport(
+                  key: ValueKey(_selectedSection),
+                  child: ScrollConfiguration(
+                    behavior: ScrollConfiguration.of(
+                      context,
+                    ).copyWith(scrollbars: false),
+                    child: ListView(
+                      physics: const BouncingScrollPhysics(),
+                      
+                      
+                      
+                      padding: const EdgeInsets.fromLTRB(
+                        SmoothSurfaceCorners.settingsGroupInset,
+                        12,
+                        SmoothSurfaceCorners.settingsGroupInset,
+                        40,
+                      ),
+                      children: [
+                        if (_selectedSection == _SettingsSection.window)
+                          _buildWindowGroupSettings(),
+
+                        if (_selectedSection == _SettingsSection.appearance)
+                          _buildThemeGroupSettings(),
+
+                        if (_selectedSection == _SettingsSection.appearance)
+                          _buildBackgroundGroupSettings(),
+
+                        if (_selectedSection == _SettingsSection.appearance &&
+                            !AppState.isVertical)
+                          _buildRightCoverGroupSettings(),
+                        if (_selectedSection == _SettingsSection.appearance)
+                          _buildPerformanceGroupSettings(),
+
+                        if (_selectedSection == _SettingsSection.appearance)
+                          _buildStorageGroupSettings(),
+
+                        if (_selectedSection == _SettingsSection.playback)
+                          _buildPlaybackGroupSettings(),
+
+                        if (_selectedSection == _SettingsSection.playback)
+                          _buildNextUpGroupSettings(),
+
+                        if (_selectedSection == _SettingsSection.lyrics)
+                          _buildLyricsGroupSettings(),
+
+                        if (_selectedSection == _SettingsSection.typography)
+                          _buildTypographyGroupSettings(),
+
+                        if (_selectedSection == _SettingsSection.about)
+                          _buildStaggeredEntry(const SettingsAboutPage()),
+                      ],
                     ),
-                    children: [
-                      if (_selectedSection == _SettingsSection.window)
-                        _buildWindowGroupSettings(),
-
-                      if (_selectedSection == _SettingsSection.appearance)
-                        _buildThemeGroupSettings(),
-
-                      if (_selectedSection == _SettingsSection.appearance)
-                        _buildBackgroundGroupSettings(),
-
-                      if (_selectedSection == _SettingsSection.appearance &&
-                          !AppState.isVertical)
-                        _buildRightCoverGroupSettings(),
-                      if (_selectedSection == _SettingsSection.appearance)
-                        _buildPerformanceGroupSettings(),
-
-                      if (_selectedSection == _SettingsSection.appearance)
-                        _buildStorageGroupSettings(),
-
-                      if (_selectedSection == _SettingsSection.playback)
-                        _buildPlaybackGroupSettings(),
-
-                      if (_selectedSection == _SettingsSection.playback)
-                        _buildNextUpGroupSettings(),
-
-                      if (_selectedSection == _SettingsSection.lyrics)
-                        _buildLyricsGroupSettings(),
-
-                      if (_selectedSection == _SettingsSection.typography)
-                        _buildTypographyGroupSettings(),
-                    ],
                   ),
                 ),
               ),

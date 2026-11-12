@@ -9,6 +9,7 @@ abstract final class WidgetDiagnostics {
   static final marks = <String, int>{};
   static final frameMarks = <String, int>{};
   static final frames = <FrameTiming>[];
+  static final windowPaints = <Map<String, Object>>[];
   static final actions = <String, Future<void> Function(Object?)>{};
   static final errors = <String>[];
   static final counters = <String, int>{};

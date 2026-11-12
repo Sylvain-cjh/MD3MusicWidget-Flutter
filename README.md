@@ -1,25 +1,30 @@
 <div align="center">
 
-<img src="assets/logo.png" width="104" alt="MD3 Music Widget 应用图标" />
+<a href="https://github.com/journey-ad/Moe-Counter"><img src="https://count.getloli.com/get/@sylvain-cjh-md3musicwidget?theme=miku" width="300" alt="初音未来主题的 README 访问计数器" /></a>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
+  <img src="assets/logo.png" width="104" alt="MD3 Music Widget 应用图标" />
+</picture>
 
 <h1>MD3 Music Widget</h1>
 
-<p><strong>把正在听的歌，留在桌面或直播画面里。</strong></p>
+<p><strong>把正在听的歌，留在桌面或直播画面里。</strong><br/>不换播放器，也不挡住你正在做的事。</p>
 
-<p>封面、歌词与真实音频频谱，一张 Material 3 风格的 Windows 音乐挂件。</p>
-
-[![版本 1.2.2](https://img.shields.io/badge/version-1.2.2-74549D?style=flat-square)](CHANGELOG.md)
+[![版本 1.3.0](https://img.shields.io/badge/version-1.3.0-74549D?style=flat-square)](CHANGELOG.md)
 [![Windows x64](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-507765?style=flat-square)](#开始使用)
 [![Flutter](https://img.shields.io/badge/UI-Flutter-74549D?style=flat-square&logo=flutter&logoColor=white)](#工作原理)
 [![内置音乐采集](https://img.shields.io/badge/capture-SMTC%20%2B%20WASAPI-507765?style=flat-square)](docs/native_capture.md)
 
-[**GitHub 发行页**](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases) · [怎么选版本](#下载与版本选择) · [界面预览](#预览) · [本版亮点](#122-版亮点) · [开始使用](#开始使用)
+[**GitHub 发行页**](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases) · [怎么选版本](#下载与版本选择) · [界面预览](#预览) · [开始使用](#开始使用)
+
+<img src="docs/media/readme-hero.svg" width="860" alt="紫色和薄荷绿的唱片、进度条与频谱插画" />
 
 </div>
 
 ---
 
-音乐仍在你常用的播放器里播放，挂件负责展示，不用换播放器。日常听歌可以保留播放按钮；直播时可以把三个按钮一起关掉，只显示想给观众看的内容。
+音乐照常在 QQ 音乐、网易云或你习惯的播放器里播放。挂件负责把封面、歌词和真实频谱放到你想要的位置。
 
 ## 预览
 
@@ -40,29 +45,30 @@
   </tr>
 </table>
 
-预览曲目为 **《Tell Your World》— livetune feat. 初音ミク**。图片由实际 Flutter 组件渲染；播放位置与频谱为演示数据，不是真实播放器采集或桌面录屏，也不是性能／分层质量测试。[曲目与封面来源](docs/media/README.md) · 点击图片可查看原图。
-
 ## 下载与版本选择
 
 **第一次用，建议先选无模型版。** 它保留封面、歌词、频谱、性能监视器和普通 3D 悬浮效果。只有想让封面里的主体和背景产生不同深度的视差时，才需要分层模型。
 
-| 1.2.2 套件 | 怎么选 | 安装版（EXE） | 免安装版（ZIP） |
+| 1.3.0 套件 | 怎么选 | 安装版（EXE） | 免安装版（ZIP） |
 | --- | --- | --- | --- |
-| **无分层模型版** · `Without-Layer-Models` | 先用挂件，需要时再补装模型 | `MD3MusicWidget-Without-Layer-Models-Setup-1.2.2.exe` | `MD3MusicWidget-Without-Layer-Models-Portable-1.2.2.zip` |
-| **有分层模型版** · `With-Layer-Models` | 一次装齐正式模型和 GPU 依赖；分层需要兼容核显 | `MD3MusicWidget-With-Layer-Models-Setup-1.2.2.exe` | `MD3MusicWidget-With-Layer-Models-Portable-1.2.2.zip` |
+| **无分层模型版** · `Without-Layer-Models` | 只想看歌曲、封面、频谱和歌词 | `MD3MusicWidget-Without-Layer-Models-Setup-1.3.0.exe` | `MD3MusicWidget-Without-Layer-Models-Portable-1.3.0.zip` |
+| **有分层模型版** · `With-Layer-Models` | 想让封面主体与背景有不同景深；需要兼容核显 | `MD3MusicWidget-With-Layer-Models-Setup-1.3.0.exe` | `MD3MusicWidget-With-Layer-Models-Portable-1.3.0.zip` |
 
 本地发行目录按套件分文件夹。线上已发布的附件以 [GitHub 发行页](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases) 为准；[cover-layers 仓库](https://github.com/Sylvain-cjh/cover-layers) 可查看后端源码。
 
-1.2.2 的有模型版沿用 1.2.1 正式模型；模型没有变化，本次不单独发行 cover-layers。需要模型请选有模型版，详见 [分层模型说明](docs/layer_models.md)。
+1.3.0 的有模型版沿用 1.2.1 正式模型，本次不单独发行 cover-layers。需要模型请选有模型版，详见 [分层模型说明](docs/layer_models.md)。
 
 > [!IMPORTANT]
 > 主程序要求 **Windows 10 2004（Build 19041）或更新版本，包括 Windows 11，x64**。播放器需要开启系统媒体控制，挂件才能读取正在播放的信息。指定进程频谱和可选分层另有系统或硬件要求。
 
-## 1.2.2 版亮点
+## 1.3.0 版亮点
 
-- **网易云有一条备用采集路径。** 手动指定网易云桌面程序后，系统媒体会话缺失或进度不完整时，可以按需尝试只读 UI Automation；切入备用路径会短暂显示提示。[网易云支持与限制](docs/netease_support.md)
-- **封面主题更有辨识度。** 动态配色统一使用 Celebi 聚类与 HCT 评分，设置新增「表现力（Expressive）」。[动态配色说明](docs/monet-artwork-colors.md)
-- **圆角按留白重新设计。** 封面、歌词、频谱和设置各有适合自己的圆角比例，外窗和内层更协调。现有背景、播放按钮形状和正式分层模型保留。
+<img src="docs/media/glass-switch.png" width="102" align="right" alt="静止状态下的液态玻璃开关" />
+
+- **外观 → 液态玻璃。** 导航滑块会弯折它后面的画面，开关不按住也有玻璃质感。喜欢原来的 MD3 样式，关掉就好。
+- **关于 → 检查更新。** 看当前版本、跳到项目源码或查正式发行。检查由你手动触发，不会自动下载。
+- **关于 → 开源许可。** 可以按组件搜索，再展开看许可内容。
+- **「浮拍」图标有深浅两版。** 「关于」页随挂件主题换色，Windows 托盘随任务栏换色。
 
 [查看本版完整更新记录](CHANGELOG.md)
 
@@ -104,6 +110,14 @@
 ## 工作原理
 
 应用由 **Flutter 界面、进程内 Windows 媒体／音频采集，以及可选 GPU 分层模块**组成。
+
+### 一首歌怎么走到屏幕上
+
+| 输入 | 挂件拿到什么 | 画面上看到什么 |
+| --- | --- | --- |
+| 播放器的 Windows 媒体会话 | 曲目、封面、状态和时间线 | 标题、进度、主题颜色 |
+| 真实音频输出 | 各频段的能量 | 随音乐变化的波形或频谱柱 |
+| 歌词源与所选歌单 | 歌词时间轴、可用的后续曲目 | 当前歌词、临近结束的下一首提示 |
 
 - **歌曲信息与控制**：后台 C++/WinRT 读取系统媒体会话，传递标题、封面、状态与时间线，并发送播放命令。不启动外置音乐采集进程，不监听旧采集端口。
 - **频谱**：WASAPI 回环采集音频，进程内 DSP 生成频段数据。关闭频谱会释放对应采集；指定来源只接受精确匹配。
@@ -176,11 +190,5 @@ flutter build windows --release
 - 模型、DirectML、ONNX Runtime 与其他依赖：保留各自随附的完整许可和来源，第三方许可不适用于整个应用。
 
 ---
-
-<p align="center">
-  <img src="https://count.getloli.com/get/@sylvain-cjh-md3musicwidget?theme=miku" width="300" alt="初音未来主题的 README 访问计数器" />
-</p>
-
-<p align="center"><sub>README 访问计数 · 由 <a href="https://github.com/journey-ad/Moe-Counter">Moe Counter</a> 提供，不代表独立访客或下载量。</sub></p>
 
 <p align="center"><sub>音乐照常播放，画面留给你。</sub></p>

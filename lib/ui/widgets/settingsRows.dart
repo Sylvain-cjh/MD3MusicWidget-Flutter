@@ -378,12 +378,11 @@ extension _SettingsRows on _SettingsPanelState {
               icon: const Icon(Icons.restart_alt_rounded),
               onPressed: onReset,
             ),
-          Switch(
+          LiquidSettingsSwitch(
             value: value,
             onChanged: disabled ? null : onChanged,
-            activeThumbColor: AppState.currentScheme.onPrimary,
-            activeTrackColor: AppState.currentScheme.primary,
-            trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+            useGlass: AppState.enableNavigationGlass,
+            scheme: AppState.currentScheme,
           ),
         ],
       ),
@@ -447,38 +446,26 @@ extension _SettingsRows on _SettingsPanelState {
       ),
     );
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (AppState.isVertical || constraints.maxWidth < 520) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                titleBlock,
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: control,
-                  ),
-                ),
-              ],
+    
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      child: SizedBox(
+        width: double.infinity,
+        child: Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            titleBlock,
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: control,
             ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(child: titleBlock),
-              control,
-            ],
-          ),
-        );
-      },
+          ],
+        ),
+      ),
     );
   }
 }

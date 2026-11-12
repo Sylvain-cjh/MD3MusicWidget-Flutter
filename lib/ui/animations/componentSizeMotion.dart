@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import '../widgets/smoothRoundedClip.dart';
+import '../../core/widgetDiagnostics.dart';
+import '../widgets/windowPaintProbe.dart';
 
 final class ComponentSizeMotion {
   static const Duration _legacyFrameDuration = Duration(milliseconds: 260);
@@ -197,25 +199,31 @@ class ComponentSizeStage extends StatelessWidget {
   Widget _frame(Widget fullCanvas) {
     final radius = decoration.borderRadius ?? BorderRadius.zero;
     final border = decoration.border;
-    return SmoothRoundedClip(
+    final uniform = border == null || (border is Border && border.isUniform);
+    final frame = SmoothRoundedClip(
       borderRadius: radius,
-      child: DecoratedBox(
-        decoration: border == null || (border is Border && border.isUniform)
-            ? ShapeDecoration(
-                color: decoration.color,
-                gradient: decoration.gradient,
-                image: decoration.image,
-                shadows: decoration.boxShadow,
-                shape: SmoothSurfaceCorners.shape(
-                  radius,
-                  side: border is Border ? border.top : BorderSide.none,
-                ),
-              )
-            : decoration,
-        position: DecorationPosition.foreground,
-        child: fullCanvas,
-      ),
+      side: uniform && border is Border ? border.top : BorderSide.none,
+      child:
+          uniform &&
+              decoration.color == null &&
+              decoration.gradient == null &&
+              decoration.image == null &&
+              decoration.boxShadow == null
+          ? fullCanvas
+          : DecoratedBox(
+              decoration: uniform
+                  ? BoxDecoration(
+                      color: decoration.color,
+                      gradient: decoration.gradient,
+                      image: decoration.image,
+                      boxShadow: decoration.boxShadow,
+                    )
+                  : decoration,
+              position: DecorationPosition.foreground,
+              child: fullCanvas,
+            ),
     );
+    return WidgetDiagnostics.enabled ? WindowPaintProbe(child: frame) : frame;
   }
 
   Widget _stage(double inset) {

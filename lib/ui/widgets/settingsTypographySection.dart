@@ -107,10 +107,7 @@ extension _SettingsTypographySection on _SettingsPanelState {
         child: TextButton.icon(
           icon: const Icon(Icons.info_outline_rounded, size: 18),
           label: const Text(SettingsLabels.fontCredits),
-          onPressed: () => showLicensePage(
-            context: context,
-            applicationName: 'MD3 Music Widget',
-          ),
+          onPressed: () => showSettingsLicenses(context),
         ),
       ),
     ],

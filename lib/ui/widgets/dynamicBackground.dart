@@ -188,6 +188,7 @@ class DynamicBackground extends StatefulWidget {
   final bool? verticalLayout;
   final bool animateArtworkReplacement;
   final bool allowGlowCrop;
+  final bool reserveNextUpInGlowCrop;
   const DynamicBackground({
     super.key,
     this.anchorHeight,
@@ -196,6 +197,7 @@ class DynamicBackground extends StatefulWidget {
     this.verticalLayout,
     this.animateArtworkReplacement = true,
     this.allowGlowCrop = true,
+    this.reserveNextUpInGlowCrop = false,
   });
 
   
@@ -416,10 +418,21 @@ class _DynamicBackgroundState extends State<DynamicBackground>
       
       
       final status = PaintingBinding.instance.imageCache.statusForKey(full);
+      
+      
+      final viewport = Size(
+        constraints.maxWidth,
+        widget.reserveNextUpInGlowCrop && widget.anchorHeight != null
+            ? math.max(
+                constraints.maxHeight,
+                height + AppState.nextUpReservedExtent,
+              )
+            : constraints.maxHeight,
+      );
       final crop = widget.allowGlowCrop && !status.tracked
           ? BlurredArtworkProvider.visibleRasterCrop(
               rect,
-              constraints.biggest,
+              viewport,
               full.rasterSize,
             )
           : null;
@@ -462,6 +475,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
       widget.anchorLeft,
       widget.animateArtworkReplacement,
       widget.allowGlowCrop,
+      widget.reserveNextUpInGlowCrop,
     );
     if (_blurredArtworkKey != key) {
       _blurredArtworkKey = key;
@@ -619,7 +633,11 @@ class _DynamicBackgroundState extends State<DynamicBackground>
                           _artworkAbsent
                       ? 0.0
                       : 1.0,
-                  duration: AppState.layoutSwitchDuration,
+                  
+                  
+                  duration: widget.animateArtworkReplacement
+                      ? AppState.layoutSwitchDuration
+                      : Duration.zero,
                   curve: AppState.layoutSwitchCurve,
                   onEnd: _releaseHeldArtwork,
                   child: SizedBox.expand(

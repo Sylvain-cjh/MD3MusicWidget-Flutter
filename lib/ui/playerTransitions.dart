@@ -11,18 +11,21 @@ extension _PlayerTransitions on _PlayerViewState {
       final reduced = MediaQuery.disableAnimationsOf(context);
       final frameRender = _layoutFrameKey.currentContext?.findRenderObject();
       final playerRender = _playerAnchorKey.currentContext?.findRenderObject();
+      final viewportOrigin = ClientViewportProjection.originOf(context);
       final inset = AppState.showLyrics
           ? 64 * _lyricsVisualMotion.animation.value * _frameScale
           : 0.0;
       final frameOffset = frameRender is RenderBox && frameRender.hasSize
-          ? frameRender.localToGlobal(Offset.zero)
+          ? frameRender.localToGlobal(Offset.zero) - viewportOrigin
           : Offset(_leftPadding, 0);
       final frameSize = frameRender is RenderBox && frameRender.hasSize
           ? Size(frameRender.size.width, frameRender.size.height + inset)
           : bounds.size;
       final source = (bounds.topLeft + frameOffset) & frameSize;
       final playerLeft = playerRender is RenderBox && playerRender.hasSize
-          ? bounds.left + playerRender.localToGlobal(Offset.zero).dx
+          ? bounds.left +
+                playerRender.localToGlobal(Offset.zero).dx -
+                viewportOrigin.dx
           : bounds.left + _leftPadding;
       final targetPadding =
           targetOpen &&
@@ -57,6 +60,8 @@ extension _PlayerTransitions on _PlayerViewState {
         _layoutPreviousBackdrop = snapshot;
         _layoutPreparing = true;
         _layoutHeldFrame = source.shift(-bounds.topLeft);
+        _layoutHeldStage = stage;
+        _layoutHeldSource = bounds;
         _layoutMotion.holdCapturedBackdrop();
       });
       _retireLayoutImage(oldImage);
@@ -113,6 +118,8 @@ extension _PlayerTransitions on _PlayerViewState {
         _layoutPreviousBackdrop = null;
         _layoutPreparing = false;
         _layoutHeldFrame = null;
+        _layoutHeldStage = null;
+        _layoutHeldSource = null;
         _layoutPlayerCanvasHeight = null;
       });
       _retireLayoutImage(old);
@@ -172,6 +179,16 @@ extension _PlayerTransitions on _PlayerViewState {
     final Rect stage = bounds.expandToInclude(targetRect);
 
     _leftPadding = absCardLeft - stage.left;
+    if (targetLayout == WidgetLayout.horizontal &&
+        targetSettingsSide == 'left' &&
+        _leftPadding > 0) {
+      
+      
+      _settingsLeftStage = (
+        width: bounds.width - (absCardLeft - bounds.left),
+        extra: _leftPadding,
+      );
+    }
     if (!_rectNearlyEquals(bounds, stage)) {
       await _writeWindowBounds(stage, serial: serial);
       
@@ -477,13 +494,18 @@ extension _PlayerTransitions on _PlayerViewState {
     }
   }
 
-  Widget _buildSettingsPanel() {
+  Widget _buildSettingsPanel({
+    GlobalKey? glassBackdropKey,
+    required bool glassCaptureReady,
+  }) {
     return RepaintBoundary(
       key: const ValueKey('settings_panel_surface'),
       child: Material(
         type: MaterialType.transparency,
         child: SettingsPanel(
           isMousePassthroughAvailable: _isSystemTrayReady,
+          glassBackdropKey: glassBackdropKey,
+          glassCaptureReady: glassCaptureReady,
           onThemeChanged: () {
             _updateState(() {});
             unawaited(_updateColorScheme());

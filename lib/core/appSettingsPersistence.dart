@@ -160,6 +160,8 @@ class _AppSettings {
         AppState.enableGlow = snapshot['enableGlow'] is bool
             ? snapshot['enableGlow'] as bool
             : true;
+        AppState.enableNavigationGlass =
+            snapshot['enableNavigationGlass'] == true;
         AppState.glowMode = _enumFromName(
           GlowMode.values,
           snapshot['glowMode'],
@@ -471,6 +473,8 @@ class _AppSettings {
       DynamicSchemeVariant.tonalSpot,
     );
     AppState.enableGlow = p.getBool('enableGlow') ?? true;
+    AppState.enableNavigationGlass =
+        p.getBool('enableNavigationGlass') ?? false;
     AppState.glowMode = _enumFromIndex(
       GlowMode.values,
       p.getInt('glowMode'),
@@ -649,6 +653,7 @@ class _AppSettings {
     'themeIsDark': AppState.themeBrightness == Brightness.dark,
     'themeVariant': AppState.themeVariant.name,
     'enableGlow': AppState.enableGlow,
+    'enableNavigationGlass': AppState.enableNavigationGlass,
     'glowMode': AppState.glowMode.name,
     'rightCoverDarkening': AppState.rightCoverDarkening,
     'rightCoverFadeLength': AppState.rightCoverFadeLength,

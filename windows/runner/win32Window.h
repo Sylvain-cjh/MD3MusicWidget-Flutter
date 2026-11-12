@@ -56,6 +56,10 @@ class Win32Window {
   RECT GetClientArea();
 
  protected:
+  void SetRetainClientSurface(bool retain) { retain_client_surface_ = retain; }
+  POINT ClientSurfaceInset() const { return client_surface_inset_; }
+  virtual void OnClientSurfaceChanged() {}
+
   
   
   
@@ -97,6 +101,11 @@ class Win32Window {
 
   
   HWND child_content_ = nullptr;
+  bool retain_client_surface_ = false;
+  bool reset_client_surface_ = false;
+  POINT client_surface_inset_{};
+  POINT client_origin_before_position_{};
+  bool have_client_origin_before_position_ = false;
 };
 
 #endif  

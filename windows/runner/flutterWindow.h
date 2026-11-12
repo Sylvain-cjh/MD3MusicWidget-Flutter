@@ -12,6 +12,7 @@
 #include "systemPerformanceMonitor.h"
 #include "systemFonts.h"
 #include "nativeMediaBridge.h"
+#include "systemTray.h"
 
 
 class FlutterWindow : public Win32Window {
@@ -24,10 +25,12 @@ class FlutterWindow : public Win32Window {
   
   bool OnCreate() override;
   void OnDestroy() override;
+  void OnClientSurfaceChanged() override;
   LRESULT MessageHandler(HWND window, UINT const message, WPARAM const wparam,
                          LPARAM const lparam) noexcept override;
 
  private:
+  flutter::EncodableValue ClientViewport();
   void RefreshFonts();
   SystemFontCatalog font_catalog_;
   bool font_refresh_pending_ = false;
@@ -40,6 +43,17 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       system_performance_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> system_fonts_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      client_viewport_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      app_info_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      system_tray_channel_;
+  SystemTray system_tray_;
+  bool watch_client_viewport_ = false;
+  LONG published_client_width_ = 0;
+  LONG published_client_height_ = 0;
+  POINT published_client_inset_{};
   
   
   std::unique_ptr<SystemPerformanceMonitor> performance_monitor_;

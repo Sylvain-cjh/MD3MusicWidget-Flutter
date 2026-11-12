@@ -1,5 +1,7 @@
 #include "win32Window.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
@@ -91,7 +93,9 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     WNDCLASS window_class{};
     window_class.hCursor = LoadCursor(nullptr, IDC_ARROW);
     window_class.lpszClassName = kWindowClassName;
-    window_class.style = CS_HREDRAW | CS_VREDRAW;
+    
+    
+    window_class.style = 0;
     window_class.cbClsExtra = 0;
     window_class.cbWndExtra = 0;
     window_class.hInstance = GetModuleHandle(nullptr);
@@ -192,23 +196,121 @@ Win32Window::MessageHandler(HWND hwnd,
       LONG newWidth = newRectSize->right - newRectSize->left;
       LONG newHeight = newRectSize->bottom - newRectSize->top;
 
+      reset_client_surface_ = true;
       SetWindowPos(hwnd, nullptr, newRectSize->left, newRectSize->top, newWidth,
                    newHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+      reset_client_surface_ = false;
 
       return 0;
     }
+    case WM_ERASEBKGND:
+      
+      return 1;
+
+    case WM_WINDOWPOSCHANGING: {
+      POINT origin{};
+      have_client_origin_before_position_ = ClientToScreen(hwnd, &origin);
+      client_origin_before_position_ = origin;
+      break;
+    }
+    case WM_WINDOWPOSCHANGED: {
+      
+      const auto result = DefWindowProc(hwnd, message, wparam, lparam);
+      have_client_origin_before_position_ = false;
+      return result;
+    }
+
     case WM_SIZE: {
-      RECT rect = GetClientArea();
-      if (child_content_ != nullptr) {
-        
-        MoveWindow(child_content_, rect.left, rect.top, rect.right - rect.left,
-                   rect.bottom - rect.top, TRUE);
+      if (child_content_ == nullptr || wparam == SIZE_MINIMIZED) {
+        return 0;
       }
+      RECT rect = GetClientArea();
+      RECT child_rect{};
+      auto width = rect.right - rect.left;
+      auto height = rect.bottom - rect.top;
+      const bool child_size_known = GetClientRect(child_content_, &child_rect);
+      POINT inset{};
+      if (child_size_known && width > 0 && height > 0 &&
+          retain_client_surface_ && !reset_client_surface_ &&
+          IsWindowVisible(hwnd)) {
+        
+        
+        
+        
+        constexpr int64_t kMaxExtraPixels = 1024 * 1024;
+        auto x = client_surface_inset_.x;
+        auto y = client_surface_inset_.y;
+        POINT origin{};
+        if (have_client_origin_before_position_ && ClientToScreen(hwnd, &origin)) {
+          x += origin.x - client_origin_before_position_.x;
+          y += origin.y - client_origin_before_position_.y;
+        }
+        
+        
+        const auto candidate_x = (std::max)(0L, x);
+        const auto candidate_y = (std::max)(0L, y);
+        const auto required_width = width + candidate_x;
+        const auto required_height = height + candidate_y;
+        const auto retained_width = (std::max)(required_width, child_rect.right);
+        const auto retained_height = (std::max)(required_height, child_rect.bottom);
+        const auto extra = int64_t{retained_width} * retained_height -
+                           int64_t{width} * height;
+        
+        
+        if ((required_width <= child_rect.right &&
+             required_height <= child_rect.bottom) ||
+            extra <= kMaxExtraPixels) {
+          inset = {candidate_x, candidate_y};
+          width = retained_width;
+          height = retained_height;
+        }
+      }
+      const auto old_inset = client_surface_inset_;
+      const bool moved = old_inset.x != inset.x || old_inset.y != inset.y;
+      const bool resized = !child_size_known || child_rect.right != width ||
+                           child_rect.bottom != height;
+      if (width > 0 && height > 0 && (resized || moved)) {
+        
+        
+        
+        client_surface_inset_ = inset;
+        if (resized) OnClientSurfaceChanged();
+        if (!SetWindowPos(child_content_, nullptr, -inset.x, -inset.y,
+                          width, height,
+                          SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOREDRAW |
+                              (resized ? 0 : SWP_NOSIZE))) {
+          client_surface_inset_ = old_inset;
+        }
+      }
+      OnClientSurfaceChanged();
       return 0;
     }
+
+    case WM_SHOWWINDOW:
+      if (!wparam && retain_client_surface_ && child_content_ != nullptr &&
+          IsWindow(child_content_)) {
+        
+        
+        const auto rect = GetClientArea();
+        RECT child_rect{};
+        if (rect.right > 0 && rect.bottom > 0 &&
+            GetClientRect(child_content_, &child_rect) &&
+            (child_rect.right != rect.right || child_rect.bottom != rect.bottom ||
+             client_surface_inset_.x != 0 || client_surface_inset_.y != 0)) {
+          const auto old_inset = client_surface_inset_;
+          client_surface_inset_ = {};
+          OnClientSurfaceChanged();
+          if (!SetWindowPos(child_content_, nullptr, 0, 0, rect.right, rect.bottom,
+                            SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOREDRAW)) {
+            client_surface_inset_ = old_inset;
+            OnClientSurfaceChanged();
+          }
+        }
+      }
+      break;
 
     case WM_ACTIVATE:
-      if (child_content_ != nullptr) {
+      if (LOWORD(wparam) != WA_INACTIVE && child_content_ != nullptr) {
         SetFocus(child_content_);
       }
       return 0;
@@ -240,6 +342,7 @@ Win32Window* Win32Window::GetThisFromHandle(HWND const window) noexcept {
 
 void Win32Window::SetChildContent(HWND content) {
   child_content_ = content;
+  client_surface_inset_ = {};
   SetParent(content, window_handle_);
   RECT frame = GetClientArea();
 

@@ -31,22 +31,32 @@ class LayoutMorphMotion extends ChangeNotifier {
   Rect get frame => geometry(beginFrame, endFrame, controller.value);
 
   Rect geometry(Rect begin, Rect end, double value, {bool cover = false}) {
-    final t = value.clamp(0.0, 1.0);
-    final x = towardVertical
-        ? Curves.easeInOutCubic.transform(t)
-        : Curves.easeOutCubic.transform((t * 2).clamp(0.0, 1.0));
-    final y = towardVertical
-        ? Curves.easeOutCubic.transform(t)
-        : Curves.easeInOutCubic.transform(t);
-    final artwork = towardVertical
-        ? Curves.easeInOutCubic.transform(t)
-        : Curves.easeOutQuart.transform(t);
+    final p = curve.transform(value.clamp(0.0, 1.0));
+    if (p <= 0) return begin;
+    if (p >= 1) return end;
+    final q = 1 - p;
+    
+    
+    
+    final lateAxis = p * p * p;
+    final earlyAxis = 1 - q * q * q;
+    final artwork = towardVertical ? p * p : 1 - q * q;
+    final x = cover
+        ? artwork
+        : towardVertical
+        ? lateAxis
+        : earlyAxis;
+    final y = cover
+        ? artwork
+        : towardVertical
+        ? earlyAxis
+        : lateAxis;
     double mix(double a, double b, double p) => a + (b - a) * p;
     return Rect.fromLTWH(
-      mix(begin.left, end.left, cover ? artwork : x),
-      mix(begin.top, end.top, cover ? artwork : y),
-      mix(begin.width, end.width, cover ? artwork : x),
-      mix(begin.height, end.height, cover ? artwork : y),
+      mix(begin.left, end.left, x),
+      mix(begin.top, end.top, y),
+      mix(begin.width, end.width, x),
+      mix(begin.height, end.height, y),
     );
   }
 

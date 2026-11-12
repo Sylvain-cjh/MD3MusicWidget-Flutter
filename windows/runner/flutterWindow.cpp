@@ -10,6 +10,37 @@
 #include "flutter/generated_plugin_registrant.h"
 
 namespace { constexpr UINT kFontsReady = WM_APP + 83; }
+static_assert(SystemTray::kCallback != kFontsReady &&
+              SystemTray::kCallback != NativeMediaBridge::kReady &&
+              SystemTray::kCallback != NativeMediaBridge::kChanged);
+
+flutter::EncodableValue FlutterWindow::ClientViewport() {
+  const auto rect = GetClientArea();
+  const auto inset = ClientSurfaceInset();
+  return flutter::EncodableValue(flutter::EncodableList{
+      flutter::EncodableValue(static_cast<int32_t>(rect.right)),
+      flutter::EncodableValue(static_cast<int32_t>(rect.bottom)),
+      flutter::EncodableValue(static_cast<int32_t>(inset.x)),
+      flutter::EncodableValue(static_cast<int32_t>(inset.y)),
+  });
+}
+
+void FlutterWindow::OnClientSurfaceChanged() {
+  if (!watch_client_viewport_ || !client_viewport_channel_) return;
+  const auto rect = GetClientArea();
+  const auto inset = ClientSurfaceInset();
+  if (rect.right <= 0 || rect.bottom <= 0 ||
+      (rect.right == published_client_width_ &&
+       rect.bottom == published_client_height_ &&
+       inset.x == published_client_inset_.x &&
+       inset.y == published_client_inset_.y)) return;
+  published_client_width_ = rect.right;
+  published_client_height_ = rect.bottom;
+  published_client_inset_ = inset;
+  client_viewport_channel_->InvokeMethod(
+      "changed", std::make_unique<flutter::EncodableValue>(ClientViewport()));
+}
+
 void FlutterWindow::RefreshFonts() {
   font_catalog_started_ = true;
   const HWND handle = GetHandle();
@@ -40,6 +71,71 @@ bool FlutterWindow::OnCreate() {
   }
   performance_monitor_ = std::make_unique<SystemPerformanceMonitor>();
   RegisterPlugins(flutter_controller_->engine());
+  system_tray_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "md3_music_widget/system_tray",
+          &flutter::StandardMethodCodec::GetInstance());
+  system_tray_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() == "start") {
+          result->Success(flutter::EncodableValue(system_tray_.Start(GetHandle())));
+        } else if (call.method_name() == "stop") {
+          system_tray_.Stop();
+          result->Success();
+        } else if (call.method_name() == "menu") {
+          const char* action = system_tray_.ShowMenuAtCursor();
+          result->Success(action ? flutter::EncodableValue(action)
+                                 : flutter::EncodableValue());
+        } else {
+          result->NotImplemented();
+        }
+      });
+  app_info_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "md3_music_widget/app_info",
+          &flutter::StandardMethodCodec::GetInstance());
+  app_info_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() == "version") {
+          result->Success(flutter::EncodableValue(FLUTTER_VERSION));
+          return;
+        }
+        
+        
+        const wchar_t* url = nullptr;
+        if (call.method_name() == "openProject") {
+          url = L"https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter";
+        } else if (call.method_name() == "openReleases") {
+          url = L"https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases";
+        }
+        if (!url) {
+          result->NotImplemented();
+          return;
+        }
+        const auto launched = reinterpret_cast<INT_PTR>(
+            ShellExecuteW(GetHandle(), L"open", url, nullptr, nullptr, SW_SHOWNORMAL));
+        result->Success(flutter::EncodableValue(launched > 32));
+      });
+  client_viewport_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "md3_music_widget/client_viewport",
+          &flutter::StandardMethodCodec::GetInstance());
+  client_viewport_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() != "watch") { result->NotImplemented(); return; }
+        const auto rect = GetClientArea();
+        published_client_width_ = rect.right;
+        published_client_height_ = rect.bottom;
+        published_client_inset_ = ClientSurfaceInset();
+        watch_client_viewport_ = true;
+        SetRetainClientSurface(true);
+        result->Success(ClientViewport());
+      });
   native_media_bridge_ = std::make_unique<NativeMediaBridge>(flutter_controller_->engine()->messenger(), GetHandle());
   system_fonts_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
@@ -156,6 +252,21 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   native_media_bridge_.reset();
+  system_tray_.Stop();
+  if (system_tray_channel_) {
+    system_tray_channel_->SetMethodCallHandler(nullptr);
+    system_tray_channel_.reset();
+  }
+  if (app_info_channel_) {
+    app_info_channel_->SetMethodCallHandler(nullptr);
+    app_info_channel_.reset();
+  }
+  watch_client_viewport_ = false;
+  SetRetainClientSurface(false);
+  if (client_viewport_channel_) {
+    client_viewport_channel_->SetMethodCallHandler(nullptr);
+    client_viewport_channel_.reset();
+  }
   font_catalog_.Wait();
   font_refresh_pending_ = false;
   font_catalog_started_ = false;
@@ -189,6 +300,24 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   if (message == NativeMediaBridge::kChanged) {
     if (native_media_bridge_) native_media_bridge_->Changed();
     return 0;
+  }
+  if (system_tray_channel_ && system_tray_.requested()) {
+    static const UINT taskbar_created = RegisterWindowMessageW(L"TaskbarCreated");
+    if (message == SystemTray::kCallback) {
+      const char* action = system_tray_.HandleClick(wparam, lparam);
+      if (action && system_tray_channel_) {
+        system_tray_channel_->InvokeMethod(action, nullptr);
+      }
+      return 0;
+    }
+    if (taskbar_created && message == taskbar_created) {
+      const bool restored = system_tray_.RestoreAfterShellRestart();
+      system_tray_channel_->InvokeMethod(restored ? "available" : "unavailable",
+                                          nullptr);
+    } else if (message == WM_SETTINGCHANGE || message == WM_THEMECHANGED ||
+               message == WM_SYSCOLORCHANGE) {
+      system_tray_.RefreshTheme();
+    }
   }
   
   if (flutter_controller_) {

@@ -2,6 +2,17 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
+abstract final class MediaLayoutSpacing {
+  static const metadataGap = 4.0;
+  static const landscapeEdge = 16.0;
+  static const portraitEdge = 24.0;
+  static const portraitArtworkGap = 16.0;
+  static const portraitProgressGap = 12.0;
+  static const portraitTransportGap = 16.0;
+
+  static double edge(bool vertical) => vertical ? portraitEdge : landscapeEdge;
+}
+
 
 
 RRect roundedMediaFragment(Rect rect, {required bool horizontal}) =>

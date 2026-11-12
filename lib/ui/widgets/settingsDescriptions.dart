@@ -1,5 +1,7 @@
 
 final class SettingsDescriptions {
+  static const aboutApp = '在桌面上显示正在播放的歌曲、歌词和频谱';
+  static const aboutLinkFailed = '未能打开默认浏览器，请稍后再试。';
   SettingsDescriptions._();
   static const playbackTime = '在进度条后显示已播放与总时长';
 
@@ -14,6 +16,7 @@ final class SettingsDescriptions {
   
   static const colorTheme = '我们拥有绝佳的自研色彩引擎';
   static const settingsNavigationShape = '支持谷歌Material Design样式';
+  static const navigationGlass = '类Apple Liquid Glass';
   static const oled = '针对OLED屏幕优化';
   static const glow = '让封面铺满整个组件';
   static const glowMode = '选择你的色彩引擎';

@@ -53,6 +53,7 @@ END
 
 
 IDI_APP_ICON            ICON                    "resources\\app_icon.ico"
+IDI_TRAY_ICON_DARK      ICON                    "..\\..\\images\\tray_icon_dark.ico"
 
 
 

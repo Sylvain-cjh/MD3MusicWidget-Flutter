@@ -224,7 +224,7 @@ extension _PlayerGeometry on _PlayerViewState {
       _contentScale = scale;
       AppState.customComponentScale = scale / AppState.standardDisplayScale;
     }
-    final targetExtent = occupied ? 64.0 : 0.0;
+    final targetExtent = occupied ? AppState.nextUpReservedExtent : 0.0;
     final targetHeight =
         (designHeight +
             targetExtent -
@@ -379,6 +379,42 @@ extension _PlayerGeometry on _PlayerViewState {
     return mounted && serial == _windowTransitionSerial;
   }
 
+  double? _settingsLeftInViewport(Size viewport, double dpr) {
+    final stage = _settingsLeftStage;
+    if (stage == null || _displayLayout != WidgetLayout.horizontal) return null;
+    final extra = (viewport.width - stage.width).clamp(0.0, stage.extra);
+    if (extra <= 1 / dpr && _leftPadding == 0) {
+      
+      
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && identical(_settingsLeftStage, stage)) {
+          _settingsLeftStage = null;
+        }
+      });
+      return 0;
+    }
+    return extra;
+  }
+
+  Rect? _orientationFrameInViewport(Size viewport, double dpr) {
+    if (_layoutPreparing) {
+      final stage = _layoutHeldStage;
+      final source = _layoutHeldSource;
+      final frame = _layoutHeldFrame;
+      if (stage == null || source == null || frame == null) return frame;
+      final tolerance = 1 / dpr;
+      
+      
+      final isStage =
+          (viewport.width - stage.width).abs() <= tolerance &&
+          (viewport.height - stage.height).abs() <= tolerance;
+      return isStage ? frame.shift(source.topLeft - stage.topLeft) : frame;
+    }
+    return _layoutMotion.active
+        ? _layoutMotion.frameInViewport(viewport, dpr)
+        : null;
+  }
+
   Future<ui.Image?> _captureLayoutBackdrop(Rect frame, Rect bounds) async {
     try {
       await WidgetsBinding.instance.endOfFrame;
@@ -388,7 +424,10 @@ extension _PlayerGeometry on _PlayerViewState {
         return null;
       }
       final ratio = MediaQuery.devicePixelRatioOf(context);
-      final origin = bounds.topLeft + render.localToGlobal(Offset.zero);
+      final origin =
+          bounds.topLeft +
+          render.localToGlobal(Offset.zero) -
+          ClientViewportProjection.originOf(context);
       
       
       return await render.capture(
@@ -414,6 +453,8 @@ extension _PlayerGeometry on _PlayerViewState {
       _layoutPreviousBackdrop = null;
       _layoutPlayerCanvasHeight = null;
       _layoutHeldFrame = null;
+      _layoutHeldStage = null;
+      _layoutHeldSource = null;
       _layoutPreparing = false;
     });
     _retireLayoutImage(old);

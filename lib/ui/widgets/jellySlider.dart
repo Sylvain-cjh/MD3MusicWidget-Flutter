@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../animations/jellySliderMotion.dart';
 import '../../core/appState.dart';
 import 'settingsControlShape.dart';
+import 'mediaGeometry.dart';
 
 
 
@@ -508,9 +509,9 @@ class JellySliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
     void segment(double left, double right, Paint paint) {
       if (right <= left) return;
       context.canvas.drawRRect(
-        RRect.fromRectAndRadius(
+        roundedMediaFragment(
           Rect.fromLTRB(left, rect.top, right, rect.bottom),
-          Radius.circular(rect.height / 2),
+          horizontal: true,
         ),
         paint,
       );

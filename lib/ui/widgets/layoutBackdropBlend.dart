@@ -18,16 +18,24 @@ class LayoutBackdropBlend extends StatelessWidget {
     required this.child,
   });
   static const blurSigma = 6.0;
+  
+  
+  static const _blurInputMargin = blurSigma * 4 + 2;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: motion,
-    child: RepaintBoundary(
-      child: ClipRect(
-        child: SizedBox(
-          width: targetSize.width,
-          height: targetSize.height,
-          child: child,
+    child: FittedBox(
+      
+      fit: BoxFit.cover,
+      alignment: Alignment.topLeft,
+      child: RepaintBoundary(
+        child: ClipRect(
+          child: SizedBox(
+            width: targetSize.width,
+            height: targetSize.height,
+            child: child,
+          ),
         ),
       ),
     ),
@@ -38,22 +46,24 @@ class LayoutBackdropBlend extends StatelessWidget {
       final p = enabled
           ? (motion.holding && motion.freshBackdrop ? 0.0 : motion.progress)
           : 1.0;
+      final filterLive = enabled && p < .99999;
+      final liveSigma = blurSigma * (1 - p);
       return Stack(
         fit: StackFit.expand,
         children: [
           ImageFiltered(
-            enabled: enabled && p < .99999,
+            enabled: filterLive,
             imageFilter: ui.ImageFilter.blur(
-              sigmaX: blurSigma * (1 - p),
-              sigmaY: blurSigma * (1 - p),
+              sigmaX: liveSigma,
+              sigmaY: liveSigma,
               tileMode: ui.TileMode.clamp,
             ),
-            child: FittedBox(
-              
-              
-              
-              fit: BoxFit.cover,
-              alignment: Alignment.topLeft,
+            
+            
+            
+            child: ClipRect(
+              clipBehavior: filterLive ? Clip.hardEdge : Clip.none,
+              clipper: const _BlurInputClip(),
               child: live,
             ),
           ),
@@ -81,4 +91,15 @@ class LayoutBackdropBlend extends StatelessWidget {
       );
     },
   );
+}
+
+class _BlurInputClip extends CustomClipper<Rect> {
+  const _BlurInputClip();
+
+  @override
+  Rect getClip(Size size) =>
+      (Offset.zero & size).inflate(LayoutBackdropBlend._blurInputMargin);
+
+  @override
+  bool shouldReclip(_BlurInputClip oldClipper) => false;
 }

@@ -51,14 +51,6 @@ struct State {
   std::unique_ptr<Payload> completed;
   HWND window = nullptr;
 };
-bool MatchesSource(const std::wstring &id, const std::wstring &selected) {
-  if (_wcsicmp(id.c_str(), selected.c_str()) == 0) return true;
-  const auto key = NativeIdentityKey(selected);
-  
-  
-  return (key == L"cloudmusic.exe" || key == L"cloudmusic") &&
-         netease_uia::IsExplicitNetEaseSource(id);
-}
 void Notify(const std::weak_ptr<State> &weak, bool metadata) {
   if (auto state = weak.lock(); state && !state->stop && state->active) {
     ++state->notifications;
@@ -154,18 +146,26 @@ Choose(const GlobalSystemMediaTransportControlsSessionManager &manager,
   if (source.empty())
     return manager.GetCurrentSession();
   GlobalSystemMediaTransportControlsSession chosen{nullptr};
-  const auto selected = to_hstring(source);
-  for (const auto &s : manager.GetSessions())
-    if (MatchesSource(s.SourceAppUserModelId().c_str(), selected.c_str())) {
-      if (!chosen)
-        chosen = s;
-      try {
-        if (s.GetPlaybackInfo().PlaybackStatus() ==
-            GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing)
-          return s;
-      } catch (...) {
-      }
+  const std::wstring selected = to_hstring(source).c_str();
+  int bestRank = 0;
+  for (const auto &s : manager.GetSessions()) {
+    const auto id = s.SourceAppUserModelId();
+    if (NativeMediaSelectionRank(id.c_str(), selected, false) == 0)
+      continue;
+    bool playing = false;
+    try {
+      playing = s.GetPlaybackInfo().PlaybackStatus() ==
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+    } catch (...) {
     }
+    const int rank = NativeMediaSelectionRank(id.c_str(), selected, playing);
+    if (rank > bestRank) {
+      chosen = s;
+      bestRank = rank;
+    }
+    if (rank == 4)
+      break;
+  }
   return chosen;
 }
 template <typename Operation>
@@ -209,6 +209,8 @@ Snapshot(const std::shared_ptr<State> &state,
   const std::wstring selectedId = to_hstring(selected).c_str();
   const bool neteaseSelected = netease_uia::IsExplicitNetEaseSource(selectedId);
   GlobalSystemMediaTransportControlsSession chosen{nullptr};
+  int bestRank = 0;
+  std::wstring chosenId;
   if (manager) for (const auto &session : manager.GetSessions()) {
     const auto id = session.SourceAppUserModelId();
     bool playing = false;
@@ -221,10 +223,22 @@ Snapshot(const std::shared_ptr<State> &state,
     auto key = std::wstring(id.c_str());
     if (!key.empty())
       unique[key] = unique[key] || playing;
-    if (!selected.empty() &&
-        MatchesSource(id.c_str(), selectedId) &&
-        (!chosen || playing))
+    const int rank = NativeMediaSelectionRank(key, selectedId, playing);
+    if (rank > bestRank) {
       chosen = session;
+      bestRank = rank;
+      chosenId = key;
+    }
+  }
+  
+  
+  if (!chosenId.empty() && unique.find(selectedId) == unique.end()) {
+    const auto entry = unique.find(chosenId);
+    if (entry != unique.end()) {
+      const bool playing = entry->second;
+      unique.erase(entry);
+      unique.emplace(selectedId, playing);
+    }
   }
   for (const auto &[id, playing] : unique) {
     JsonObject entry;

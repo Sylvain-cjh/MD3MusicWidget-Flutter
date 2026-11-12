@@ -219,7 +219,8 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final Size viewport = constraints.biggest;
-          final double menuPadding = 8 * visualScale;
+          final double menuPadding =
+              SmoothSurfaceCorners.popoverRowInset * visualScale;
           final double contentHeight =
               entries.length * itemHeight + menuPadding * 2;
           final int safeSelectedIndex = selectedIndex < 0 ? 0 : selectedIndex;
@@ -271,12 +272,22 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
                     }
                     return ClipPath(
                       key: const ValueKey('md3-select-reveal'),
-                      clipBehavior: Clip.antiAliasWithSaveLayer,
+                      clipBehavior: animation.isCompleted
+                          ? Clip.none
+                          : Clip.antiAlias,
                       clipper: _SelectedItemRevealClipper(
                         progress: progress,
                         selectedCenter: selectedViewportCenter,
                         initialHeight: itemHeight,
-                        cornerRadius: 12 * visualScale,
+                        cornerRadius:
+                            (SmoothSurfaceCorners.control.topLeft.x +
+                                (SmoothSurfaceCorners.popoverRadius -
+                                        SmoothSurfaceCorners
+                                            .control
+                                            .topLeft
+                                            .x) *
+                                    progress) *
+                            visualScale,
                       ),
                       child: child,
                     );
@@ -353,7 +364,9 @@ class _Md3SelectMenuState<T> extends State<_Md3SelectMenu<T>> {
       clipBehavior: Clip.antiAliasWithSaveLayer,
       child: SingleChildScrollView(
         controller: _scrollController,
-        padding: EdgeInsets.symmetric(vertical: 8 * widget.visualScale),
+        padding: EdgeInsets.symmetric(
+          vertical: SmoothSurfaceCorners.popoverRowInset * widget.visualScale,
+        ),
         child: FocusTraversalGroup(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -497,8 +510,11 @@ class _SelectedItemRevealClipper extends CustomClipper<Path> {
       size.width,
       bottom.clamp(0.0, size.height),
     );
-    return Path()..addRRect(
-      RRect.fromRectAndRadius(revealRect, Radius.circular(cornerRadius)),
+    return Path()..addRSuperellipse(
+      RSuperellipse.fromRectAndRadius(
+        revealRect,
+        Radius.circular(cornerRadius),
+      ),
     );
   }
 

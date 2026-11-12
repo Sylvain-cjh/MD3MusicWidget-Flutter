@@ -62,6 +62,7 @@ endif()
 add_executable(${BINARY_NAME} WIN32
   "flutterWindow.cpp"
   "systemFonts.cpp"
+  "systemTray.cpp"
   "systemPerformanceMonitor.cpp"
   "main.cpp"
   "utils.cpp"
@@ -74,6 +75,7 @@ add_executable(${BINARY_NAME} WIN32
 
 
 apply_standard_settings(${BINARY_NAME})
+target_compile_options(${BINARY_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
 
 
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")
@@ -93,6 +95,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE native_media_preview windowsapp)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "pdh.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "dwrite.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "advapi32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 

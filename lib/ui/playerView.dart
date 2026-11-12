@@ -14,6 +14,7 @@ import '../core/appState.dart';
 import '../core/widgetDiagnostics.dart';
 import '../core/nativeWindowGeometry.dart';
 import '../core/windowGeometryQueue.dart';
+import '../core/windowsTrayBridge.dart';
 import '../core/artworkResources.dart';
 import '../core/artworkRequests.dart';
 import '../core/mediaProvider.dart';
@@ -42,6 +43,9 @@ import 'widgets/musicNextUpPanel.dart';
 import 'widgets/spectrumPerformanceRow.dart';
 import 'widgets/slideMenu.dart';
 import 'widgets/settingsPanel.dart';
+import 'widgets/nativeClientViewport.dart';
+import 'widgets/orientationScene.dart';
+import 'widgets/mediaGeometry.dart';
 
 part 'playerServices.dart';
 part 'playerArtwork.dart';
@@ -136,6 +140,7 @@ class _PlayerViewState extends State<PlayerView>
   bool _isMenuOpen = false;
   bool _menuResizeInFlight = false;
   bool _isSystemTrayReady = false;
+  final _windowsTray = WindowsTrayBridge();
   String _menuSide = "right";
   double _menuTop = 12.0;
 
@@ -158,6 +163,7 @@ class _PlayerViewState extends State<PlayerView>
 
   bool _isTransitioning = false;
   double _leftPadding = 0.0;
+  ({double width, double extra})? _settingsLeftStage;
   int _windowTransitionSerial = 0;
   final _windowGeometry = WindowGeometryQueue();
   bool _nextUpResizePending = false;
@@ -183,6 +189,8 @@ class _PlayerViewState extends State<PlayerView>
   bool _layoutPreparing = false;
   bool _layoutCleanupScheduled = false;
   Rect? _layoutHeldFrame;
+  Rect? _layoutHeldStage;
+  Rect? _layoutHeldSource;
   double? _layoutPlayerCanvasHeight;
   double? _menuBaseViewportWidth;
   double _menuNativeExtra = 0;
@@ -193,12 +201,12 @@ class _PlayerViewState extends State<PlayerView>
     _displayLayout = AppState.widgetLayout;
     _layoutMotion = LayoutMorphMotion(
       vsync: this,
-      duration: AppState.layoutSwitchDuration,
-      curve: AppState.layoutSwitchCurve,
+      duration: MediaMotionTokens.orientation,
+      curve: MediaMotionTokens.orientationCurve,
     );
     _artworkResources = ArtworkResources();
     windowManager.addListener(this);
-    tm.trayManager.addListener(this);
+    if (!Platform.isWindows) tm.trayManager.addListener(this);
     _nextUpMotion = NextUpPresenceMotion(
       vsync: this,
       reserveSpace: _reserveNextUpSpace,
@@ -302,7 +310,11 @@ class _PlayerViewState extends State<PlayerView>
     _resizeSaveTimer?.cancel();
     _artworkResources.dispose();
     windowManager.removeListener(this);
-    tm.trayManager.removeListener(this);
+    if (Platform.isWindows) {
+      unawaited(_windowsTray.stop());
+    } else {
+      tm.trayManager.removeListener(this);
+    }
     AppState.nextUpPreviewVisible.removeListener(_onNextUpVisibilityChanged);
     _nextUpMotion.dispose();
     AppState.nextUpPanelOccupied = false;

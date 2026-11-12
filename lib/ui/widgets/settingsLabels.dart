@@ -10,6 +10,22 @@ final class SettingsLabels {
   static const playbackTab = '播放';
   static const lyricsTab = '歌词';
   static const typographyTab = '字体';
+  static const aboutTab = '关于';
+
+  static const appName = 'MD3 Music Widget';
+  static const aboutVersionLoading = '正在读取版本';
+  static const aboutVersionUnavailable = '版本信息不可用';
+  static String aboutVersion(String version) => '版本 $version';
+  static const aboutSource = '项目源码';
+  static const aboutReleases = '发行记录';
+  static const aboutCheckUpdate = '检查更新';
+  static const aboutCheckingUpdate = '正在检查…';
+  static const aboutUpToDate = '当前没有可用更新';
+  static const aboutNoPublicRelease = '没有查到公开的正式发行。';
+  static const aboutUpdateFailed = '未能检查更新，请稍后再试。';
+  static const aboutViewUpdate = '查看发行页';
+  static String aboutUpdateAvailable(String version) => '发现新版本 $version';
+  static const aboutLicenses = '开源许可';
 
   
   static const windowGroup = '窗口与布局';
@@ -40,6 +56,7 @@ final class SettingsLabels {
   static const themeFidelity = '真实';
   static const themeExpressive = '表现力';
   static const darkMode = '深色模式';
+  static const navigationGlass = 'Liquid Glass';
   static const settingsNavigationShape = '设置导航形状';
   static const oled = 'OLED 模式';
   static const glow = '流光背景';

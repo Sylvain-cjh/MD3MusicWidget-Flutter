@@ -581,6 +581,7 @@ class AppState {
   static Brightness themeBrightness = Brightness.dark;
 
   static bool enableGlow = true;
+  static bool enableNavigationGlass = false;
   static GlowMode glowMode = GlowMode.waterfall;
   static const defaultRightCoverDarkening = 0.32;
   static const defaultRightCoverFadeLength = 0.65;
@@ -829,8 +830,9 @@ class AppState {
       ? 0.0
       : 64.0;
   static double lyricsPanelExtentOf(WidgetLayout l) => showLyrics ? 64.0 : 0.0;
+  static const nextUpReservedExtent = 64.0;
   static double nextUpPanelExtentOf(WidgetLayout l) =>
-      nextUpPanelOccupied ? 64.0 : 0.0;
+      nextUpPanelOccupied ? nextUpReservedExtent : 0.0;
   static double innerPlayerHeightOf(WidgetLayout l) =>
       corePlayerHeightOf(l) +
       spectrumPanelExtentOf(l) +

@@ -128,21 +128,16 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
                 : SmoothRoundedClip(
                     key: ValueKey('next_up_${next.id}'),
                     borderRadius: SmoothSurfaceCorners.mediaStrip,
+                    side: BorderSide(
+                      width: RoundedRasterScale.hairline(context),
+                      color: scheme.outlineVariant.withValues(alpha: 0.28),
+                    ),
                     child: BackdropFilter(
                       filter: _glassBlur,
                       child: DecoratedBox(
-                        decoration: ShapeDecoration(
+                        decoration: BoxDecoration(
                           color: scheme.surfaceContainerHigh.withValues(
                             alpha: 0.62,
-                          ),
-                          shape: SmoothSurfaceCorners.shape(
-                            SmoothSurfaceCorners.mediaStrip,
-                            side: BorderSide(
-                              width: RoundedRasterScale.hairline(context),
-                              color: scheme.outlineVariant.withValues(
-                                alpha: 0.28,
-                              ),
-                            ),
                           ),
                         ),
                         child: Padding(

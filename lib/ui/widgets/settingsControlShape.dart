@@ -4,8 +4,12 @@ import '../../core/appState.dart';
 
 final class SettingsControlShape {
   static const referenceHeight = 50.0;
-  static ShapeBorder borderFor(MD3Shape shape) => switch (shape) {
-    MD3Shape.stadium || MD3Shape.circle => const StadiumBorder(),
+  static RoundedSuperellipseBorder borderFor(MD3Shape shape) => switch (shape) {
+    
+    
+    MD3Shape.stadium || MD3Shape.circle => const RoundedSuperellipseBorder(
+      borderRadius: BorderRadius.all(Radius.circular(referenceHeight / 2)),
+    ),
     MD3Shape.roundedExtraSmall => const RoundedSuperellipseBorder(
       borderRadius: BorderRadius.all(Radius.circular(4)),
     ),
