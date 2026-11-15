@@ -106,8 +106,7 @@ class _LicensesPageState extends State<_LicensesPage> {
                         filled: true,
                         fillColor: scheme.surfaceContainerHigh,
                         isDense: true,
-                        border: const OutlineInputBorder(
-                          borderRadius: SmoothSurfaceCorners.control,
+                        border: SmoothSurfaceCorners.controlInput.copyWith(
                           borderSide: BorderSide.none,
                         ),
                       ),

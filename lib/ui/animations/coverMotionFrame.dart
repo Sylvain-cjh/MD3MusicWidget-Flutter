@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../core/appState.dart';
+import '../widgets/continuousSurfaceBorder.dart';
 import 'mediaMotionTokens.dart';
 
 class CoverMotionFrame {
@@ -190,7 +191,7 @@ class CoverFrameView extends StatelessWidget {
         style == CoverTransitionStyle.filmHorizontal;
     return IgnorePointer(
       ignoring: exiting,
-      child: ClipRSuperellipse(
+      child: ContinuousCornerClip(
         borderRadius: borderRadius,
         clipBehavior: film && frame.offset != Offset.zero
             ? Clip.antiAlias

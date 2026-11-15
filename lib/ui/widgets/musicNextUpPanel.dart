@@ -125,9 +125,8 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
             ).animate(_animation),
             child: !preview
                 ? const SizedBox.shrink(key: ValueKey('next_up_hidden'))
-                : SmoothRoundedClip(
+                : SmoothRoundedClip.mediaStrip(
                     key: ValueKey('next_up_${next.id}'),
-                    borderRadius: SmoothSurfaceCorners.mediaStrip,
                     side: BorderSide(
                       width: RoundedRasterScale.hairline(context),
                       color: scheme.outlineVariant.withValues(alpha: 0.28),

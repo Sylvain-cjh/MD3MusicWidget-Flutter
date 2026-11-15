@@ -11,7 +11,7 @@
 
 <p><strong>把正在听的歌，留在桌面或直播画面里。</strong><br/>不换播放器，也不挡住你正在做的事。</p>
 
-[![版本 1.3.0](https://img.shields.io/badge/version-1.3.0-74549D?style=flat-square)](CHANGELOG.md)
+[![版本 1.3.1](https://img.shields.io/badge/version-1.3.1-74549D?style=flat-square)](CHANGELOG.md)
 [![Windows x64](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-507765?style=flat-square)](#开始使用)
 [![Flutter](https://img.shields.io/badge/UI-Flutter-74549D?style=flat-square&logo=flutter&logoColor=white)](#工作原理)
 [![内置音乐采集](https://img.shields.io/badge/capture-SMTC%20%2B%20WASAPI-507765?style=flat-square)](docs/native_capture.md)
@@ -49,19 +49,23 @@
 
 **第一次用，建议先选无模型版。** 它保留封面、歌词、频谱、性能监视器和普通 3D 悬浮效果。只有想让封面里的主体和背景产生不同深度的视差时，才需要分层模型。
 
-| 1.3.0 套件 | 怎么选 | 安装版（EXE） | 免安装版（ZIP） |
+| 1.3.1 套件 | 怎么选 | 安装版（EXE） | 免安装版（ZIP） |
 | --- | --- | --- | --- |
-| **无分层模型版** · `Without-Layer-Models` | 只想看歌曲、封面、频谱和歌词 | `MD3MusicWidget-Without-Layer-Models-Setup-1.3.0.exe` | `MD3MusicWidget-Without-Layer-Models-Portable-1.3.0.zip` |
-| **有分层模型版** · `With-Layer-Models` | 想让封面主体与背景有不同景深；需要兼容核显 | `MD3MusicWidget-With-Layer-Models-Setup-1.3.0.exe` | `MD3MusicWidget-With-Layer-Models-Portable-1.3.0.zip` |
+| **无分层模型版** · `Without-Layer-Models` | 只想看歌曲、封面、频谱和歌词 | `MD3MusicWidget-Without-Layer-Models-Setup-1.3.1.exe` | `MD3MusicWidget-Without-Layer-Models-Portable-1.3.1.zip` |
+| **有分层模型版** · `With-Layer-Models` | 想让封面主体与背景有不同景深；需要兼容核显 | `MD3MusicWidget-With-Layer-Models-Setup-1.3.1.exe` | `MD3MusicWidget-With-Layer-Models-Portable-1.3.1.zip` |
 
 本地发行目录按套件分文件夹。线上已发布的附件以 [GitHub 发行页](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases) 为准；[cover-layers 仓库](https://github.com/Sylvain-cjh/cover-layers) 可查看后端源码。
 
-1.3.0 的有模型版沿用 1.2.1 正式模型，本次不单独发行 cover-layers。需要模型请选有模型版，详见 [分层模型说明](docs/layer_models.md)。
+1.3.1 的有模型版沿用上一版的正式模型，本次不单独发行 cover-layers。需要模型请选有模型版，详见 [分层模型说明](docs/layer_models.md)。
 
 > [!IMPORTANT]
 > 主程序要求 **Windows 10 2004（Build 19041）或更新版本，包括 Windows 11，x64**。播放器需要开启系统媒体控制，挂件才能读取正在播放的信息。指定进程频谱和可选分层另有系统或硬件要求。
 
-## 1.3.0 版亮点
+## 1.3.1 版亮点
+
+- **圆角统一了转弯方式。** 窗口、主封面、设置卡片、下拉框和玻璃导航共享同一套曲线，各自保留原有半径。频谱和歌词的外框也一致了。
+
+## 界面中的其他功能
 
 <img src="docs/media/glass-switch.png" width="102" align="right" alt="静止状态下的液态玻璃开关" />
 

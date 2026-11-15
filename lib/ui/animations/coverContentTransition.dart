@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../core/appState.dart';
+import '../widgets/continuousSurfaceBorder.dart';
 import 'coverMotionFrame.dart';
 
 
@@ -222,7 +223,7 @@ class _CoverContentTransitionState extends State<CoverContentTransition> {
 
         return IgnorePointer(
           ignoring: _exiting,
-          child: ClipRSuperellipse(
+          child: ContinuousCornerClip(
             borderRadius: widget.borderRadius,
             clipBehavior: film && !widget.reduceMotion && remaining > 0.00001
                 ? Clip.antiAlias
@@ -276,7 +277,7 @@ class CoverTransitionStack extends StatelessWidget {
       final softSlide =
           style == CoverTransitionStyle.softSlide && !reduceMotion;
       final behind = softSlide && direction < 0 && animation.value < 1;
-      return ClipRSuperellipse(
+      return ContinuousCornerClip(
         borderRadius: borderRadius,
         clipBehavior: softSlide && animation.value < 0.99999
             ? Clip.antiAliasWithSaveLayer

@@ -92,9 +92,7 @@ extension _SettingsMediaOptions on _SettingsPanelState {
                     labelText: SettingsLabels.qqPlaylistLink,
                     hintText: 'https://y.qq.com/n/ryqq/playlist/…',
                     errorText: error,
-                    border: const OutlineInputBorder(
-                      borderRadius: SmoothSurfaceCorners.control,
-                    ),
+                    border: SmoothSurfaceCorners.controlInput,
                   ),
                   onChanged: (value) {
                     input = value;
@@ -313,9 +311,7 @@ extension _SettingsMediaOptions on _SettingsPanelState {
                     labelText: SettingsLabels.qqPlaylistLink,
                     hintText: 'https://music.163.com/#/playlist?id=…',
                     errorText: error,
-                    border: const OutlineInputBorder(
-                      borderRadius: SmoothSurfaceCorners.control,
-                    ),
+                    border: SmoothSurfaceCorners.controlInput,
                   ),
                 ),
               ],

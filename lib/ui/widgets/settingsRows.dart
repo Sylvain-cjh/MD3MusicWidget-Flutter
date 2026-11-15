@@ -69,8 +69,8 @@ extension _SettingsRows on _SettingsPanelState {
               color: AppState.currentScheme.surfaceContainerLow.withValues(
                 alpha: 0.82,
               ),
-              shape: SmoothSurfaceCorners.shape(
-                SmoothSurfaceCorners.settingsCard,
+              shape: const ContinuousSurfaceBorder(
+                borderRadius: SmoothSurfaceCorners.settingsCard,
               ),
             ),
             child: SmoothRoundedClip(

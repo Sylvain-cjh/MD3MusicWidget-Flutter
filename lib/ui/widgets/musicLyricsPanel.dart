@@ -235,11 +235,9 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
             actual.status == LyricsStatus.unavailable);
     if (!hiding) _retainedState = actual;
     final state = hiding ? (_retainedState ?? actual) : actual;
-    const radius = SmoothSurfaceCorners.mediaStrip;
     final displayText = _displayText(state);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    return SmoothRoundedClip(
-      borderRadius: radius,
+    return SmoothRoundedClip.mediaStrip(
       side: BorderSide(
         width: RoundedRasterScale.hairline(context),
         color: scheme.outlineVariant.withValues(alpha: 0.28),

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'continuousSurfaceBorder.dart';
 import 'smoothRoundedClip.dart';
 
 class Md3AnchoredSelect<T> extends StatefulWidget {
@@ -510,11 +511,9 @@ class _SelectedItemRevealClipper extends CustomClipper<Path> {
       size.width,
       bottom.clamp(0.0, size.height),
     );
-    return Path()..addRSuperellipse(
-      RSuperellipse.fromRectAndRadius(
-        revealRect,
-        Radius.circular(cornerRadius),
-      ),
+    return ContinuousSurfaceBorder.outline(
+      revealRect,
+      BorderRadius.circular(cornerRadius),
     );
   }
 

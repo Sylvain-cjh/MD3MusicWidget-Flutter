@@ -193,15 +193,11 @@ class _EditableSliderValueState extends State<EditableSliderValue> {
                         suffixText: widget.suffix.isEmpty
                             ? null
                             : ' ${widget.suffix}',
-                        border: OutlineInputBorder(
-                          borderRadius: SmoothSurfaceCorners.small,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: SmoothSurfaceCorners.small,
+                        border: SmoothSurfaceCorners.smallInput,
+                        enabledBorder: SmoothSurfaceCorners.smallInput.copyWith(
                           borderSide: BorderSide(color: scheme.outlineVariant),
                         ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: SmoothSurfaceCorners.small,
+                        focusedBorder: SmoothSurfaceCorners.smallInput.copyWith(
                           borderSide: BorderSide(
                             color: _error == null
                                 ? scheme.primary

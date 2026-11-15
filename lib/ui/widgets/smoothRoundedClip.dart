@@ -1,6 +1,6 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
+
+import 'continuousSurfaceBorder.dart';
 
 
 
@@ -32,7 +32,7 @@ abstract final class SmoothSurfaceCorners {
   );
   static const control = BorderRadius.all(Radius.circular(14));
   static const small = BorderRadius.all(Radius.circular(12));
-  static const dialog = RoundedSuperellipseBorder(borderRadius: popover);
+  static const dialog = ContinuousSurfaceBorder(borderRadius: popover);
 
   
   
@@ -45,7 +45,7 @@ abstract final class SmoothSurfaceCorners {
       );
 
   static ShapeBorder navigationTrack(ShapeBorder indicator) =>
-      indicator is RoundedSuperellipseBorder
+      indicator is ContinuousSurfaceBorder
       ? shape(
           indicator.borderRadius.add(
             const BorderRadius.all(Radius.circular(navigationInset)),
@@ -53,10 +53,17 @@ abstract final class SmoothSurfaceCorners {
         )
       : indicator;
 
-  static RoundedSuperellipseBorder shape(
+  static ContinuousSurfaceBorder shape(
     BorderRadiusGeometry radius, {
     BorderSide side = BorderSide.none,
-  }) => RoundedSuperellipseBorder(borderRadius: radius, side: side);
+  }) => ContinuousSurfaceBorder(borderRadius: radius, side: side);
+
+  static const controlInput = ShapedInputBorder(
+    shape: ContinuousSurfaceBorder(borderRadius: control),
+  );
+  static const smallInput = ShapedInputBorder(
+    shape: ContinuousSurfaceBorder(borderRadius: small),
+  );
 }
 
 
@@ -99,11 +106,18 @@ class SmoothRoundedClip extends StatelessWidget {
     this.composite = true,
     this.side = BorderSide.none,
   });
+
+  const SmoothRoundedClip.mediaStrip({
+    super.key,
+    required this.child,
+    this.side = BorderSide.none,
+  }) : borderRadius = SmoothSurfaceCorners.mediaStrip,
+       composite = true;
+
   @override
-  Widget build(BuildContext context) => ClipRSuperellipse(
-    borderRadius: borderRadius,
-    clipBehavior: composite ? Clip.antiAliasWithSaveLayer : Clip.antiAlias,
-    child: side.style == BorderStyle.none || side.width <= 0
+  Widget build(BuildContext context) {
+    final clip = composite ? Clip.antiAliasWithSaveLayer : Clip.antiAlias;
+    final content = side.style == BorderStyle.none || side.width <= 0
         ? child
         : CustomPaint(
             foregroundPainter: _InnerRim(
@@ -111,8 +125,13 @@ class SmoothRoundedClip extends StatelessWidget {
               side,
             ),
             child: child,
-          ),
-  );
+          );
+    return ContinuousCornerClip(
+      borderRadius: borderRadius,
+      clipBehavior: clip,
+      child: content,
+    );
+  }
 }
 
 
@@ -129,13 +148,15 @@ class _InnerRim extends CustomPainter {
     final bounds = Offset.zero & size;
     final width = side.strokeInset;
     if (width <= 0) return;
-    final rim = Path()
-      ..fillType = PathFillType.evenOdd
-      ..addRect(bounds.inflate(math.max(2.0, width)));
-    if (width * 2 < size.shortestSide) {
-      rim.addRSuperellipse(radius.toRSuperellipse(bounds).deflate(width));
-    }
-    canvas.drawPath(rim, Paint()..color = side.color);
+    
+    
+    canvas.drawPath(
+      ContinuousSurfaceBorder.outline(bounds, radius),
+      Paint()
+        ..color = side.color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = width * 2,
+    );
   }
 
   @override

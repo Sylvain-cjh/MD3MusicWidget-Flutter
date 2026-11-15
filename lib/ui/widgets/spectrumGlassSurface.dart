@@ -16,8 +16,7 @@ class SpectrumGlassSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = AppState.currentScheme;
     return ClipRect(
-      child: SmoothRoundedClip(
-        borderRadius: SmoothSurfaceCorners.mediaStrip,
+      child: SmoothRoundedClip.mediaStrip(
         side: BorderSide(
           width: RoundedRasterScale.hairline(context),
           color: scheme.outlineVariant.withValues(alpha: 0.28),

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../core/recoverableResource.dart';
 import '../../core/widgetDiagnostics.dart';
 import 'backdropCaptureBoundary.dart';
+import 'continuousSurfaceBorder.dart';
 
 
 
@@ -332,6 +333,9 @@ class _GlassTrackPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
     final uv = texture.uv;
+    final profile = shape is ContinuousSurfaceBorder
+        ? ContinuousSurfaceBorder.uniformProfile(size, radius)
+        : (0.0, 0.0);
     final shader = texture.trackShader
       ..setFloat(0, size.width)
       ..setFloat(1, size.height)
@@ -346,7 +350,9 @@ class _GlassTrackPainter extends CustomPainter {
       ..setFloat(10, math.min(radius, size.shortestSide / 2))
       ..setFloat(24, .5 / texture.image.width)
       ..setFloat(25, .5 / texture.image.height)
-      ..setFloat(27, 1);
+      ..setFloat(27, 1)
+      ..setFloat(28, profile.$1)
+      ..setFloat(29, profile.$2);
     canvas.drawPath(
       shape.getOuterPath(Offset.zero & size),
       Paint()..shader = shader,
@@ -456,7 +462,9 @@ final class _GlassPainter extends CustomPainter {
       canvas.drawPath(path, Paint()..color = tint);
       return;
     }
-    final radius = switch (shape) {
+    final nominalRadius = switch (shape) {
+      final ContinuousSurfaceBorder rounded =>
+        rounded.borderRadius.resolve(TextDirection.ltr).topLeft.x,
       final RoundedSuperellipseBorder rounded => math.min(
         rounded.borderRadius.resolve(TextDirection.ltr).topLeft.x,
         size.shortestSide / 2,
@@ -465,6 +473,13 @@ final class _GlassPainter extends CustomPainter {
     };
     final uv = texture.uv;
     final trackW = track.size.width, trackH = track.size.height;
+    final useContinuous = shape is ContinuousSurfaceBorder;
+    final profile = useContinuous
+        ? ContinuousSurfaceBorder.uniformProfile(size, nominalRadius)
+        : (0.0, 0.0);
+    final trackProfile = useContinuous
+        ? ContinuousSurfaceBorder.uniformProfile(track.size, trackRadius)
+        : (0.0, 0.0);
     final shader = texture.shader
       ..setFloat(0, size.width)
       ..setFloat(1, size.height)
@@ -476,7 +491,7 @@ final class _GlassPainter extends CustomPainter {
       ..setFloat(7, tint.g)
       ..setFloat(8, tint.b)
       ..setFloat(9, (dark ? .19 : .17) - .07 * press)
-      ..setFloat(10, radius)
+      ..setFloat(10, math.min(nominalRadius, size.shortestSide / 2))
       ..setFloat(11, press)
       ..setFloat(12, dark ? 1 : 0)
       ..setFloat(13, rect.left / trackW)
@@ -493,7 +508,11 @@ final class _GlassPainter extends CustomPainter {
       ..setFloat(24, .5 / texture.image.width)
       ..setFloat(25, .5 / texture.image.height)
       ..setFloat(26, texture.glyphs == null ? 0 : 1)
-      ..setFloat(27, 0);
+      ..setFloat(27, 0)
+      ..setFloat(28, profile.$1)
+      ..setFloat(29, profile.$2)
+      ..setFloat(30, trackProfile.$1)
+      ..setFloat(31, trackProfile.$2);
     WidgetDiagnostics.count('navigationGlassPaints');
     
     canvas.drawPath(path, Paint()..shader = shader);

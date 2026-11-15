@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/releaseCheck.dart';
+import 'continuousSurfaceBorder.dart';
 import 'settingsDescriptions.dart';
 import 'settingsLabels.dart';
 import 'settingsLicensesPage.dart';
@@ -95,8 +96,8 @@ class _SettingsAboutPageState extends State<SettingsAboutPage> {
           children: [
             Material(
               color: scheme.surfaceContainerLow.withValues(alpha: 0.94),
-              shape: SmoothSurfaceCorners.shape(
-                SmoothSurfaceCorners.settingsCard,
+              shape: const ContinuousSurfaceBorder(
+                borderRadius: SmoothSurfaceCorners.settingsCard,
               ),
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -201,8 +202,8 @@ class _SettingsAboutPageState extends State<SettingsAboutPage> {
             const SizedBox(height: 8),
             Material(
               color: scheme.surfaceContainerLow.withValues(alpha: 0.94),
-              shape: SmoothSurfaceCorners.shape(
-                SmoothSurfaceCorners.settingsCard,
+              shape: const ContinuousSurfaceBorder(
+                borderRadius: SmoothSurfaceCorners.settingsCard,
               ),
               clipBehavior: Clip.antiAlias,
               child: Padding(

@@ -14,6 +14,8 @@ uniform float uTrackRadius;
 uniform vec2 uTexelInset;
 uniform float uHasGlyphs;
 uniform float uTrackPass;
+uniform vec2 uProfile;
+uniform vec2 uTrackProfile;
 uniform sampler2D uBackdrop;
 uniform sampler2D uGlyphs;
 out vec4 fragColor;
@@ -21,6 +23,35 @@ out vec4 fragColor;
 float cornerLength(vec2 v) {
   vec2 v2 = v * v;
   return mix(length(v), sqrt(sqrt(dot(v2, v2))), 0.60);
+}
+
+
+
+vec3 continuousEdge(vec2 centered, vec2 halfSize, vec2 profile) {
+  vec2 inset = halfSize - abs(centered);
+  bool swap = inset.y > inset.x;
+  vec2 q = swap ? inset.yx : inset;
+  float target = (q.x - q.y) / profile.x;
+  vec2 direction = sign(centered);
+  if (target >= 1.0) {
+    vec2 n = swap ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    return vec3(q.y, n * direction);
+  }
+  float m = profile.y;
+  float t = 1.0 - target;
+  for (int i = 0; i < 4; i++) {
+    float u = 1.0 - t;
+    float d = u * (u * u + 12.0 * m * u * t + 6.0 * m * t * t);
+    float derivative = -3.0 * ((1.0 - 4.0 * m) * u * u
+                             + 4.0 * m * u * t + 2.0 * m * t * t);
+    t = clamp(t - (d - target) / derivative, 0.0, 1.0);
+  }
+  float u = 1.0 - t;
+  float y = m * t * t * t;
+  float x = u * (u * u + 12.0 * m * u * t + 6.0 * m * t * t) + y;
+  vec2 n = normalize(vec2(m * t * t,
+                  (1.0 - 4.0 * m) * u * u + 4.0 * m * u * t + m * t * t));
+  return vec3(dot(q - vec2(x, y) * profile.x, n), (swap ? n.yx : n) * direction);
 }
 
 vec4 sceneAt(vec2 uv) {
@@ -43,6 +74,11 @@ void main() {
   vec2 cornerNormal = mix(corner, squared / max(cornerDist, 0.001), 0.60);
   vec2 normal = normalize(mix(axis, cornerNormal, smoothstep(0.0, 1.8, cornerDist)))
               * sign(centered);
+  if (uProfile.x > 0.0) {
+    vec3 edge = continuousEdge(centered, halfSize, uProfile);
+    distanceInside = max(0.0, edge.x);
+    normal = edge.yz;
+  }
 
   
   
@@ -99,6 +135,10 @@ void main() {
               - (uTrackSize * 0.5 - trackRadius);
   float trackEdge = cornerLength(max(trackQ, 0.0))
                   + min(max(trackQ.x, trackQ.y), 0.0) - trackRadius;
+  if (uTrackProfile.x > 0.0) {
+    trackEdge = -continuousEdge(trackPoint - uTrackSize * 0.5, uTrackSize * 0.5,
+                               uTrackProfile).x;
+  }
   float trackAlpha = uTrackColor.a * (0.60 - 0.36 * bevel)
                    * (1.0 - smoothstep(-0.7, 0.7, trackEdge));
   vec3 opticalScene = mix(background, uTrackColor.rgb, trackAlpha);

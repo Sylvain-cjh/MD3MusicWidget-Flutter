@@ -10,6 +10,7 @@ import '../animations/coverLayerHandoff.dart';
 import '../animations/mediaMotionTokens.dart';
 import '../../core/coverLayers.dart';
 import '../../core/widgetDiagnostics.dart';
+import 'continuousSurfaceBorder.dart';
 import 'smoothRoundedClip.dart';
 
 class CoverParallax extends StatefulWidget {
@@ -300,7 +301,7 @@ class CoverParallaxState extends State<CoverParallax>
     Widget shadow(double alpha, double blur, double y) => RepaintBoundary(
       child: DecoratedBox(
         decoration: ShapeDecoration(
-          shape: SmoothSurfaceCorners.shape(widget.borderRadius),
+          shape: ContinuousSurfaceBorder(borderRadius: widget.borderRadius),
           shadows: [
             BoxShadow(
               color: Colors.black.withValues(alpha: alpha),

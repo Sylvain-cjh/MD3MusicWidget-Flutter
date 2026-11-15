@@ -22,6 +22,7 @@ import 'jellySlider.dart';
 import 'editableSliderValue.dart';
 import 'liquidSettingsSwitch.dart';
 import 'smoothRoundedClip.dart';
+import 'continuousSurfaceBorder.dart';
 import '../../core/coverLayers.dart';
 
 part 'settingsWindowSection.dart';

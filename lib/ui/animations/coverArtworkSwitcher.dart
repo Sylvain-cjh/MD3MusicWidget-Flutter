@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/appState.dart';
+import '../widgets/continuousSurfaceBorder.dart';
 import 'coverContentTransition.dart';
 import 'coverMotionFrame.dart';
 
@@ -215,8 +216,9 @@ class CoverShadowViewportClipper extends CustomClipper<Path> {
     final overflow = (size.shortestSide * .065).clamp(4.0, 12.0);
     final margin =
         overflow + (size.shortestSide * 0.12 + 24 - overflow) * reveal;
-    return Path()..addRSuperellipse(
-      radius.toRSuperellipse((Offset.zero & size).inflate(margin)),
+    return ContinuousSurfaceBorder.outline(
+      (Offset.zero & size).inflate(margin),
+      radius,
     );
   }
 

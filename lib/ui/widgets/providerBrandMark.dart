@@ -29,7 +29,8 @@ class ProviderBrandMark extends StatelessWidget {
           'qqMusic' || 'neteaseCloud' => CustomPaint(
             painter: ProviderBrandPainter(source, scheme.onPrimaryContainer),
           ),
-          'lrclib' => ClipRSuperellipse(
+          'lrclib' => SmoothRoundedClip(
+            composite: false,
             borderRadius: BorderRadius.circular(size * .2),
             child: Image.asset('assets/brand/lrclib.png'),
           ),
