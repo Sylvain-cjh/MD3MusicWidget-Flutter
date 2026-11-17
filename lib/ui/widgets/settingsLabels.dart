@@ -92,6 +92,14 @@ final class SettingsLabels {
   static const sourceApp = '采集程序';
   static const sourceAutomatic = '自动 · 系统当前播放器';
   static const playbackControls = '显示播放控制';
+  static const audioOutputDevice = '输出设备';
+  static const showHomeAudioOutput = '显示首页设备入口';
+  static const noAudioOutput = '没有可用输出';
+  static const unknownAudioOutput = '音频输出设备';
+  static const currentAudioOutputUnknown = '选择输出设备';
+  static const openWindowsSoundSettings = '打开 Windows 声音设置';
+  static const coverVolumeEnabled = '封面滚轮调音量';
+  static const coverVolumeStep = '音量步长';
   static const trackTextAnimations = '歌名与歌手动画';
   static const trackTextTransition = '歌名与歌手切换效果';
   static const trackTextAnimationsLinked = '进场与退场联动';

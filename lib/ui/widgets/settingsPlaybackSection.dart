@@ -27,6 +27,22 @@ extension _SettingsPlaybackSection on _SettingsPanelState {
               : const Icon(Icons.refresh_rounded),
         ),
       ),
+      if (Platform.isWindows) ...[
+        _buildDivider(),
+        _buildAudioOutputSelector(),
+        _buildDivider(),
+        MergeSemantics(
+          child: _buildSwitchRow(
+            SettingsLabels.showHomeAudioOutput,
+            SettingsDescriptions.showHomeAudioOutput,
+            AppState.showHomeAudioOutput,
+            (value) {
+              _updateState(() => AppState.showHomeAudioOutput = value);
+              widget.onVisualChanged();
+            },
+          ),
+        ),
+      ],
       _buildDivider(),
       _buildSwitchRow(
         SettingsLabels.trackTextAnimations,
@@ -93,6 +109,34 @@ extension _SettingsPlaybackSection on _SettingsPanelState {
           widget.onVisualChanged();
         },
         _coverTransitionEntries(),
+      ),
+      _buildDivider(),
+      _buildSwitchRow(
+        SettingsLabels.coverVolumeEnabled,
+        SettingsDescriptions.coverVolumeEnabled,
+        AppState.coverVolumeEnabled,
+        (value) {
+          _updateState(() => AppState.coverVolumeEnabled = value);
+          widget.onVisualChanged();
+        },
+      ),
+      _buildOptionalSetting(
+        visible: AppState.coverVolumeEnabled,
+        child: _buildContinuousSliderRow(
+          title: SettingsLabels.coverVolumeStep,
+          subtitle: SettingsDescriptions.coverVolumeStep,
+          value: AppState.coverVolumeStep.toDouble(),
+          min: 1,
+          max: AppState.maxCoverVolumeStep.toDouble(),
+          divisions: AppState.maxCoverVolumeStep - 1,
+          resetValue: AppState.defaultCoverVolumeStep.toDouble(),
+          sliderKey: const ValueKey('cover_volume_step'),
+          valueLabel: (value) => '${value.round()}%',
+          inputSuffix: '%',
+          onChanged: (value) =>
+              _updateState(() => AppState.coverVolumeStep = value.round()),
+          onChangeEnd: widget.onVisualChanged,
+        ),
       ),
       _buildDivider(),
       _buildSwitchRow(
@@ -181,6 +225,61 @@ extension _SettingsPlaybackSection on _SettingsPanelState {
       ),
     ],
   );
+
+  Widget _buildAudioOutputSelector() {
+    final audio = AppState.audioOutputs;
+    return ListenableBuilder(
+      listenable: audio,
+      builder: (context, _) {
+        final devices = audio.outputs;
+        final current = devices.any((device) => device.id == audio.defaultId)
+            ? audio.defaultId
+            : '';
+        return _buildDropdownRow<String>(
+          SettingsLabels.audioOutputDevice,
+          audio.switching
+              ? SettingsDescriptions.audioOutputChanging
+              : audio.selectFailed
+              ? SettingsDescriptions.audioOutputSelectFailed
+              : audio.available
+              ? SettingsDescriptions.audioOutputDevice
+              : SettingsDescriptions.audioOutputUnavailable,
+          current,
+          (id) => unawaited(audio.select(id)),
+          [
+            if (current.isEmpty)
+              DropdownMenuEntry(
+                value: '',
+                enabled: false,
+                label: devices.isEmpty
+                    ? SettingsLabels.noAudioOutput
+                    : SettingsLabels.currentAudioOutputUnknown,
+              ),
+            for (final device in devices)
+              DropdownMenuEntry(
+                value: device.id,
+                label: device.name.isEmpty
+                    ? SettingsLabels.unknownAudioOutput
+                    : device.name,
+                enabled: !audio.switching,
+                leadingIcon: Icon(
+                  device.bluetoothGroup.isNotEmpty
+                      ? Icons.bluetooth_audio_rounded
+                      : Icons.speaker_rounded,
+                  size: 17,
+                ),
+              ),
+          ],
+          fullWidth: true,
+          actionButton: IconButton(
+            tooltip: SettingsLabels.openWindowsSoundSettings,
+            onPressed: () => unawaited(audio.openWindowsSettings()),
+            icon: const Icon(Icons.open_in_new_rounded, size: 18),
+          ),
+        );
+      },
+    );
+  }
 
   Widget _buildNextUpGroupSettings() => _buildCategoryCard(
     title: SettingsLabels.nextUpGroup,

@@ -246,6 +246,10 @@ class _AppSettings {
           MD3ProgressStyle.linear,
         );
         AppState.showPlaybackTime = snapshot['showPlaybackTime'] == true;
+        AppState.coverVolumeEnabled = snapshot['coverVolumeEnabled'] != false;
+        AppState.coverVolumeStep = _coverVolumeStep(
+          snapshot['coverVolumeStep'],
+        );
         AppState.settingsNavigationShape = _enumFromName(
           MD3Shape.values,
           snapshot['settingsNavigationShape'],
@@ -261,6 +265,7 @@ class _AppSettings {
         AppState.showPlaybackControls = snapshot['showPlaybackControls'] is bool
             ? snapshot['showPlaybackControls'] as bool
             : true;
+        AppState.showHomeAudioOutput = snapshot['showHomeAudioOutput'] != false;
         AppState.trackTextAnimationsEnabled =
             snapshot['trackTextAnimationsEnabled'] is bool
             ? snapshot['trackTextAnimationsEnabled'] as bool
@@ -545,6 +550,8 @@ class _AppSettings {
       MD3ProgressStyle.linear,
     );
     AppState.showPlaybackTime = p.getBool('showPlaybackTime') ?? false;
+    AppState.coverVolumeEnabled = p.getBool('coverVolumeEnabled') ?? true;
+    AppState.coverVolumeStep = _coverVolumeStep(p.getInt('coverVolumeStep'));
     AppState.settingsNavigationShape = _enumFromIndex(
       MD3Shape.values,
       p.getInt('settingsNavigationShape'),
@@ -561,6 +568,7 @@ class _AppSettings {
       CoverTransitionStyle.softSlide,
     );
     AppState.showPlaybackControls = p.getBool('showPlaybackControls') ?? true;
+    AppState.showHomeAudioOutput = p.getBool('showHomeAudioOutput') ?? true;
     AppState.trackTextAnimationsEnabled =
         p.getBool('trackTextAnimationsEnabled') ?? true;
     AppState.trackTextTransitionStyle = _enumFromIndex(
@@ -683,6 +691,8 @@ class _AppSettings {
     'localLyricsDirectory': AppState.localLyricsDirectory,
     'progressStyle': AppState.progressStyle.name,
     'showPlaybackTime': AppState.showPlaybackTime,
+    'coverVolumeEnabled': AppState.coverVolumeEnabled,
+    'coverVolumeStep': AppState.coverVolumeStep,
     'settingsNavigationShape': AppState.settingsNavigationShape.name,
     'enableProgressAutoContrast': AppState.enableProgressAutoContrast,
     'enableOledTheme': AppState.enableOledTheme,
@@ -690,6 +700,7 @@ class _AppSettings {
     'enableCoverLayers': AppState.enableCoverLayers,
     'coverTransitionStyle': AppState.coverTransitionStyle.name,
     'showPlaybackControls': AppState.showPlaybackControls,
+    'showHomeAudioOutput': AppState.showHomeAudioOutput,
     'trackTextAnimationsEnabled': AppState.trackTextAnimationsEnabled,
     'trackTextTransitionStyle': AppState.trackTextTransitionStyle.name,
     'trackTextAnimationsLinked': AppState.trackTextAnimationsLinked,
@@ -758,6 +769,10 @@ class _AppSettings {
   ) => value is num && value.isFinite
       ? value.toDouble().clamp(min, max)
       : fallback;
+  static int _coverVolumeStep(Object? value) => value is num && value.isFinite
+      ? value.clamp(1, AppState.maxCoverVolumeStep).round()
+      : AppState.defaultCoverVolumeStep;
+
   static Future<void> saveSettings() async {
     if (_prefs == null) return;
     _pendingSettingsSnapshot = jsonEncode(_captureSettingsSnapshot());

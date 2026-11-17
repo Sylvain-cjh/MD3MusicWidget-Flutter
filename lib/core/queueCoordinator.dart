@@ -8,7 +8,7 @@ final class QueueCoordinator extends ChangeNotifier {
   final PlatformProviderRegistry registry;
   PlatformQueue? _queue;
   String? _trackIdentity;
-  String? _lookupIdentity;
+  (String, double)? _lookupIdentity;
   String? _providerId;
   String? _error;
   bool _loading = false;
@@ -43,8 +43,35 @@ final class QueueCoordinator extends ChangeNotifier {
   PlatformQueue? get queue => _queue;
   
   
-  PlatformQueue? queueForTrack(PlatformTrack? track) =>
-      track != null && track.contextIdentity == _trackIdentity ? _queue : null;
+  PlatformQueue? queueForTrack(PlatformTrack? track, {String? providerId}) {
+    if (_queue == null ||
+        track == null ||
+        track.contextIdentity != _trackIdentity ||
+        !_sameLookup(_lookupFor(track), _lookupIdentity)) {
+      return null;
+    }
+    final provider = registry.queueFor(track, providerId: providerId);
+    return identical(provider, _provider) &&
+            _contextFor(provider) == _contextKey
+        ? _queue
+        : null;
+  }
+
+  QueuePlatformProvider? _provider;
+  static (String, double) _lookupFor(PlatformTrack track) =>
+      (track.queueIdentity, track.durationMs);
+
+  static bool _sameLookup((String, double)? a, (String, double)? b) {
+    if (a == null || b == null) return a == b;
+    return a.$1 == b.$1 &&
+        (a.$2 > 0) == (b.$2 > 0) &&
+        PlatformTrack.compatibleDuration(a.$2, b.$2);
+  }
+
+  static String? _contextFor(QueuePlatformProvider? provider) =>
+      provider is QueueContextProvider
+      ? (provider as QueueContextProvider).queueContextKey
+      : provider?.id;
   String? get error => _error;
   bool get isLoading => _loading;
   String? get providerId => _providerId;
@@ -59,14 +86,12 @@ final class QueueCoordinator extends ChangeNotifier {
         ? registry.queueFor(track, providerId: providerId)
         : null;
     final identity = provider == null ? null : track!.contextIdentity;
-    final lookupIdentity = provider == null ? null : track!.queueIdentity;
-    final contextKey = provider is QueueContextProvider
-        ? (provider as QueueContextProvider).queueContextKey
-        : provider?.id;
+    final lookupIdentity = provider == null ? null : _lookupFor(track!);
+    final contextKey = _contextFor(provider);
     if (!force &&
         identity == _trackIdentity &&
-        lookupIdentity == _lookupIdentity &&
-        provider?.id == _providerId &&
+        _sameLookup(lookupIdentity, _lookupIdentity) &&
+        identical(provider, _provider) &&
         contextKey == _contextKey) {
       return;
     }
@@ -75,10 +100,12 @@ final class QueueCoordinator extends ChangeNotifier {
     final keepQueue =
         identity != null &&
         identity == _trackIdentity &&
-        provider?.id == _providerId &&
+        _sameLookup(lookupIdentity, _lookupIdentity) &&
+        identical(provider, _provider) &&
         contextKey == _contextKey;
     _trackIdentity = identity;
     _lookupIdentity = lookupIdentity;
+    _provider = provider;
     _providerId = provider?.id;
     _contextKey = contextKey;
     if (!keepQueue) _queue = null;

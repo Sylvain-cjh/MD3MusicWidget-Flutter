@@ -62,6 +62,7 @@ final class LyricsCoordinator extends ChangeNotifier {
     issue: LyricsIssue.noTrack,
   );
   String? _trackIdentity;
+  PlatformTrack? _lookupTrack;
   String? _displayTrackIdentity;
   String? _stateTrackIdentity;
   int _providerRevision = -1;
@@ -115,27 +116,53 @@ final class LyricsCoordinator extends ChangeNotifier {
     return wake.future;
   }
 
-  LyricsState get state => _state;
+  LyricsState get state => _stateTrackIdentity == _displayTrackIdentity
+      ? _state
+      : const LyricsState(status: LyricsStatus.loading);
 
   Future<void> setTrack(
     PlatformTrack? track, {
     String? providerId,
     bool force = false,
-  }) => _loadTrack(track, providerId: providerId, force: force);
+    double? positionMs,
+  }) => _loadTrack(
+    track,
+    providerId: providerId,
+    force: force,
+    positionMs: positionMs,
+  );
 
   Future<void> _loadTrack(
     PlatformTrack? track, {
     String? providerId,
     bool force = false,
     bool cooldownRecovery = false,
+    double? positionMs,
   }) async {
     final identity = track?.identity;
     final displayIdentity = track?.contextIdentity;
+    final sameSelection =
+        _selectedProviderId == providerId &&
+        _providerRevision == providers.revision;
+    if (!force &&
+        identity == _trackIdentity &&
+        displayIdentity == _displayTrackIdentity &&
+        sameSelection) {
+      return;
+    }
+    final previous = _lookupTrack;
+    final lookupSource = providerId ?? '';
+    final sameRecording =
+        track != null &&
+        previous != null &&
+        LyricsDiskCache.keyFor(track, lookupSource) ==
+            LyricsDiskCache.keyFor(previous, lookupSource) &&
+        PlatformTrack.compatibleDuration(track.durationMs, previous.durationMs);
     final sameContext =
         displayIdentity != null &&
         displayIdentity == _displayTrackIdentity &&
-        _selectedProviderId == providerId &&
-        _providerRevision == providers.revision;
+        sameRecording &&
+        sameSelection;
     
     
     if (sameContext &&
@@ -144,25 +171,27 @@ final class LyricsCoordinator extends ChangeNotifier {
       return;
     }
     if (!force &&
-        identity == _trackIdentity &&
-        _selectedProviderId == providerId &&
-        _providerRevision == providers.revision) {
-      return;
-    }
-    if (!force &&
-        displayIdentity != null &&
-        displayIdentity == _displayTrackIdentity &&
+        sameContext &&
         (_state.status == LyricsStatus.ready ||
             _state.status == LyricsStatus.loading ||
             _state.issue == LyricsIssue.rateLimited ||
-            _reconnectUntil != null) &&
-        _selectedProviderId == providerId &&
-        _providerRevision == providers.revision) {
+            _reconnectUntil != null)) {
       _trackIdentity = identity;
       return;
     }
+    final reusedDocument =
+        !force &&
+            !sameContext &&
+            sameRecording &&
+            _stateTrackIdentity == _displayTrackIdentity &&
+            _state.status == LyricsStatus.ready &&
+            sameSelection
+        ? _state.document
+        : null;
     _trackIdentity = identity;
+    _lookupTrack = track;
     _displayTrackIdentity = displayIdentity;
+    if (!sameContext && displayIdentity != null) _stateTrackIdentity = null;
     _selectedProviderId = providerId;
     _providerRevision = providers.revision;
     _cancelRetry();
@@ -177,7 +206,11 @@ final class LyricsCoordinator extends ChangeNotifier {
         sameContext &&
         _stateTrackIdentity == displayIdentity &&
         _state.status == LyricsStatus.ready;
-    if (!sameContext) _positionMs = 0;
+    if (positionMs != null && positionMs.isFinite) {
+      _positionMs = positionMs.clamp(0, double.infinity);
+    } else if (!sameContext) {
+      _positionMs = 0;
+    }
     final provider = track == null
         ? null
         : providers.lyricsFor(track, providerId: providerId);
@@ -191,9 +224,12 @@ final class LyricsCoordinator extends ChangeNotifier {
       return;
     }
     try {
-      LyricsDocument? document;
+      LyricsDocument? document = reusedDocument;
       final useDisk = provider.id != 'localLrc';
-      if ((!force || cooldownRecovery) && useDisk && cache != null) {
+      if (document == null &&
+          (!force || cooldownRecovery) &&
+          useDisk &&
+          cache != null) {
         _cacheLookupGeneration = generation;
         try {
           document = await cache!.get(track!, provider.id);

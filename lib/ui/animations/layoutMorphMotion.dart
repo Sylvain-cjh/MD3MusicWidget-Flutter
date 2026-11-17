@@ -28,9 +28,18 @@ class LayoutMorphMotion extends ChangeNotifier {
   }
 
   double get progress => curve.transform(controller.value.clamp(0.0, 1.0));
+  double get coverProgress => _coverFraction(progress);
+  double _coverFraction(double p) =>
+      towardVertical ? p * p : 1 - (1 - p) * (1 - p);
   Rect get frame => geometry(beginFrame, endFrame, controller.value);
 
-  Rect geometry(Rect begin, Rect end, double value, {bool cover = false}) {
+  Rect geometry(
+    Rect begin,
+    Rect end,
+    double value, {
+    bool cover = false,
+    bool clearCoverHeader = false,
+  }) {
     final p = curve.transform(value.clamp(0.0, 1.0));
     if (p <= 0) return begin;
     if (p >= 1) return end;
@@ -38,25 +47,29 @@ class LayoutMorphMotion extends ChangeNotifier {
     
     
     
-    final lateAxis = p * p * p;
-    final earlyAxis = 1 - q * q * q;
-    final artwork = towardVertical ? p * p : 1 - q * q;
+    double lag(double t) => t * (.16 + .84 * t * t);
+    final lateAxis = lag(p);
+    final earlyAxis = 1 - lag(q);
+    final artwork = _coverFraction(p);
     final x = cover
         ? artwork
         : towardVertical
         ? lateAxis
         : earlyAxis;
-    final y = cover
-        ? artwork
-        : towardVertical
-        ? earlyAxis
-        : lateAxis;
+    final flowY = towardVertical ? earlyAxis : lateAxis;
     double mix(double a, double b, double p) => a + (b - a) * p;
+    
+    
+    final y = !cover
+        ? flowY
+        : clearCoverHeader
+        ? mix(artwork, flowY, .74)
+        : artwork;
     return Rect.fromLTWH(
       mix(begin.left, end.left, x),
       mix(begin.top, end.top, y),
       mix(begin.width, end.width, x),
-      mix(begin.height, end.height, y),
+      mix(begin.height, end.height, cover ? artwork : y),
     );
   }
 
@@ -151,6 +164,7 @@ class MorphPositioned extends StatefulWidget {
   final Curve curve;
   final LayoutMorphMotion? motion;
   final bool cover;
+  final bool clearCoverHeader;
   final Widget child;
   const MorphPositioned({
     super.key,
@@ -162,6 +176,7 @@ class MorphPositioned extends StatefulWidget {
     required this.curve,
     this.motion,
     this.cover = false,
+    this.clearCoverHeader = false,
     required this.child,
   });
   Rect get rect => Rect.fromLTWH(left, top, width, height);
@@ -227,7 +242,13 @@ class _MorphPositionedState extends State<MorphPositioned>
               .clamp(0.0, 1.0)
         : widget.curve.transform(_local.value);
     _current = _shared
-        ? widget.motion!.geometry(_begin, _end, p, cover: widget.cover)
+        ? widget.motion!.geometry(
+            _begin,
+            _end,
+            p,
+            cover: widget.cover,
+            clearCoverHeader: widget.clearCoverHeader,
+          )
         : Rect.lerp(_begin, _end, p)!;
     return Positioned(
       left: _current.left,

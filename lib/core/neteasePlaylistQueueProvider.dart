@@ -83,6 +83,7 @@ final class NeteasePlaylistQueueProvider
         throw const FormatException('歌单曲目不完整，无法可靠预测下一首');
       }
       final singers = song['artists'] ?? song['ar'];
+      final duration = song['dt'] ?? song['duration'];
       final artist = (singers is List ? singers : const [])
           .whereType<Map>()
           .map((s) => s['name']?.toString() ?? '')
@@ -93,6 +94,9 @@ final class NeteasePlaylistQueueProvider
           id: song['id'].toString(),
           title: song['name'] as String,
           artist: artist,
+          durationMs: duration is num && duration.isFinite
+              ? duration.toDouble()
+              : 0,
         ),
       );
     }
@@ -129,6 +133,12 @@ final class NeteasePlaylistQueueProvider
     for (var i = 0; i < items.length; i++) {
       final item = items[i];
       if (_key(item.title) != _key(track.title)) continue;
+      if (!PlatformTrack.compatibleDuration(
+        item.durationMs,
+        track.durationMs,
+      )) {
+        continue;
+      }
       final artist = _key(track.artist);
       final singers = item.artist.split(' / ').map(_key).toSet();
       if (artist.isNotEmpty &&

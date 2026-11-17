@@ -49,6 +49,13 @@ final class SettingsDescriptions {
   static const sourceAutomatic = '选择你想要';
   static const sourceSelected = '仅展示选中播放器的音频，不混入其他程序的声音';
   static const playbackControls = '变为纯粹的音乐挂件';
+  static const audioOutputDevice = '切换 Windows 默认播放输出';
+  static const showHomeAudioOutput = '关掉后，仍能在这里切换输出设备';
+  static const audioOutputChanging = '正在切换输出…';
+  static const audioOutputUnavailable = '暂时读不到输出设备，可打开 Windows 声音设置';
+  static const audioOutputSelectFailed = '未能完成切换，当前设备以 Windows 显示为准';
+  static const coverVolumeEnabled = '鼠标放在主封面上，就能滚动调整系统音量';
+  static const coverVolumeStep = '每滚一格，音量变动多少';
   static const trackTextAnimations = '换歌时，歌名和歌手只演一遍';
   static const trackTextTransition = '选一个你喜欢的出场方式';
   static const trackTextAnimationsLinked = '打开时，旧歌退场会与新歌进场相呼应';

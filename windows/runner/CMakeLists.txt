@@ -18,6 +18,17 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/../tooling/systemFontsProbe.cpp")
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/../temp/font-diagnostics")
 endif()
 
+if(EXISTS "${CMAKE_SOURCE_DIR}/../tooling/audioOutputDevicesProbe.cpp")
+  add_executable(audio_output_devices_probe EXCLUDE_FROM_ALL
+    "${CMAKE_SOURCE_DIR}/../tooling/audioOutputDevicesProbe.cpp" "audioOutputDevices.cpp")
+  apply_standard_settings(audio_output_devices_probe ENABLE_STL_EXCEPTIONS)
+  target_compile_features(audio_output_devices_probe PRIVATE cxx_std_20)
+  target_compile_definitions(audio_output_devices_probe PRIVATE NOMINMAX)
+  target_link_libraries(audio_output_devices_probe PRIVATE windowsapp ole32 cfgmgr32)
+  set_target_properties(audio_output_devices_probe PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/../temp/audio-output-diagnostics")
+endif()
+
 add_library(cover_layers_gpu SHARED "coverLayersGpu.cpp" "coverGpuResources.rc")
 set_source_files_properties("coverGpuResources.rc" PROPERTIES
   OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/coverGpuCompute.hlsl")
@@ -61,6 +72,7 @@ endif()
 
 add_executable(${BINARY_NAME} WIN32
   "flutterWindow.cpp"
+  "audioOutputDevices.cpp"
   "systemFonts.cpp"
   "systemTray.cpp"
   "systemPerformanceMonitor.cpp"
@@ -95,6 +107,8 @@ target_link_libraries(${BINARY_NAME} PRIVATE native_media_preview windowsapp)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "pdh.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "dwrite.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "cfgmgr32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "advapi32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 

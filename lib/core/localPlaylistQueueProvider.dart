@@ -38,6 +38,12 @@ final class LocalPlaylistQueueProvider
     for (var i = 0; i < items.length; i++) {
       final item = items[i];
       if (_normalize(item.title) != title) continue;
+      if (!PlatformTrack.compatibleDuration(
+        item.durationMs,
+        track.durationMs,
+      )) {
+        continue;
+      }
       if (item.artist.isNotEmpty && _normalize(item.artist) != artist) continue;
       matches.add(i);
     }
@@ -61,12 +67,16 @@ List<PlatformQueueItem> parsePlaylistJson(String contents) {
     if (raw is! Map) continue;
     final title = raw['title']?.toString().trim() ?? '';
     final artist = raw['artist']?.toString().trim() ?? '';
+    final duration = raw['durationMs'];
     if (title.isEmpty) continue;
     items.add(
       PlatformQueueItem(
         id: raw['id']?.toString() ?? '${items.length}',
         title: title,
         artist: artist,
+        durationMs: duration is num && duration.isFinite
+            ? duration.toDouble()
+            : 0,
       ),
     );
   }
@@ -81,12 +91,17 @@ List<PlatformQueueItem> parseM3uPlaylist(String contents) {
   final items = <PlatformQueueItem>[];
   String? pendingTitle;
   String pendingArtist = '';
+  double pendingDuration = 0;
   for (final raw in lines) {
     final line = raw.trim();
     if (line.startsWith('#EXTINF:')) {
       final comma = line.indexOf(',');
       if (comma < 0) continue;
       final label = line.substring(comma + 1).trim();
+      final seconds = double.tryParse(line.substring(8, comma));
+      pendingDuration = seconds != null && seconds.isFinite
+          ? seconds * 1000
+          : 0;
       final split = label.indexOf(' - ');
       pendingArtist = split < 0 ? '' : label.substring(0, split).trim();
       pendingTitle = split < 0 ? label : label.substring(split + 3).trim();
@@ -103,11 +118,17 @@ List<PlatformQueueItem> parseM3uPlaylist(String contents) {
         : pendingArtist;
     if (title.isNotEmpty) {
       items.add(
-        PlatformQueueItem(id: '${items.length}', title: title, artist: artist),
+        PlatformQueueItem(
+          id: '${items.length}',
+          title: title,
+          artist: artist,
+          durationMs: pendingDuration,
+        ),
       );
     }
     pendingTitle = null;
     pendingArtist = '';
+    pendingDuration = 0;
     if (items.length > 2000) throw const FormatException('播放列表超过 2000 首');
   }
   return List.unmodifiable(items);

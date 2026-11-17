@@ -112,6 +112,7 @@ List<PlatformQueueItem> parseQqPlaylistResponse(Object? decoded) {
     final title = (song['songname'] ?? song['name'])?.toString().trim() ?? '';
     if (title.isEmpty) continue;
     final singers = song['singer'];
+    final duration = song['interval'];
     final artist = singers is List
         ? singers
               .whereType<Map>()
@@ -124,6 +125,9 @@ List<PlatformQueueItem> parseQqPlaylistResponse(Object? decoded) {
         id: (song['songmid'] ?? song['songid'] ?? items.length).toString(),
         title: title,
         artist: artist,
+        durationMs: duration is num && duration.isFinite
+            ? duration * 1000.0
+            : 0,
       ),
     );
   }
@@ -198,6 +202,12 @@ final class QqMusicPlaylistQueueProvider
     for (var index = 0; index < items.length; index++) {
       final item = items[index];
       if (_normalized(item.title) != title) continue;
+      if (!PlatformTrack.compatibleDuration(
+        item.durationMs,
+        track.durationMs,
+      )) {
+        continue;
+      }
       final singers = item.artist.split(' / ').map(_normalizedArtist);
       if (artist.isNotEmpty &&
           artist != '未知歌手' &&

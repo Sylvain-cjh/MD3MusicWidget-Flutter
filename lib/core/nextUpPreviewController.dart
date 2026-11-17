@@ -55,7 +55,8 @@ class NextUpPreviewController extends ChangeNotifier {
         input.next != null &&
         input.durationMs.isFinite &&
         input.durationMs > 0 &&
-        input.positionMs.isFinite;
+        input.positionMs.isFinite &&
+        input.positionMs >= 0;
     if (eligible) {
       final remaining = input.durationMs - input.positionMs;
       final lead = (input.leadSeconds * 1000.0).clamp(0.0, input.durationMs);
@@ -84,7 +85,17 @@ class NextUpPreviewController extends ChangeNotifier {
       }
     }
     final next = visible ? input.next : null;
-    if (_visible == visible && identical(_next, next)) return;
+    final current = _next;
+    if ((!trackChanged || !visible) &&
+        _visible == visible &&
+        (identical(current, next) ||
+            (current != null &&
+                next != null &&
+                current.id == next.id &&
+                current.title == next.title &&
+                current.artist == next.artist))) {
+      return;
+    }
     _visible = visible;
     _next = next;
     notifyListeners();

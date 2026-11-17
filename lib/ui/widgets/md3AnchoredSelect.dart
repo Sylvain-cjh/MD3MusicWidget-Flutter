@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'continuousSurfaceBorder.dart';
 import 'smoothRoundedClip.dart';
 
+typedef _SelectActiveRow = Widget Function(BuildContext context, double scale);
+
 class Md3AnchoredSelect<T> extends StatefulWidget {
   final T value;
   final List<DropdownMenuEntry<T>> entries;
@@ -12,6 +14,11 @@ class Md3AnchoredSelect<T> extends StatefulWidget {
   final double width;
   final double height;
   final bool enabled;
+  final bool _chip;
+  final double? _chipMenuWidth;
+  final IconData? _chipIcon;
+  final String? semanticLabel;
+  final Widget Function(BuildContext context, double scale)? activeRow;
 
   const Md3AnchoredSelect({
     super.key,
@@ -21,7 +28,27 @@ class Md3AnchoredSelect<T> extends StatefulWidget {
     this.width = 156,
     this.height = 48,
     this.enabled = true,
-  });
+  }) : _chip = false,
+       _chipMenuWidth = null,
+       _chipIcon = null,
+       semanticLabel = null,
+       activeRow = null;
+
+  const Md3AnchoredSelect.chip({
+    super.key,
+    required this.value,
+    required this.entries,
+    required this.onSelected,
+    required IconData icon,
+    this.semanticLabel,
+    this.activeRow,
+    double menuWidth = 252,
+    this.width = 154,
+    this.height = 28,
+    this.enabled = true,
+  }) : _chip = true,
+       _chipMenuWidth = menuWidth,
+       _chipIcon = icon;
 
   @override
   State<Md3AnchoredSelect<T>> createState() => _Md3AnchoredSelectState<T>();
@@ -31,11 +58,29 @@ class _Md3AnchoredSelectState<T> extends State<Md3AnchoredSelect<T>> {
   final GlobalKey _anchorKey = GlobalKey();
   bool _expanded = false;
 
-  DropdownMenuEntry<T> get _selectedEntry {
-    for (final entry in widget.entries) {
-      if (entry.value == widget.value) return entry;
-    }
-    return widget.entries.first;
+  int get _selectedIndex =>
+      widget.entries.indexWhere((entry) => entry.value == widget.value);
+
+  _SelectFaceStyle _faceStyle(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final chip = widget._chip;
+    final ink = chip ? scheme.onPrimaryContainer : scheme.onSurface;
+    return (
+      radius: chip
+          ? BorderRadius.circular(widget.height * .62)
+          : SmoothSurfaceCorners.control,
+      fill: widget.enabled || chip
+          ? (chip ? scheme.primaryContainer : scheme.surfaceContainerHighest)
+          : scheme.onSurface.withValues(alpha: .08),
+      ink: widget.enabled ? ink : scheme.onSurface.withValues(alpha: .38),
+      arrow: widget.enabled
+          ? scheme.onSurfaceVariant
+          : scheme.onSurface.withValues(alpha: .38),
+      font: (theme.textTheme.labelLarge ?? const TextStyle(fontSize: 14))
+          .copyWith(fontSize: chip ? 12.5 : null, fontWeight: FontWeight.w500),
+      leading: widget._chipIcon,
+    );
   }
 
   Future<void> _openMenu() async {
@@ -54,30 +99,38 @@ class _Md3AnchoredSelectState<T> extends State<Md3AnchoredSelect<T>> {
       ancestor: overlay,
     );
     final Rect anchorRect = Rect.fromPoints(topLeft, bottomRight);
+    if (anchorRect.isEmpty) return;
     final bool disableAnimations =
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final scale = anchorRect.height / widget.height;
+    final route = _Md3SelectRoute<T>(
+      anchorRect: anchorRect,
+      selectedIndex: math.max(_selectedIndex, 0),
+      entries: List.unmodifiable(widget.entries),
+      face: _faceStyle(context),
+      width: math.max(anchorRect.width, (widget._chipMenuWidth ?? 0) * scale),
+      itemHeight: widget._chip ? 42 * scale : anchorRect.height,
+      visualScale: scale,
+      alignEnd: widget._chip,
+      activeRow: widget.activeRow,
+      disableAnimations: disableAnimations,
+      barrierLabel: MaterialLocalizations.of(context).menuDismissLabel,
+      capturedThemes: InheritedTheme.capture(
+        from: context,
+        to: navigator.context,
+      ),
+    );
 
     setState(() => _expanded = true);
     try {
-      await navigator.push<T>(
-        _Md3SelectRoute<T>(
-          anchorRect: anchorRect,
-          selectedIndex: widget.entries.indexWhere(
-            (entry) => entry.value == widget.value,
-          ),
-          entries: widget.entries,
-          onSelected: widget.onSelected,
-          width: anchorRect.width,
-          itemHeight: anchorRect.height,
-          visualScale: anchorRect.height / widget.height,
-          disableAnimations: disableAnimations,
-          barrierLabel: MaterialLocalizations.of(context).menuDismissLabel,
-          capturedThemes: InheritedTheme.capture(
-            from: context,
-            to: navigator.context,
-          ),
-        ),
-      );
+      final choice = await navigator.push<T>(route);
+      
+      
+      
+      await route.completed;
+      if (mounted && choice != null && choice != widget.value) {
+        widget.onSelected(choice);
+      }
     } finally {
       if (mounted) setState(() => _expanded = false);
     }
@@ -86,73 +139,45 @@ class _Md3AnchoredSelectState<T> extends State<Md3AnchoredSelect<T>> {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final TextStyle? textStyle = Theme.of(context).textTheme.labelLarge;
-    final DropdownMenuEntry<T> selected = _selectedEntry;
+    final face = _faceStyle(context);
+    final label = widget.entries.isEmpty
+        ? ''
+        : widget.entries[math.max(_selectedIndex, 0)].label;
+    final bool hide =
+        _expanded && !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
 
     return Semantics(
       button: true,
       enabled: widget.enabled,
       expanded: _expanded,
-      value: selected.label,
-      child: Material(
-        key: _anchorKey,
-        color: widget.enabled
-            ? scheme.surfaceContainerHighest
-            : scheme.onSurface.withValues(alpha: 0.08),
-        shape: SmoothSurfaceCorners.shape(SmoothSurfaceCorners.control),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: widget.enabled ? _openMenu : null,
-          overlayColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.pressed)) {
-              return scheme.primary.withValues(alpha: 0.12);
-            }
-            if (states.contains(WidgetState.focused)) {
-              return scheme.primary.withValues(alpha: 0.10);
-            }
-            if (states.contains(WidgetState.hovered)) {
-              return scheme.primary.withValues(alpha: 0.08);
-            }
-            return null;
-          }),
-          child: SizedBox(
-            width: widget.width,
-            height: widget.height,
-            child: Opacity(
-              opacity: _expanded ? 0 : 1,
-              child: Padding(
-                padding: const EdgeInsetsDirectional.only(start: 16, end: 10),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        selected.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textStyle?.copyWith(
-                          color: widget.enabled
-                              ? scheme.onSurface
-                              : scheme.onSurface.withValues(alpha: 0.38),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    AnimatedRotation(
-                      turns: _expanded ? 0.5 : 0.0,
-                      duration: const Duration(milliseconds: 160),
-                      curve: const Cubic(0.23, 1.0, 0.32, 1.0),
-                      child: Icon(
-                        Icons.arrow_drop_down_rounded,
-                        color: widget.enabled
-                            ? (_expanded
-                                  ? scheme.primary
-                                  : scheme.onSurfaceVariant)
-                            : scheme.onSurface.withValues(alpha: 0.38),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+      label: widget.semanticLabel,
+      value: label,
+      child: Opacity(
+        key: const ValueKey('md3-select-anchor-visibility'),
+        opacity: hide ? 0 : 1,
+        child: Material(
+          key: _anchorKey,
+          color: face.fill,
+          shape: SmoothSurfaceCorners.shape(face.radius),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: widget.enabled ? _openMenu : null,
+            overlayColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.pressed)) {
+                return scheme.primary.withValues(alpha: 0.12);
+              }
+              if (states.contains(WidgetState.focused)) {
+                return scheme.primary.withValues(alpha: 0.10);
+              }
+              if (states.contains(WidgetState.hovered)) {
+                return scheme.primary.withValues(alpha: 0.08);
+              }
+              return null;
+            }),
+            child: SizedBox(
+              width: widget.width,
+              height: widget.height,
+              child: _SelectFace(label: label, style: face),
             ),
           ),
         ),
@@ -161,14 +186,85 @@ class _Md3AnchoredSelectState<T> extends State<Md3AnchoredSelect<T>> {
   }
 }
 
+typedef _SelectFaceStyle = ({
+  BorderRadius radius,
+  Color fill,
+  Color ink,
+  Color arrow,
+  TextStyle font,
+  IconData? leading,
+});
+
+class _SelectFace extends StatelessWidget {
+  final String label;
+  final _SelectFaceStyle style;
+  final double scale;
+  final double progress;
+  final bool toActiveRow;
+
+  const _SelectFace({
+    required this.label,
+    required this.style,
+    this.scale = 1,
+    this.progress = 0,
+    this.toActiveRow = false,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsetsDirectional.only(
+      start:
+          (style.leading == null
+              ? 16
+              : 10 + (toActiveRow ? 11 * progress : 0)) *
+          scale,
+      end: 10 * scale,
+    ),
+    child: Row(
+      children: [
+        if (style.leading case final icon?) ...[
+          Icon(
+            icon,
+            size: (15 + (toActiveRow ? 4 * progress : 0)) * scale,
+            color: style.ink,
+          ),
+          SizedBox(width: (6 + (toActiveRow ? 7 * progress : 0)) * scale),
+        ],
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style.font.copyWith(
+              fontSize: (style.font.fontSize ?? 14) * scale,
+              color: style.ink,
+            ),
+          ),
+        ),
+        if (style.leading == null)
+          Transform.rotate(
+            angle: progress * math.pi,
+            child: Icon(
+              Icons.arrow_drop_down_rounded,
+              size: 24 * scale,
+              color: style.arrow,
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 class _Md3SelectRoute<T> extends PopupRoute<T> {
   final Rect anchorRect;
   final int selectedIndex;
   final List<DropdownMenuEntry<T>> entries;
-  final ValueChanged<T> onSelected;
+  final _SelectFaceStyle face;
   final double width;
   final double itemHeight;
   final double visualScale;
+  final bool alignEnd;
+  final _SelectActiveRow? activeRow;
   final bool disableAnimations;
   final CapturedThemes capturedThemes;
 
@@ -179,10 +275,12 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
     required this.anchorRect,
     required this.selectedIndex,
     required this.entries,
-    required this.onSelected,
+    required this.face,
     required this.width,
     required this.itemHeight,
     required this.visualScale,
+    required this.alignEnd,
+    required this.activeRow,
     required this.disableAnimations,
     required this.barrierLabel,
     required this.capturedThemes,
@@ -192,6 +290,11 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
        );
 
   static const double _screenPadding = 8;
+  static const double _chipTopInset = 24;
+  static const _selectCurve = Cubic(.23, 1, .32, 1);
+  
+  
+  static const _chipMorphCurve = Cubic(.28, .26, .20, 1);
 
   @override
   Color? get barrierColor => null;
@@ -202,12 +305,12 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
   @override
   Duration get transitionDuration => disableAnimations
       ? const Duration(milliseconds: 120)
-      : const Duration(milliseconds: 200);
+      : Duration(milliseconds: alignEnd ? 240 : 200);
 
   @override
   Duration get reverseTransitionDuration => disableAnimations
       ? const Duration(milliseconds: 100)
-      : const Duration(milliseconds: 160);
+      : Duration(milliseconds: alignEnd ? 190 : 160);
 
   @override
   Widget buildPage(
@@ -215,6 +318,16 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
     Animation<double> animation,
     Animation<double> secondaryAnimation,
   ) {
+    final shapeCurve = alignEnd && !disableAnimations
+        ? _chipMorphCurve
+        : _selectCurve;
+    final selectedBlend = animation.drive(
+      CurveTween(
+        curve: alignEnd
+            ? const Interval(.55, .84, curve: Curves.easeInOut)
+            : const Interval(.42, .74, curve: Curves.easeInOut),
+      ),
+    );
     final Widget page = Material(
       type: MaterialType.transparency,
       child: LayoutBuilder(
@@ -227,82 +340,161 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
           final int safeSelectedIndex = selectedIndex < 0 ? 0 : selectedIndex;
           final double selectedContentCenter =
               menuPadding + safeSelectedIndex * itemHeight + itemHeight / 2;
+          final double topInset = alignEnd
+              ? math.max(
+                  _screenPadding,
+                  math.min(_chipTopInset * visualScale, viewport.height / 8),
+                )
+              : _screenPadding;
+          
+          
+          
+          final double rowHalfExtent = menuPadding + itemHeight / 2;
+          final double minCenter = topInset + rowHalfExtent;
+          final double maxCenter =
+              viewport.height - _screenPadding - rowHalfExtent;
+          final double selectedCenter = alignEnd && minCenter <= maxCenter
+              ? anchorRect.center.dy.clamp(minCenter, maxCenter)
+              : anchorRect.center.dy;
           final double visibleAbove = math.min(
             selectedContentCenter,
-            math.max(0, anchorRect.center.dy - _screenPadding),
+            math.max(0, selectedCenter - topInset),
           );
           final double visibleBelow = math.min(
             contentHeight - selectedContentCenter,
-            math.max(
-              0,
-              viewport.height - _screenPadding - anchorRect.center.dy,
-            ),
+            math.max(0, viewport.height - _screenPadding - selectedCenter),
           );
           final double menuHeight = visibleAbove + visibleBelow;
-          final double top = anchorRect.center.dy - visibleAbove;
+          final double top = selectedCenter - visibleAbove;
           final double initialScrollOffset =
               selectedContentCenter - visibleAbove;
-          final double selectedViewportCenter = visibleAbove;
+          final double sidePadding = math.min(
+            _screenPadding,
+            viewport.width / 2,
+          );
           final double menuWidth = math.min(
             width,
-            math.max(0, viewport.width - _screenPadding * 2),
+            viewport.width - sidePadding * 2,
           );
-          final double left = anchorRect.left.clamp(
-            _screenPadding,
-            viewport.width - menuWidth - _screenPadding,
+          if (menuWidth <= 0 || menuHeight <= 0) return const SizedBox.shrink();
+          final rtl = Directionality.of(context) == TextDirection.rtl;
+          final double desiredLeft = alignEnd && !rtl
+              ? anchorRect.right - menuWidth
+              : anchorRect.left;
+          final double left = desiredLeft.clamp(
+            sidePadding,
+            viewport.width - menuWidth - sidePadding,
           );
-
+          final menuRect = Rect.fromLTWH(left, top, menuWidth, menuHeight);
+          final bounds = anchorRect.expandToInclude(menuRect);
+          final origin = -bounds.topLeft;
+          final anchor = anchorRect.shift(origin);
+          final menu = menuRect.shift(origin);
+          final double selectedLocalY = selectedCenter + origin.dy;
+          final menuRadius = SmoothSurfaceCorners.popover * visualScale;
+          final scheme = Theme.of(context).colorScheme;
+          Widget menuContent = _Md3SelectMenu<T>(
+            entries: entries,
+            selectedIndex: safeSelectedIndex,
+            initialScrollOffset: initialScrollOffset,
+            rowHeight: itemHeight,
+            visualScale: visualScale,
+            face: face,
+            activeRow: activeRow,
+            animation: animation,
+            selectedBlend: selectedBlend,
+            disableAnimations: disableAnimations,
+          );
+          if (alignEnd) {
+            
+            
+            menuContent = ScrollConfiguration(
+              behavior: ScrollConfiguration.of(
+                context,
+              ).copyWith(scrollbars: false),
+              child: menuContent,
+            );
+          }
           return Stack(
             children: [
-              Positioned(
-                left: left,
-                top: top,
-                width: menuWidth,
-                height: menuHeight,
+              Positioned.fromRect(
+                rect: bounds,
                 child: AnimatedBuilder(
                   animation: animation,
                   builder: (context, child) {
-                    final double progress = const Cubic(
-                      0.23,
-                      1.0,
-                      0.32,
-                      1.0,
-                    ).transform(animation.value);
-                    if (disableAnimations) {
-                      return Opacity(opacity: progress, child: child);
-                    }
-                    return ClipPath(
-                      key: const ValueKey('md3-select-reveal'),
-                      clipBehavior: animation.isCompleted
-                          ? Clip.none
-                          : Clip.antiAlias,
-                      clipper: _SelectedItemRevealClipper(
-                        progress: progress,
-                        selectedCenter: selectedViewportCenter,
-                        initialHeight: itemHeight,
-                        cornerRadius:
-                            (SmoothSurfaceCorners.control.topLeft.x +
-                                (SmoothSurfaceCorners.popoverRadius -
-                                        SmoothSurfaceCorners
-                                            .control
-                                            .topLeft
-                                            .x) *
-                                    progress) *
-                            visualScale,
+                    final t = shapeCurve.transform(animation.value);
+                    final progress = disableAnimations ? 1.0 : t;
+                    final rect = Rect.lerp(anchor, menu, progress)!;
+                    final radius = BorderRadius.lerp(
+                      face.radius * visualScale,
+                      menuRadius,
+                      progress,
+                    )!;
+                    final clipper = _SelectSurfaceClipper(rect, radius);
+                    final surface = CustomPaint(
+                      painter: _SelectShadow(
+                        clipper,
+                        scheme.shadow,
+                        progress,
+                        visualScale,
                       ),
-                      child: child,
+                      child: ClipPath(
+                        key: disableAnimations
+                            ? null
+                            : const ValueKey('md3-select-reveal'),
+                        
+                        
+                        clipBehavior: Clip.antiAliasWithSaveLayer,
+                        clipper: clipper,
+                        child: ColoredBox(
+                          color: Color.lerp(
+                            face.fill,
+                            scheme.surfaceContainerHighest,
+                            progress,
+                          )!,
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              child!,
+                              if (!disableAnimations && selectedBlend.value < 1)
+                                Positioned.fromRect(
+                                  key: const ValueKey('md3-select-morph-face'),
+                                  rect: Rect.fromCenter(
+                                    center: Offset(
+                                      rect.center.dx,
+                                      anchor.center.dy +
+                                          (selectedLocalY - anchor.center.dy) *
+                                              progress,
+                                    ),
+                                    width: rect.width,
+                                    height: anchor.height,
+                                  ),
+                                  child: IgnorePointer(
+                                    child: ExcludeSemantics(
+                                      child: Opacity(
+                                        opacity: 1 - selectedBlend.value,
+                                        child: _SelectFace(
+                                          label:
+                                              entries[safeSelectedIndex].label,
+                                          style: face,
+                                          scale: visualScale,
+                                          progress: progress,
+                                          toActiveRow: activeRow != null,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
                     );
+                    return disableAnimations
+                        ? Opacity(opacity: t, child: surface)
+                        : surface;
                   },
-                  child: _Md3SelectMenu<T>(
-                    entries: entries,
-                    onSelected: onSelected,
-                    selectedIndex: safeSelectedIndex,
-                    initialScrollOffset: initialScrollOffset,
-                    rowHeight: itemHeight,
-                    visualScale: visualScale,
-                    animation: animation,
-                    disableAnimations: disableAnimations,
-                  ),
+                  child: Positioned.fromRect(rect: menu, child: menuContent),
                 ),
               ),
             ],
@@ -316,22 +508,26 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
 
 class _Md3SelectMenu<T> extends StatefulWidget {
   final List<DropdownMenuEntry<T>> entries;
-  final ValueChanged<T> onSelected;
   final int selectedIndex;
   final double initialScrollOffset;
   final double rowHeight;
   final double visualScale;
+  final _SelectFaceStyle face;
+  final _SelectActiveRow? activeRow;
   final Animation<double> animation;
+  final Animation<double> selectedBlend;
   final bool disableAnimations;
 
   const _Md3SelectMenu({
     required this.entries,
-    required this.onSelected,
     required this.selectedIndex,
     required this.initialScrollOffset,
     required this.rowHeight,
     required this.visualScale,
+    required this.face,
+    required this.activeRow,
     required this.animation,
+    required this.selectedBlend,
     required this.disableAnimations,
   });
 
@@ -355,14 +551,7 @@ class _Md3SelectMenuState<T> extends State<_Md3SelectMenu<T>> {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     return Material(
       key: const ValueKey('md3-select-menu-surface'),
-      color: scheme.surfaceContainerHighest,
-      elevation: 2 * widget.visualScale,
-      shadowColor: scheme.shadow.withValues(alpha: 0.18),
-      surfaceTintColor: Colors.transparent,
-      shape: SmoothSurfaceCorners.shape(
-        SmoothSurfaceCorners.popover * widget.visualScale,
-      ),
-      clipBehavior: Clip.antiAliasWithSaveLayer,
+      type: MaterialType.transparency,
       child: SingleChildScrollView(
         controller: _scrollController,
         padding: EdgeInsets.symmetric(
@@ -379,85 +568,135 @@ class _Md3SelectMenuState<T> extends State<_Md3SelectMenu<T>> {
                   horizontal:
                       SmoothSurfaceCorners.popoverRowInset * widget.visualScale,
                 ),
-                child: MenuItemButton(
-                  autofocus: selected,
-                  onPressed: entry.enabled
-                      ? () {
-                          if (!selected) widget.onSelected(entry.value);
-                          Navigator.of(context).pop(entry.value);
-                        }
-                      : null,
-                  trailingIcon: SizedBox.square(
-                    dimension: 24 * widget.visualScale,
-                    child: selected
-                        ? Icon(
-                            Icons.check_rounded,
-                            size: 20 * widget.visualScale,
-                            color: scheme.primary,
-                          )
-                        : null,
-                  ),
-                  style: ButtonStyle(
-                    minimumSize: WidgetStatePropertyAll(
-                      Size(0, widget.rowHeight),
-                    ),
-                    maximumSize: WidgetStatePropertyAll(
-                      Size(double.infinity, widget.rowHeight),
-                    ),
-                    padding: WidgetStatePropertyAll(
-                      EdgeInsetsDirectional.only(
-                        start: 12 * widget.visualScale,
-                        end: 6 * widget.visualScale,
+                child: selected && widget.activeRow != null
+                    ? SizedBox(
+                        height: widget.rowHeight,
+                        child: widget.activeRow!(context, widget.visualScale),
+                      )
+                    : MenuItemButton(
+                        overflowAxis: Axis.vertical,
+                        autofocus: selected,
+                        onPressed: entry.enabled
+                            ? () => Navigator.of(context).pop(entry.value)
+                            : null,
+                        leadingIcon: widget.face.leading != null
+                            ? null
+                            : entry.leadingIcon,
+                        trailingIcon: SizedBox.square(
+                          dimension: 24 * widget.visualScale,
+                          child: selected && entry.enabled
+                              ? Icon(
+                                  Icons.check_rounded,
+                                  size: 20 * widget.visualScale,
+                                  color: scheme.primary,
+                                )
+                              : null,
+                        ),
+                        style: ButtonStyle(
+                          
+                          
+                          
+                          
+                          fixedSize: WidgetStatePropertyAll(
+                            Size.fromHeight(widget.rowHeight),
+                          ),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          minimumSize: WidgetStatePropertyAll(
+                            Size(0, widget.rowHeight),
+                          ),
+                          maximumSize: WidgetStatePropertyAll(
+                            Size(double.infinity, widget.rowHeight),
+                          ),
+                          padding: WidgetStatePropertyAll(
+                            EdgeInsetsDirectional.only(
+                              start:
+                                  (widget.face.leading == null ? 10 : 4) *
+                                  widget.visualScale,
+                              end: 6 * widget.visualScale,
+                            ),
+                          ),
+                          shape: WidgetStatePropertyAll(
+                            SmoothSurfaceCorners.shape(
+                              SmoothSurfaceCorners.popoverItem *
+                                  widget.visualScale,
+                            ),
+                          ),
+                          backgroundColor: WidgetStateProperty.resolveWith((
+                            states,
+                          ) {
+                            if (states.contains(WidgetState.pressed)) {
+                              return scheme.primary.withValues(alpha: 0.12);
+                            }
+                            if (states.contains(WidgetState.focused)) {
+                              return scheme.primary.withValues(alpha: 0.10);
+                            }
+                            if (states.contains(WidgetState.hovered)) {
+                              return scheme.primary.withValues(alpha: 0.08);
+                            }
+                            return selected && entry.enabled
+                                ? scheme.primary.withValues(alpha: .10)
+                                : null;
+                          }),
+                          foregroundColor: WidgetStatePropertyAll(
+                            scheme.onSurface,
+                          ),
+                          textStyle: WidgetStatePropertyAll(
+                            widget.face.font.copyWith(
+                              fontSize:
+                                  (widget.face.font.fontSize ?? 14) *
+                                  widget.visualScale,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            if (widget.face.leading != null) ...[
+                              SizedBox.square(
+                                dimension: 15 * widget.visualScale,
+                                child: FittedBox(
+                                  fit: BoxFit.contain,
+                                  child:
+                                      entry.leadingIcon ??
+                                      const SizedBox.shrink(),
+                                ),
+                              ),
+                              SizedBox(width: 6 * widget.visualScale),
+                            ],
+                            Expanded(
+                              child: Text(
+                                entry.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    shape: WidgetStatePropertyAll(
-                      SmoothSurfaceCorners.shape(
-                        SmoothSurfaceCorners.popoverItem * widget.visualScale,
-                      ),
-                    ),
-                    backgroundColor: WidgetStateProperty.resolveWith((states) {
-                      if (states.contains(WidgetState.pressed)) {
-                        return scheme.primary.withValues(alpha: 0.12);
-                      }
-                      if (states.contains(WidgetState.focused)) {
-                        return scheme.primary.withValues(alpha: 0.10);
-                      }
-                      if (states.contains(WidgetState.hovered)) {
-                        return scheme.primary.withValues(alpha: 0.08);
-                      }
-                      return null;
-                    }),
-                    foregroundColor: WidgetStatePropertyAll(scheme.onSurface),
-                    textStyle: WidgetStatePropertyAll(
-                      Theme.of(context).textTheme.labelLarge?.copyWith(
-                        fontSize:
-                            (Theme.of(context).textTheme.labelLarge?.fontSize ??
-                                14) *
-                            widget.visualScale,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  child: Text(
-                    entry.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
               );
-              if (selected) return row;
+              if (widget.disableAnimations) return row;
+              if (selected) {
+                return FadeTransition(
+                  opacity: widget.selectedBlend,
+                  child: row,
+                );
+              }
               final int distance = (index - widget.selectedIndex).abs();
-              final double start = widget.disableAnimations
-                  ? 0
-                  : (0.07 + (distance - 1) * 0.065).clamp(0.07, 0.52);
-              final Animation<double> reveal = CurvedAnimation(
-                parent: widget.animation,
-                curve: Interval(
-                  start,
-                  widget.disableAnimations ? 1 : (start + 0.42).clamp(0.0, 1.0),
-                  curve: Curves.easeOutCubic,
+              
+              
+              final bool widens = widget.face.leading != null;
+              final double start = widens
+                  ? math.min(.81, .60 + (distance - 1) * .045)
+                  : math.min(.52, .07 + (distance - 1) * .065);
+              final Animation<double> reveal = widget.animation.drive(
+                CurveTween(
+                  curve: Interval(
+                    start,
+                    math.min(1, start + (widens ? .19 : .42)),
+                    curve: Curves.easeOutCubic,
+                  ),
                 ),
               );
+              final double travel = math.min(.30, .09 * distance);
               return FadeTransition(
                 key: ValueKey('md3-select-option-$index'),
                 opacity: reveal,
@@ -465,11 +704,7 @@ class _Md3SelectMenuState<T> extends State<_Md3SelectMenu<T>> {
                   position: Tween<Offset>(
                     begin: Offset(
                       0,
-                      widget.disableAnimations
-                          ? 0
-                          : index < widget.selectedIndex
-                          ? 0.08
-                          : -0.08,
+                      index < widget.selectedIndex ? travel : -travel,
                     ),
                     end: Offset.zero,
                   ).animate(reveal),
@@ -484,43 +719,43 @@ class _Md3SelectMenuState<T> extends State<_Md3SelectMenu<T>> {
   }
 }
 
-class _SelectedItemRevealClipper extends CustomClipper<Path> {
-  final double progress;
-  final double selectedCenter;
-  final double initialHeight;
-  final double cornerRadius;
+class _SelectSurfaceClipper extends CustomClipper<Path> {
+  final Rect rect;
+  final BorderRadius radius;
 
-  const _SelectedItemRevealClipper({
-    required this.progress,
-    required this.selectedCenter,
-    required this.initialHeight,
-    required this.cornerRadius,
-  });
+  const _SelectSurfaceClipper(this.rect, this.radius);
 
   @override
-  Path getClip(Size size) {
-    final double initialHalfHeight = initialHeight / 2;
-    final double top = (selectedCenter - initialHalfHeight) * (1.0 - progress);
-    final double bottom =
-        selectedCenter +
-        initialHalfHeight +
-        (size.height - selectedCenter - initialHalfHeight) * progress;
-    final Rect revealRect = Rect.fromLTRB(
-      0,
-      top.clamp(0.0, size.height),
-      size.width,
-      bottom.clamp(0.0, size.height),
-    );
-    return ContinuousSurfaceBorder.outline(
-      revealRect,
-      BorderRadius.circular(cornerRadius),
+  Path getClip(Size size) => ContinuousSurfaceBorder.outline(rect, radius);
+
+  @override
+  bool shouldReclip(_SelectSurfaceClipper oldClipper) =>
+      oldClipper.rect != rect || oldClipper.radius != radius;
+}
+
+class _SelectShadow extends CustomPainter {
+  final _SelectSurfaceClipper outline;
+  final Color color;
+  final double progress;
+  final double scale;
+
+  const _SelectShadow(this.outline, this.color, this.progress, this.scale);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress <= 0) return;
+    canvas.drawShadow(
+      outline.getClip(size),
+      color.withValues(alpha: .18 * progress),
+      2 * scale * progress,
+      false,
     );
   }
 
   @override
-  bool shouldReclip(_SelectedItemRevealClipper oldClipper) =>
-      oldClipper.progress != progress ||
-      oldClipper.selectedCenter != selectedCenter ||
-      oldClipper.initialHeight != initialHeight ||
-      oldClipper.cornerRadius != cornerRadius;
+  bool shouldRepaint(_SelectShadow oldDelegate) =>
+      outline.shouldReclip(oldDelegate.outline) ||
+      color != oldDelegate.color ||
+      progress != oldDelegate.progress ||
+      scale != oldDelegate.scale;
 }

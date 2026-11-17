@@ -28,6 +28,8 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
   Animation<double> get _animation =>
       widget.presenceAnimation ?? _localAnimation;
   PlatformQueueItem? _visibleNext;
+  String? _ownerPlayback;
+  String? _ownerProvider;
 
   @override
   void initState() {
@@ -35,8 +37,11 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
     _localAnimation = AnimationController(vsync: this);
     _preview = AppState.nextUpPreviewController;
     _preview.addListener(_syncPreview);
+    AppState.playbackRevision.addListener(_onPlayback);
     _animation.addStatusListener(_onStatus);
     _visibleNext = _preview.next;
+    _ownerPlayback = AppState.currentPlatformTrack?.contextIdentity;
+    _ownerProvider = AppState.queue.providerId;
   }
 
   @override
@@ -48,7 +53,11 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
   void _syncPreview() {
     if (!mounted) return;
     setState(() {
-      if (_preview.visible) _visibleNext = _preview.next;
+      if (_preview.visible) {
+        _visibleNext = _preview.next;
+        _ownerPlayback = AppState.currentPlatformTrack?.contextIdentity;
+        _ownerProvider = AppState.queue.providerId;
+      }
       if (!_preview.visible && _animation.value == 0) _visibleNext = null;
     });
     if (widget.presenceAnimation == null) {
@@ -64,6 +73,17 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
         curve: AppState.layoutSwitchCurve,
       );
     }
+  }
+
+  void _onPlayback() {
+    if (_visibleNext == null ||
+        _ownerPlayback == AppState.currentPlatformTrack?.contextIdentity) {
+      return;
+    }
+    
+    
+    _syncPreview();
+    if (!_preview.visible) setState(() => _visibleNext = null);
   }
 
   void _onStatus(AnimationStatus status) {
@@ -90,6 +110,7 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
   @override
   void dispose() {
     _preview.removeListener(_syncPreview);
+    AppState.playbackRevision.removeListener(_onPlayback);
     _animation.removeStatusListener(_onStatus);
     _localAnimation.dispose();
     super.dispose();
@@ -105,9 +126,9 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
     final detail = preview
         ? next.artist.isNotEmpty
               ? next.artist
-              : AppState.queue.providerId == 'qqMusicPlaylist'
+              : _ownerProvider == 'qqMusicPlaylist'
               ? '来自 QQ 音乐歌单'
-              : AppState.queue.providerId == 'neteasePlaylist'
+              : _ownerProvider == 'neteasePlaylist'
               ? '来自网易云歌单'
               : '来自导入的播放列表'
         : '';

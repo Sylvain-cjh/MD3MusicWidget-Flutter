@@ -86,6 +86,11 @@ final class PlatformTrack {
 
   String get contextIdentity => lifecycleId ?? queueIdentity;
 
+  
+  
+  static bool compatibleDuration(double a, double b) =>
+      a <= 0 || b <= 0 || (a - b).abs() <= 3500;
+
   MusicPlatform get platform => identifyMusicPlatform(sourceAppId);
 }
 
@@ -93,11 +98,13 @@ final class PlatformQueueItem {
   final String id;
   final String title;
   final String artist;
+  final double durationMs;
 
   const PlatformQueueItem({
     required this.id,
     required this.title,
     required this.artist,
+    this.durationMs = 0,
   });
 }
 
@@ -110,10 +117,10 @@ final class PlatformQueue {
 
   PlatformQueueItem? nextItem({bool wrap = false}) {
     final index = currentIndex;
-    if (index == null || items.isEmpty) return null;
+    if (index == null || index < 0 || index >= items.length) return null;
     final next = index + 1;
     if (next < items.length) return items[next];
-    return wrap ? items.first : null;
+    return wrap && items.length > 1 ? items.first : null;
   }
 }
 

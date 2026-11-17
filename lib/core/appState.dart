@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'appTypography.dart';
+import 'audioOutputs.dart';
 
 import 'mediaProvider.dart';
 import 'mediaCaptureBackend.dart';
@@ -193,12 +194,17 @@ class AppState {
         showLyrics ? currentPlatformTrack : null,
         providerId: lyricsProviderChoice.name,
         force: force,
+        positionMs: lyricsPlaybackPositionMs,
       ),
     );
   }
 
   static void refreshQueue({bool force = false}) {
+    _refreshQueueCandidate(force: force);
     _nextUpPreviewController?.refresh();
+  }
+
+  static void _refreshQueueCandidate({bool force = false}) {
     if (force) {
       _qqPlaylist.invalidate();
       _neteasePlaylist.invalidate();
@@ -208,12 +214,13 @@ class AppState {
         showNextUp ? currentPlatformTrack : null,
         enabled: showNextUp,
         force: force,
-        providerId: selectedQueueProviderId.isEmpty
-            ? null
-            : selectedQueueProviderId,
+        providerId: _selectedQueueId,
       ),
     );
   }
+
+  static String? get _selectedQueueId =>
+      selectedQueueProviderId.isEmpty ? null : selectedQueueProviderId;
 
   static PlatformQueueItem? get nextQueueItem {
     if (!showNextUp ||
@@ -223,7 +230,7 @@ class AppState {
       return null;
     }
     return queue
-        .queueForTrack(currentPlatformTrack)
+        .queueForTrack(currentPlatformTrack, providerId: _selectedQueueId)
         ?.nextItem(wrap: autoRepeatMode == 'list');
   }
 
@@ -510,6 +517,7 @@ class AppState {
   }
 
   static bool _playbackPositionKnown = true;
+  static bool get playbackPositionKnown => _playbackPositionKnown;
 
   static double get estimatedPlaybackPositionMs {
     if (!isPlaying || !_playbackPositionKnown || playbackUpdatedAtMs <= 0) {
@@ -530,6 +538,21 @@ class AppState {
     required int updatedAtMs,
     bool positionKnown = true,
   }) {
+    _storePlaybackTimeline(
+      positionMs: positionMs,
+      durationMs: durationMs,
+      updatedAtMs: updatedAtMs,
+      positionKnown: positionKnown,
+    );
+    playbackRevision.value++;
+  }
+
+  static void _storePlaybackTimeline({
+    required double positionMs,
+    required double durationMs,
+    required int updatedAtMs,
+    required bool positionKnown,
+  }) {
     final double safeDuration = durationMs.isFinite && durationMs > 0
         ? durationMs
         : 0.0;
@@ -549,26 +572,40 @@ class AppState {
         ? (receivedAtWallClockMs - updatedAtMs).clamp(0, 2000)
         : 0;
     _playbackReceivedAtMonotonicMs = _playbackClock.elapsedMilliseconds;
-    playbackRevision.value++;
   }
 
   static void commitPlaybackContext(
     MediaSnapshot snapshot,
     PlatformTrack? track,
   ) {
+    final samePlayback =
+        track != null &&
+        currentPlatformTrack?.contextIdentity == track.contextIdentity;
+    final positionKnown =
+        track != null &&
+        snapshot.timelinePositionKnown != false &&
+        snapshot.positionMs.isFinite &&
+        snapshot.positionMs >= 0;
+    final position = positionKnown
+        ? snapshot.positionMs
+        : samePlayback
+        ? estimatedPlaybackPositionMs
+        : 0.0;
     currentPlatformTrack = track;
+    isPlaying = snapshot.isPlaying;
     captureRoute = snapshot.captureRoute;
     isShuffleActive = snapshot.isShuffleActive;
     autoRepeatMode = snapshot.autoRepeatMode;
-    updatePlaybackTimeline(
-      positionMs: snapshot.positionMs,
+    _storePlaybackTimeline(
+      positionMs: position,
       durationMs: snapshot.durationMs,
       updatedAtMs: snapshot.timelineUpdatedAtMs,
-      positionKnown: snapshot.timelinePositionKnown ?? true,
+      positionKnown: positionKnown,
     );
-    refreshQueue();
     refreshLyrics();
     if (showLyrics) lyrics.setPositionMs(lyricsPlaybackPositionMs);
+    _refreshQueueCandidate();
+    playbackRevision.value++;
   }
 
   static ColorScheme currentScheme = ColorScheme.fromSeed(
@@ -663,6 +700,12 @@ class AppState {
   static CoverTransitionStyle coverTransitionStyle =
       CoverTransitionStyle.softSlide;
   static bool showPlaybackControls = true;
+  static bool showHomeAudioOutput = true;
+  static final audioOutputs = AudioOutputs();
+  static const int defaultCoverVolumeStep = 3;
+  static const int maxCoverVolumeStep = 15;
+  static bool coverVolumeEnabled = true;
+  static int coverVolumeStep = defaultCoverVolumeStep;
   static bool trackTextAnimationsEnabled = true;
   static TrackTextTransitionStyle trackTextTransitionStyle =
       TrackTextTransitionStyle.particles;

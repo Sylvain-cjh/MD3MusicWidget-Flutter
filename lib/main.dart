@@ -58,6 +58,14 @@ Future<void> main() async {
   await windowManager.show();
   await windowManager.focus();
   WidgetDiagnostics.mark('windowShown');
+  if (Platform.isWindows) {
+    unawaited(
+      Future<void>.delayed(
+        const Duration(milliseconds: 330),
+        AppState.audioOutputs.start,
+      ),
+    );
+  }
 
   unawaited(
     Future<void>.delayed(

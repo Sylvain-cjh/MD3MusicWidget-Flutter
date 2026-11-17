@@ -13,7 +13,7 @@ abstract final class MediaMotionTokens {
   static const layerHandoffCurve = Cubic(.23, 1, .32, 1);
   static const settingsDisclosure = Duration(milliseconds: 280);
   static const settingsDisclosureCurve = Cubic(.32, .72, 0, 1);
-  static const orientation = Duration(milliseconds: 300);
+  static const orientation = Duration(milliseconds: 340);
   static const orientationCurve = _OrientationSpringCurve();
 }
 

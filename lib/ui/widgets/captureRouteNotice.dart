@@ -11,10 +11,12 @@ class CaptureRouteNotice extends StatefulWidget {
     super.key,
     required this.route,
     this.compact = false,
+    this.bluetoothOutput,
   });
 
   final MediaCaptureRoute route;
   final bool compact;
+  final String? bluetoothOutput;
   static const height = 20.0;
   static const visibleFor = Duration(milliseconds: 2400);
   static const message = 'UIA 备用采集';
@@ -65,10 +67,16 @@ class _CaptureRouteNoticeState extends State<CaptureRouteNotice> {
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final device = widget.bluetoothOutput;
+    final visible = _visible || device != null;
     return IgnorePointer(
       child: Semantics(
-        liveRegion: _visible,
-        label: _visible ? '网易云音乐：已启用 UI Automation 备用采集' : null,
+        liveRegion: visible,
+        label: device != null
+            ? (device.isEmpty ? '蓝牙音频已连接' : '蓝牙音频已连接：$device')
+            : _visible
+            ? '网易云音乐：已启用 UI Automation 备用采集'
+            : null,
         excludeSemantics: true,
         child: AnimatedSwitcher(
           duration: reduceMotion
@@ -91,21 +99,31 @@ class _CaptureRouteNoticeState extends State<CaptureRouteNotice> {
                     child: child,
                   ),
           ),
-          child: !_visible
+          child: !visible
               ? null
               : Builder(
-                  key: const ValueKey('capture_route_notice'),
-                  builder: _buildSurface,
+                  key: ValueKey(
+                    device == null
+                        ? 'capture_route_notice'
+                        : 'bluetooth_output_notice',
+                  ),
+                  builder: (context) => _buildSurface(context, device),
                 ),
         ),
       ),
     );
   }
 
-  Widget _buildSurface(BuildContext context) {
+  Widget _buildSurface(BuildContext context, String? device) {
     final colors = Theme.of(context).colorScheme;
-    final background = colors.tertiaryContainer;
-    final foreground = _legibleOn(background, colors.onTertiaryContainer);
+    final bluetooth = device != null;
+    final background = bluetooth
+        ? colors.secondaryContainer
+        : colors.tertiaryContainer;
+    final foreground = _legibleOn(
+      background,
+      bluetooth ? colors.onSecondaryContainer : colors.onTertiaryContainer,
+    );
     return DecoratedBox(
       decoration: ShapeDecoration(
         color: background,
@@ -131,7 +149,10 @@ class _CaptureRouteNoticeState extends State<CaptureRouteNotice> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (!widget.compact) ...[
+            if (bluetooth) ...[
+              Icon(Icons.bluetooth_audio_rounded, size: 11, color: foreground),
+              const SizedBox(width: 3),
+            ] else if (!widget.compact) ...[
               SizedBox.square(
                 dimension: 5,
                 child: DecoratedBox(
@@ -145,7 +166,11 @@ class _CaptureRouteNoticeState extends State<CaptureRouteNotice> {
             ],
             Flexible(
               child: Text(
-                widget.compact
+                bluetooth
+                    ? !widget.compact && device.isNotEmpty
+                          ? '蓝牙已连接 · $device'
+                          : '蓝牙已连接'
+                    : widget.compact
                     ? CaptureRouteNotice.compactMessage
                     : CaptureRouteNotice.message,
                 maxLines: 1,

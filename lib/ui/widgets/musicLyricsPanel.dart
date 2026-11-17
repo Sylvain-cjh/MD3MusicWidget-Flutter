@@ -28,6 +28,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
   Timer? _timelineTimer;
   Timer? _cooldownDisplayTimer;
   LyricsState? _retainedState;
+  String? _retainedPlayback;
   late final AnimatedSwitcherTransitionBuilder _lineTransitionBuilder =
       _buildLineTransition;
 
@@ -47,7 +48,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     AppState.typographyRevision.addListener(_onLyricsChanged);
     AppState.lyricsVisualRevision.addListener(_onLyricsChanged);
     AppState.backgroundRevision.addListener(_onLyricsChanged);
-    AppState.playbackRevision.addListener(_syncTimelineTimer);
+    AppState.playbackRevision.addListener(_onPlaybackChanged);
     _syncTimelineTimer();
     _syncCooldownTimer();
   }
@@ -56,6 +57,14 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     _syncTimelineTimer();
     _syncCooldownTimer();
     if (mounted) setState(() {});
+  }
+
+  void _onPlaybackChanged() {
+    _syncTimelineTimer();
+    if (_retainedPlayback != AppState.currentPlatformTrack?.contextIdentity &&
+        mounted) {
+      setState(() {});
+    }
   }
 
   DateTime get _now => widget.clock?.call() ?? DateTime.now();
@@ -100,7 +109,9 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
   }
 
   void _syncTimelineTimer() {
-    if (AppState.isPlaying && AppState.lyrics.state.document?.isTimed == true) {
+    if (AppState.isPlaying &&
+        AppState.playbackPositionKnown &&
+        AppState.lyrics.state.document?.isTimed == true) {
       _timelineTimer ??= Timer.periodic(const Duration(milliseconds: 100), (_) {
         AppState.lyrics.setPositionMs(AppState.lyricsPlaybackPositionMs);
       });
@@ -118,7 +129,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     AppState.typographyRevision.removeListener(_onLyricsChanged);
     AppState.lyricsVisualRevision.removeListener(_onLyricsChanged);
     AppState.backgroundRevision.removeListener(_onLyricsChanged);
-    AppState.playbackRevision.removeListener(_syncTimelineTimer);
+    AppState.playbackRevision.removeListener(_onPlaybackChanged);
     super.dispose();
   }
 
@@ -228,6 +239,9 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
   @override
   Widget build(BuildContext context) {
     final scheme = AppState.currentScheme;
+    final playback = AppState.currentPlatformTrack?.contextIdentity;
+    if (_retainedPlayback != playback) _retainedState = null;
+    _retainedPlayback = playback;
     final actual = AppState.lyrics.state;
     final hiding =
         AppState.hideUnavailableLyrics &&
@@ -236,6 +250,11 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
     if (!hiding) _retainedState = actual;
     final state = hiding ? (_retainedState ?? actual) : actual;
     final displayText = _displayText(state);
+    final lineKey =
+        '${state.providerId}:${state.status}:${state.lineIndex}:$displayText';
+    final countdown =
+        state.issue == LyricsIssue.rateLimited || state.automaticRetryScheduled;
+    var linePosition = AppState.lyricsPlaybackPositionMs;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return SmoothRoundedClip.mediaStrip(
       side: BorderSide(
@@ -301,12 +320,11 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                       ),
                       transitionBuilder: _lineTransitionBuilder,
                       child: Align(
-                        key: ValueKey(
-                          state.issue == LyricsIssue.rateLimited ||
-                                  state.automaticRetryScheduled
-                              ? '${state.providerId}:lyrics_cooldown_${state.issue.name}'
-                              : '${state.providerId}:${state.status}:${state.lineIndex}:$displayText',
-                        ),
+                        key: countdown
+                            ? ValueKey(
+                                '${state.providerId}:lyrics_cooldown_${state.issue.name}',
+                              )
+                            : ValueKey((playback, lineKey)),
                         alignment: Alignment.centerLeft,
                         child:
                             state.status == LyricsStatus.loading &&
@@ -326,9 +344,23 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                                   effect: AppState.lyricsHighlightStyle,
                                   smokeEnabled: AppState.wordLyricsSmokeEnabled,
                                   active: !hiding && AppState.showLyrics,
-                                  positionMs: () =>
-                                      AppState.lyricsPlaybackPositionMs,
-                                  isPlaying: () => AppState.isPlaying,
+                                  positionMs: () {
+                                    if (AppState
+                                            .currentPlatformTrack
+                                            ?.contextIdentity ==
+                                        playback) {
+                                      linePosition =
+                                          AppState.lyricsPlaybackPositionMs;
+                                    }
+                                    return linePosition;
+                                  },
+                                  isPlaying: () =>
+                                      AppState.isPlaying &&
+                                      AppState.playbackPositionKnown &&
+                                      AppState
+                                              .currentPlatformTrack
+                                              ?.contextIdentity ==
+                                          playback,
                                   playbackChanges: AppState.playbackRevision,
                                 ),
                               )

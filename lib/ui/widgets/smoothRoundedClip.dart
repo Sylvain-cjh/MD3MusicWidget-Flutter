@@ -17,6 +17,10 @@ abstract final class SmoothSurfaceCorners {
   );
   
   static const mediaStrip = BorderRadius.all(Radius.circular(18));
+  
+  
+  
+  static const portraitArtwork = mediaStrip;
   static const navigationInset = 3.0;
   static const menuRadius = 24.0;
   static const menuInset = 6.0;

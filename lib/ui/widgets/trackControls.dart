@@ -9,9 +9,11 @@ import 'playbackControlButton.dart';
 import 'playbackPauseShade.dart';
 import 'mediaGeometry.dart';
 import 'coverParallax.dart';
+import 'coverVolumeControl.dart';
 import 'spectrumGlassSurface.dart';
 import 'playbackTimeLabel.dart';
 import 'adaptiveMediaText.dart';
+import 'audioOutputChip.dart';
 import 'captureRouteNotice.dart';
 import 'smoothRoundedClip.dart';
 import '../animations/coverArtworkSwitcher.dart';
@@ -44,13 +46,19 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
   double _cachedArtistTargetWidth = 0, _cachedArtistTargetHeight = 0;
   String _directionCoverIdentity = '';
   int _coverDirection = 1;
+  BorderRadius? _displayedCoverCorners;
+  BorderRadius? _beginCoverCorners;
+  int? _coverCornersSerial;
   late bool _hasTimeline;
+  late bool _hasOutputChip;
   Timer? _timelineHideTimer;
 
   @override
   void initState() {
     super.initState();
     _hasTimeline = _timelineAvailable;
+    _hasOutputChip = AudioOutputChip.isAvailable(AppState.audioOutputs);
+    AppState.audioOutputs.addListener(_handleOutputAvailability);
     AppState.playbackRevision.addListener(_handleTimelineAvailability);
     AppState.typographyRevision.addListener(_handleTypographyChanged);
     AppState.fontsRevision.addListener(_handleTypographyChanged);
@@ -58,6 +66,13 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
 
   void _handleTypographyChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _handleOutputAvailability() {
+    final available = AudioOutputChip.isAvailable(AppState.audioOutputs);
+    if (mounted && available != _hasOutputChip) {
+      setState(() => _hasOutputChip = available);
+    }
   }
 
   bool get _timelineAvailable =>
@@ -88,6 +103,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
   @override
   void dispose() {
     _timelineHideTimer?.cancel();
+    AppState.audioOutputs.removeListener(_handleOutputAvailability);
     AppState.playbackRevision.removeListener(_handleTimelineAvailability);
     AppState.typographyRevision.removeListener(_handleTypographyChanged);
     AppState.fontsRevision.removeListener(_handleTypographyChanged);
@@ -335,6 +351,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
         ? Colors.white.withValues(alpha: 0.78)
         : AppState.currentScheme.onSurfaceVariant;
     final bool isV = widget.isVertical;
+    final bool showOutputChip = AppState.showHomeAudioOutput && _hasOutputChip;
     final bool canPrevious =
         AppState.showPlaybackControls &&
         MediaCapability.supports(
@@ -419,11 +436,24 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
           final totalSpacing =
               coverGap + metadataGap + progressGap + transportGap;
           final double nonCoverHeight = titleH + artistH + progressH + playH;
+          
+          
+          final double headerHeight = showOutputChip
+              ? AudioOutputChip.height
+              : 0;
           final double coverSpace =
-              availableH - padding * 2 - nonCoverHeight - totalSpacing;
+              availableH -
+              padding * 2 -
+              nonCoverHeight -
+              totalSpacing -
+              headerHeight;
           coverSize = math.min(infoW, math.max(96.0, coverSpace));
           final double groupHeight = coverSize + nonCoverHeight + totalSpacing;
-          coverT = math.max(padding, (availableH - groupHeight) / 2.0);
+          coverT = math.max(
+            padding + headerHeight,
+            (availableH - groupHeight + headerHeight) / 2.0,
+          );
+          coverL = (availableW - coverSize) / 2;
           titleT = coverT + coverSize + coverGap;
           artistT = titleT + titleH + metadataGap;
           progressT = artistT + artistH + progressGap;
@@ -447,9 +477,12 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
           progressH = hasProgress ? md3ProgressHeight : 0.0;
           progressW = (infoW * 0.72).clamp(180.0, 218.0);
           if (AppState.showPlaybackTime) progressW = infoW;
+          final double contentTop = showOutputChip
+              ? padding + AudioOutputChip.height + 4
+              : padding;
           final double contentHeight = math.max(
             80.0,
-            availableH - padding * 2.0,
+            availableH - contentTop - padding,
           );
           playH = hasControls ? (contentHeight * 0.44).clamp(48.0, 58.0) : 0.0;
           btnH = playH * 0.83;
@@ -462,7 +495,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                     .clamp(2.0, 16.0);
           final double groupHeight =
               fixedHeight + metadataGap + gap * actionGaps;
-          titleT = (availableH - groupHeight) / 2.0;
+          titleT = contentTop + math.max(0, (contentHeight - groupHeight) / 2);
           artistT = titleT + titleH + metadataGap;
           progressT = artistT + artistH + (hasProgress ? gap : 0.0);
           playT = hasProgress
@@ -471,6 +504,9 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
           btnT = playT + (playH - btnH) / 2.0;
         }
 
+        final double chipWidth = isV
+            ? math.min(154.0, coverSize - 20)
+            : (infoW * .58).clamp(128.0, 172.0);
         double shapedWidth(MD3Shape shape, double height, double extra) =>
             height + (shape == MD3Shape.stadium ? height * extra : 0.0);
 
@@ -574,6 +610,9 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
             );
         final Duration titleTransitionDuration = mediaTextTransitionDuration;
         final Duration artistTransitionDuration = mediaTextTransitionDuration;
+        final coverRadius = isV
+            ? SmoothSurfaceCorners.portraitArtwork
+            : SmoothSurfaceCorners.artwork(inset: coverL, topInset: coverT);
 
         return Stack(
           clipBehavior: Clip.none,
@@ -581,15 +620,25 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
             MorphPositioned(
               motion: widget.layoutMotion,
               cover: true,
+              clearCoverHeader: showOutputChip,
               duration: AppState.layoutSwitchDuration,
               curve: AppState.layoutSwitchCurve,
               left: coverL,
               top: coverT,
               width: coverSize,
               height: coverSize,
-              child: _buildCover(
-                coverSize,
-                SmoothSurfaceCorners.artwork(inset: coverL, topInset: coverT),
+              child: AnimatedBuilder(
+                animation: widget.layoutMotion ?? kAlwaysCompleteAnimation,
+                builder: (context, _) {
+                  final radius = _coverCorners(coverRadius);
+                  return CoverVolumeControl(
+                    scheme: AppState.currentScheme,
+                    borderRadius: radius,
+                    enabled: AppState.coverVolumeEnabled,
+                    stepPercent: AppState.coverVolumeStep,
+                    child: _buildCover(coverSize, radius),
+                  );
+                },
               ),
             ),
 
@@ -851,16 +900,52 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
               height: noticeHeight,
               child: Align(
                 alignment: Alignment.centerRight,
-                child: CaptureRouteNotice(
-                  route: AppState.captureRoute,
-                  compact: noticeWidth < 82,
+                child: ValueListenableBuilder(
+                  valueListenable: AppState.audioOutputs.bluetoothNotice,
+                  builder: (context, bluetooth, _) => CaptureRouteNotice(
+                    route: AppState.captureRoute,
+                    compact: noticeWidth < 82,
+                    bluetoothOutput: bluetooth?.name,
+                  ),
                 ),
               ),
             ),
+            if (showOutputChip)
+              MorphPositioned(
+                key: const ValueKey('home_audio_output_position'),
+                motion: widget.layoutMotion,
+                duration: AppState.layoutSwitchDuration,
+                curve: AppState.layoutSwitchCurve,
+                left: availableW - padding - chipWidth,
+                top: isV ? coverT - AudioOutputChip.height - 8 : padding,
+                width: chipWidth,
+                height: AudioOutputChip.height,
+                child: AudioOutputChip(
+                  audio: AppState.audioOutputs,
+                  width: chipWidth,
+                ),
+              ),
           ],
         );
       },
     );
+  }
+
+  BorderRadius _coverCorners(BorderRadius target) {
+    final motion = widget.layoutMotion;
+    if (motion == null || !motion.active) {
+      _coverCornersSerial = null;
+      return _displayedCoverCorners = target;
+    }
+    if (_coverCornersSerial != motion.serial) {
+      _coverCornersSerial = motion.serial;
+      _beginCoverCorners = _displayedCoverCorners ?? target;
+    }
+    return _displayedCoverCorners = BorderRadius.lerp(
+      _beginCoverCorners,
+      target,
+      motion.coverProgress,
+    )!;
   }
 
   Widget _buildCover(double size, BorderRadius radius) {

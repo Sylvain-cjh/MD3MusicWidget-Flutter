@@ -21,6 +21,7 @@ final class MediaSessionLifecycle {
   final double Function() estimatedPositionMs;
   final Duration emptyGrace;
   PlatformTrack? _track;
+  MediaSnapshot? _lastSnapshot;
   MediaSnapshot? _pendingEmpty;
   Timer? _emptyTimer;
   int _producer = 0, _lastTimestamp = 0;
@@ -93,7 +94,11 @@ final class MediaSessionLifecycle {
             _text(previous.sourceAppId) == _text(incoming.sourceAppId)) &&
         (!_knownArtist(previous.artist) ||
             !_knownArtist(incoming.artist) ||
-            _artists(previous.artist) == _artists(incoming.artist));
+            _artists(previous.artist) == _artists(incoming.artist)) &&
+        PlatformTrack.compatibleDuration(
+          previous.durationMs,
+          incoming.durationMs,
+        );
     if (sameSong) {
       snapshot = snapshot.withMetadata(
         artist: !_knownArtist(incoming.artist) && _knownArtist(previous.artist)
@@ -102,17 +107,34 @@ final class MediaSessionLifecycle {
         sourceAppId: incoming.sourceAppId.isEmpty
             ? previous.sourceAppId
             : incoming.sourceAppId,
-        durationMs: incoming.durationMs <= 0
-            ? previous.durationMs
-            : incoming.durationMs,
       );
       incoming = PlatformTrack.fromSnapshot(snapshot)!;
     }
+    final last = _lastSnapshot;
+    
+    
+    
+    final previousPosition = sameSong ? estimatedPositionMs() : 0.0;
     final restart =
         sameSong &&
-        previous.trackVersion != incoming!.trackVersion &&
-        snapshot.positionMs < 5000 &&
-        estimatedPositionMs() > 5000;
+        last != null &&
+        last.captureRoute == snapshot.captureRoute &&
+        last.timelinePositionKnown != false &&
+        snapshot.timelinePositionKnown != false &&
+        last.isPlaying &&
+        snapshot.isPlaying &&
+        previous.durationMs >= 5000 &&
+        last.durationMs > 0 &&
+        snapshot.durationMs > 0 &&
+        snapshot.positionMs >= 0 &&
+        snapshot.positionMs < 3500 &&
+        previousPosition >= previous.durationMs - 12000 &&
+        previousPosition - snapshot.positionMs > 5000 &&
+        (previous.trackVersion != incoming!.trackVersion ||
+            previousPosition >= previous.durationMs - 2200);
+    final lookupDuration = sameSong && incoming!.durationMs <= 0
+        ? previous.durationMs
+        : incoming?.durationMs ?? 0.0;
     final change = incoming == null
         ? MediaTrackChange.cleared
         : !sameSong
@@ -122,7 +144,7 @@ final class MediaSessionLifecycle {
         : previous.title != incoming.title ||
               previous.artist != incoming.artist ||
               previous.sourceAppId != incoming.sourceAppId ||
-              previous.durationMs != incoming.durationMs
+              previous.durationMs != lookupDuration
         ? MediaTrackChange.enrichment
         : MediaTrackChange.transport;
     if (incoming != null) {
@@ -131,13 +153,14 @@ final class MediaSessionLifecycle {
         trackVersion: incoming.trackVersion,
         title: incoming.title,
         artist: incoming.artist,
-        durationMs: incoming.durationMs,
+        durationMs: lookupDuration,
         lifecycleId: sameSong && !restart
             ? previous.lifecycleId
             : 'media-session:${++_nextEpoch}',
       );
     }
     _track = incoming;
+    _lastSnapshot = snapshot;
     accepted++;
     onUpdate(MediaSessionUpdate(snapshot, incoming, change));
   }

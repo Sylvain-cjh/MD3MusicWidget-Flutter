@@ -67,9 +67,10 @@ final class LyricsDiskCache {
       }
       final duration = json['durationMs'];
       if (duration is num &&
-          duration > 0 &&
-          track.durationMs > 0 &&
-          (duration - track.durationMs).abs() > 12000) {
+          !PlatformTrack.compatibleDuration(
+            duration.toDouble(),
+            track.durationMs,
+          )) {
         return null;
       }
       final lines = json['lines'] as List;

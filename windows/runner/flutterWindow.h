@@ -12,6 +12,7 @@
 #include "systemPerformanceMonitor.h"
 #include "systemFonts.h"
 #include "nativeMediaBridge.h"
+#include "audioOutputDevices.h"
 #include "systemTray.h"
 
 
@@ -49,6 +50,11 @@ class FlutterWindow : public Win32Window {
       app_info_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       system_tray_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      system_volume_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      audio_outputs_channel_;
+  std::unique_ptr<AudioOutputDevices> audio_outputs_;
   SystemTray system_tray_;
   bool watch_client_viewport_ = false;
   LONG published_client_width_ = 0;
