@@ -43,8 +43,8 @@ class _SettingsDisclosureState extends State<SettingsDisclosure>
       _progress
           .animateTo(
             target,
-            duration: MediaMotionTokens.settingsDisclosure,
-            curve: MediaMotionTokens.settingsDisclosureCurve,
+            duration: MediaMotionTokens.settingsDuration(open),
+            curve: MediaMotionTokens.settingsSurfaceCurve,
           )
           .orCancel
           .then(
@@ -95,12 +95,15 @@ class _SettingsDisclosureState extends State<SettingsDisclosure>
           animation: _progress,
           child: widget.child,
           builder: (context, child) {
-            final delta = _reduced ? 0.0 : 18 * (1 - _progress.value);
+            final position = _progress.value;
+            final delta = _reduced ? 0.0 : 18 * (1 - position);
             return TickerMode(
               enabled: widget.open || _progress.isAnimating,
               child: ClipRect(
                 child: Opacity(
-                  opacity: _progress.value,
+                  opacity: MediaMotionTokens.surfaceOpacityCurve.transform(
+                    position,
+                  ),
                   child: Transform.translate(
                     offset: widget.axis == Axis.vertical
                         ? Offset(0, delta)

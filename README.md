@@ -11,7 +11,7 @@
 
 <p><strong>把正在听的歌，留在桌面或直播画面里。</strong><br/>不换播放器，也不挡住你正在做的事。</p>
 
-[![版本 1.3.2](https://img.shields.io/badge/version-1.3.2-74549D?style=flat-square)](CHANGELOG.md)
+[![版本 1.3.3](https://img.shields.io/badge/version-1.3.3-74549D?style=flat-square)](CHANGELOG.md)
 [![Windows x64](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-507765?style=flat-square)](#开始使用)
 [![Flutter](https://img.shields.io/badge/UI-Flutter-74549D?style=flat-square&logo=flutter&logoColor=white)](#工作原理)
 [![内置音乐采集](https://img.shields.io/badge/capture-SMTC%20%2B%20WASAPI-507765?style=flat-square)](docs/native_capture.md)
@@ -30,14 +30,14 @@
 
 **第一次用，建议先选无模型版。** 它保留封面、歌词、频谱、性能监视器和普通 3D 悬浮效果。只有想让封面里的主体和背景产生不同深度的视差时，才需要分层模型。
 
-| 1.3.2 套件 | 适合谁 |
+| 1.3.3 套件 | 适合谁 |
 | --- | --- |
 | **无分层模型版** · `Without-Layer-Models` | 想看歌曲、封面、歌词、频谱，或给直播做展示。 |
 | **有分层模型版** · `With-Layer-Models` | 想让封面主体与背景有不同景深；需要兼容核显。 |
 
 两种版本都有 `Setup.exe` 安装包和 `Portable.zip` 免安装包，任选其一即可。源码 ZIP 不用于直接运行。已发布的附件见 [GitHub 发行页](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases)。
 
-1.3.2 的有模型版沿用上一版的正式模型，本次不单独发行 cover-layers。需要模型请选有模型版，详见 [分层模型说明](docs/layer_models.md)。
+1.3.3 的有模型版沿用上一版的正式模型，本次不单独发行 cover-layers。需要模型请选有模型版，详见 [分层模型说明](docs/layer_models.md)。
 
 > [!IMPORTANT]
 > 主程序要求 **Windows 10 2004（Build 19041）或更新版本，包括 Windows 11，x64**。播放器需要开启系统媒体控制，挂件才能读取正在播放的信息。指定进程频谱和可选分层另有系统或硬件要求。
@@ -45,34 +45,36 @@
 ## 功能演示
 
 <p align="center">
-  <a href="docs/media/widget-showcase.png"><img src="docs/media/widget-showcase.png" width="856" alt="MD3 Music Widget 完整功能演示：播放器和偏好设置全景" /></a>
+  <a href="docs/media/demo-playback.png"><img src="docs/media/demo-playback.png" width="432" alt="播放、歌词与频谱演示" /></a>
 </p>
 
-<p align="center"><sub>播放 · 输出设备与音量 · 横竖布局 · 歌词与频谱 · 性能监视 · 偏好设置</sub></p>
+<p align="center"><sub>播放 · 歌词 · 频谱与性能监视</sub></p>
 
 <p align="center">
-  <a href="docs/media/player-horizontal.png"><img src="docs/media/player-horizontal.png" width="740" alt="横版播放器：封面、歌手、播放时间、播放控件、波形和歌词" /></a>
+  <a href="docs/media/demo-output.png"><img src="docs/media/demo-output.png" width="432" alt="输出设备与音量演示" /></a>
 </p>
 
-<p align="center"><sub>横版播放器 · 封面、频谱与歌词</sub></p>
+<p align="center"><sub>输出设备与音量</sub></p>
 
-<table>
-  <tr>
-    <td align="center" width="42%"><strong>竖版 · 性能监视器</strong></td>
-    <td align="center" width="58%"><strong>偏好设置 · 歌词</strong></td>
-  </tr>
-  <tr>
-    <td align="center" valign="top"><a href="docs/media/player-vertical.png"><img src="docs/media/player-vertical.png" width="290" alt="竖版播放器：大封面、音频设备、柱状频谱与系统性能读数" /></a></td>
-    <td align="center" valign="top"><a href="docs/media/settings.png"><img src="docs/media/settings.png" width="400" alt="偏好设置的歌词分页，展示歌词能见度、逐字效果和歌词来源选项" /></a></td>
-  </tr>
-</table>
+<p align="center">
+  <a href="docs/media/demo-layout.png"><img src="docs/media/demo-layout.png" width="856" alt="横竖布局切换演示" /></a>
+</p>
 
-<p align="center"><a href="docs/media/audio-devices.png">输出设备截图</a> · <a href="docs/media/README.md">素材与演示说明</a></p>
+<p align="center"><sub>横竖布局切换</sub></p>
+
+<p align="center">
+  <a href="docs/media/demo-settings.png"><img src="docs/media/demo-settings.png" width="408" alt="偏好设置分页演示" /></a>
+</p>
+
+<p align="center"><sub>偏好设置</sub></p>
+
+<p align="center"><a href="docs/media/player-horizontal.png">横版截图</a> · <a href="docs/media/player-vertical.png">竖版截图</a> · <a href="docs/media/audio-devices.png">输出设备截图</a> · <a href="docs/media/settings.png">设置截图</a> · <a href="docs/media/README.md">素材与演示说明</a></p>
 
 ## 这次更新
 
-- **播放设备就在首页。** 可在「设置 → 播放」关闭首页设备入口。新的蓝牙播放设备连接时会提示，不会自动改换输出。
-- **横竖切换更自然。** 竖版将设备入口放在封面上方；切换时封面保持正方形、避开设备控件，背景柔和淡变。
+- **设备面板从原位展开。** 宽度先打开，设备列表再铺开；设备名与音量行分段交接，收回时回到同一枚胶囊。
+- **窗口与设置动效重新调校。** 横竖切换、设置展开和右键菜单使用无回弹的非线性过渡，按各自的距离和用途调整节奏。
+- **歌词来源只留标识。** QQ 音乐、网易云、LRCLIB 等不再显示独立底牌，标识随深浅主题调整。
 
 ## 界面中的其他功能
 

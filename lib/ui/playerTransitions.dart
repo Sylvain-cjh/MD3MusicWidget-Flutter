@@ -150,7 +150,7 @@ extension _PlayerTransitions on _PlayerViewState {
     final String targetSettingsSide = _settingsSide;
 
     final duration = _settingsTransitionActive
-        ? MediaMotionTokens.settingsDisclosure
+        ? MediaMotionTokens.settingsDuration(targetSettingsOpen)
         : AppState.layoutSwitchDuration;
 
     final double targetW =

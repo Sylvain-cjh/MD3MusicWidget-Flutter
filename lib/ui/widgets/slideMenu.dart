@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/appState.dart';
+import '../animations/mediaMotionTokens.dart';
 import 'smoothRoundedClip.dart';
 
 class SlideMenu extends StatelessWidget {
@@ -21,16 +22,21 @@ class SlideMenu extends StatelessWidget {
     final offsetBegin = MediaQuery.disableAnimationsOf(context)
         ? Offset.zero
         : menuSide == "left"
-        ? const Offset(0.2, 0)
-        : const Offset(-0.2, 0);
+        ? const Offset(0.10, 0)
+        : const Offset(-0.10, 0);
+    final reveal = animation.drive(
+      CurveTween(curve: MediaMotionTokens.compactSurfaceCurve),
+    );
 
     return FadeTransition(
-      opacity: animation,
+      opacity: reveal.drive(
+        CurveTween(curve: MediaMotionTokens.surfaceOpacityCurve),
+      ),
       child: SlideTransition(
         position: Tween<Offset>(
           begin: offsetBegin,
           end: Offset.zero,
-        ).animate(animation.drive(CurveTween(curve: Curves.easeOutCubic))),
+        ).animate(reveal),
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 4),
           child: IntrinsicWidth(

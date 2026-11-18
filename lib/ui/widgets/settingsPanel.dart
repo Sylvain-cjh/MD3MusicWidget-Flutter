@@ -10,6 +10,7 @@ import '../../core/systemPerformanceProvider.dart';
 import '../../core/qqMusicPlaylistQueueProvider.dart';
 import '../../core/neteasePlaylistQueueProvider.dart';
 import '../../core/platformProvider.dart';
+import '../animations/mediaMotionTokens.dart';
 import 'md3AnchoredSelect.dart';
 import 'settingsDescriptions.dart';
 import 'settingsLabels.dart';
@@ -99,7 +100,7 @@ class _SettingsPanelState extends State<SettingsPanel>
   bool _hasWordTiming = false;
   _SettingsSection _selectedSection = _SettingsSection.window;
   int _sectionEntryDirection = 1;
-  double _sectionEntryTravel = 50;
+  double _sectionEntryTravel = 18;
   late final AnimationController _sectionEntryController;
   int _entrySlot = 0;
   List<MusicSource> _sources = const [];
@@ -120,7 +121,7 @@ class _SettingsPanelState extends State<SettingsPanel>
     super.initState();
     _sectionEntryController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 280),
+      duration: MediaMotionTokens.settingsSection,
       value: 1,
     );
     _hasTimeline = AppState.playbackDurationMs > 0;
@@ -149,7 +150,7 @@ class _SettingsPanelState extends State<SettingsPanel>
     setState(() {
       final delta = section.index - _selectedSection.index;
       _sectionEntryDirection = delta.isNegative ? -1 : 1;
-      _sectionEntryTravel = (38.0 + delta.abs() * 10).clamp(48.0, 78.0);
+      _sectionEntryTravel = (12.0 + delta.abs() * 6).clamp(18.0, 36.0);
       _selectedSection = section;
     });
     if (MediaQuery.disableAnimationsOf(context)) {
@@ -191,21 +192,30 @@ class _SettingsPanelState extends State<SettingsPanel>
     final slot = _entrySlot++;
     if (MediaQuery.disableAnimationsOf(context)) return child;
     final start = (slot * 0.10).clamp(0.0, 0.50);
-    final curve = Interval(start, 1, curve: Curves.easeOutCubic);
+    final travel = Interval(
+      start,
+      1,
+      curve: MediaMotionTokens.compactSurfaceCurve,
+    );
+    final reveal = Interval(
+      start,
+      .80 + start * .20,
+      curve: MediaMotionTokens.surfaceOpacityCurve,
+    );
     return AnimatedBuilder(
       animation: _sectionEntryController,
       child: child,
       builder: (context, child) {
-        final progress = curve.transform(_sectionEntryController.value);
+        final time = _sectionEntryController.value;
         return Opacity(
           key: ValueKey('settings_entry_$slot'),
-          opacity: progress,
+          opacity: reveal.transform(time),
           child: Transform.translate(
             key: ValueKey('settings_entry_motion_$slot'),
             offset: Offset(
-              (_sectionEntryTravel + slot.clamp(0, 6) * 2) *
+              (_sectionEntryTravel + slot.clamp(0, 6)) *
                   _sectionEntryDirection *
-                  (1 - progress),
+                  (1 - travel.transform(time)),
               0,
             ),
             child: child,

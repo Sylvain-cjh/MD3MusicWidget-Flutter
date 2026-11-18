@@ -185,11 +185,10 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
       message: '歌词来源：$label',
       child: Semantics(
         label: '歌词来源：$label',
-        child: SizedBox(
+        child: ProviderBrandMark(
           key: ValueKey('lyrics_source_$source'),
-          width: 27,
-          height: 27,
-          child: ProviderBrandMark(source: source, scheme: scheme),
+          source: source,
+          scheme: scheme,
         ),
       ),
     );

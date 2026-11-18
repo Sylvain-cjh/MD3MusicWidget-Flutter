@@ -216,8 +216,8 @@ class _PlayerViewState extends State<PlayerView>
     if (AppState.nextUpPreviewVisible.value) _onNextUpVisibilityChanged();
 
     _menuAnimController = AnimationController(
-      duration: const Duration(milliseconds: 250),
-      reverseDuration: const Duration(milliseconds: 200),
+      duration: MediaMotionTokens.menuOpen,
+      reverseDuration: MediaMotionTokens.menuClose,
       vsync: this,
     );
     _frameScaleController = AnimationController.unbounded(

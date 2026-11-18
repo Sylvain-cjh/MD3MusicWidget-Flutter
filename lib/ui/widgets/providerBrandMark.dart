@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'lawniconsBrandGeometry.dart';
-import 'smoothRoundedClip.dart';
-
 
 
 class ProviderBrandMark extends StatelessWidget {
@@ -16,38 +14,46 @@ class ProviderBrandMark extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: size,
-    child: DecoratedBox(
-      decoration: ShapeDecoration(
-        color: scheme.primaryContainer,
-        shape: SmoothSurfaceCorners.shape(BorderRadius.circular(size * .34)),
-      ),
+  Widget build(BuildContext context) {
+    final ink = scheme.onSurface;
+    return SizedBox.square(
+      dimension: size,
       child: Padding(
         padding: EdgeInsets.all(size * .06),
         child: switch (source) {
           'qqMusic' || 'neteaseCloud' => CustomPaint(
-            painter: ProviderBrandPainter(source, scheme.onPrimaryContainer),
+            painter: ProviderBrandPainter(source, ink),
           ),
-          'lrclib' => SmoothRoundedClip(
-            composite: false,
-            borderRadius: BorderRadius.circular(size * .2),
-            child: Image.asset('assets/brand/lrclib.png'),
+          'lrclib' => Center(
+            child: ExcludeSemantics(
+              child: Text(
+                'LRC\nLIB',
+                textAlign: TextAlign.center,
+                textScaler: TextScaler.noScaling,
+                style: TextStyle(
+                  color: ink,
+                  fontWeight: FontWeight.w800,
+                  fontSize: size * .38,
+                  height: .94,
+                  letterSpacing: .35,
+                ),
+              ),
+            ),
           ),
           'amll' => Icon(
             Icons.library_music_rounded,
-            color: scheme.onPrimaryContainer,
+            color: ink,
             size: size * .76,
           ),
           _ => Icon(
             source == 'localLrc' ? Icons.folder_rounded : Icons.lyrics_rounded,
-            color: scheme.onPrimaryContainer,
+            color: ink,
             size: size * .76,
           ),
         },
       ),
-    ),
-  );
+    );
+  }
 }
 
 class ProviderBrandPainter extends CustomPainter {

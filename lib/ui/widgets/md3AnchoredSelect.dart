@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../animations/mediaMotionTokens.dart';
 import 'continuousSurfaceBorder.dart';
 import 'smoothRoundedClip.dart';
 
@@ -291,11 +292,6 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
 
   static const double _screenPadding = 8;
   static const double _chipTopInset = 24;
-  static const _selectCurve = Cubic(.23, 1, .32, 1);
-  
-  
-  static const _chipMorphCurve = Cubic(.28, .26, .20, 1);
-
   @override
   Color? get barrierColor => null;
 
@@ -305,12 +301,16 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
   @override
   Duration get transitionDuration => disableAnimations
       ? const Duration(milliseconds: 120)
-      : Duration(milliseconds: alignEnd ? 240 : 200);
+      : alignEnd
+      ? MediaMotionTokens.outputMenuOpen
+      : const Duration(milliseconds: 200);
 
   @override
   Duration get reverseTransitionDuration => disableAnimations
       ? const Duration(milliseconds: 100)
-      : Duration(milliseconds: alignEnd ? 190 : 160);
+      : alignEnd
+      ? MediaMotionTokens.outputMenuClose
+      : const Duration(milliseconds: 160);
 
   @override
   Widget buildPage(
@@ -318,13 +318,22 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
     Animation<double> animation,
     Animation<double> secondaryAnimation,
   ) {
-    final shapeCurve = alignEnd && !disableAnimations
-        ? _chipMorphCurve
-        : _selectCurve;
-    final selectedBlend = animation.drive(
+    final chipMorph = alignEnd && !disableAnimations;
+    final shapeCurve = chipMorph
+        ? MediaMotionTokens.outputMenuHeightCurve
+        : MediaMotionTokens.settleCurve;
+    final surfaceMotion = animation.drive(CurveTween(curve: shapeCurve));
+    
+    
+    final rowMotion = chipMorph ? surfaceMotion : animation;
+    final selectedBlend = rowMotion.drive(
       CurveTween(
-        curve: alignEnd
-            ? const Interval(.55, .84, curve: Curves.easeInOut)
+        curve: chipMorph
+            ? const Interval(
+                .59,
+                .78,
+                curve: MediaMotionTokens.surfaceOpacityCurve,
+              )
             : const Interval(.42, .74, curve: Curves.easeInOut),
       ),
     );
@@ -401,7 +410,7 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
             visualScale: visualScale,
             face: face,
             activeRow: activeRow,
-            animation: animation,
+            animation: rowMotion,
             selectedBlend: selectedBlend,
             disableAnimations: disableAnimations,
           );
@@ -420,11 +429,53 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
               Positioned.fromRect(
                 rect: bounds,
                 child: AnimatedBuilder(
-                  animation: animation,
+                  animation: surfaceMotion,
                   builder: (context, child) {
-                    final t = shapeCurve.transform(animation.value);
+                    final t = surfaceMotion.value;
                     final progress = disableAnimations ? 1.0 : t;
-                    final rect = Rect.lerp(anchor, menu, progress)!;
+                    final heightFrame = Rect.lerp(anchor, menu, progress)!;
+                    final Rect rect;
+                    if (chipMorph) {
+                      final widthFrame = Rect.lerp(
+                        anchor,
+                        menu,
+                        MediaMotionTokens.outputMenuWidthCurve.transform(
+                          animation.value,
+                        ),
+                      )!;
+                      rect = Rect.fromLTRB(
+                        widthFrame.left,
+                        heightFrame.top,
+                        widthFrame.right,
+                        heightFrame.bottom,
+                      );
+                    } else {
+                      rect = heightFrame;
+                    }
+                    final materialProgress = chipMorph
+                        ? MediaMotionTokens.surfaceOpacityCurve.transform(
+                            progress,
+                          )
+                        : progress;
+                    final faceProgress = chipMorph
+                        ? const Interval(
+                            0,
+                            .75,
+                            curve: Curves.easeOutCubic,
+                          ).transform(progress)
+                        : progress;
+                    
+                    
+                    
+                    final faceOpacity =
+                        1 -
+                        (chipMorph
+                            ? const Interval(
+                                .45,
+                                .61,
+                                curve: MediaMotionTokens.surfaceOpacityCurve,
+                              ).transform(progress)
+                            : selectedBlend.value);
                     final radius = BorderRadius.lerp(
                       face.radius * visualScale,
                       menuRadius,
@@ -435,7 +486,7 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
                       painter: _SelectShadow(
                         clipper,
                         scheme.shadow,
-                        progress,
+                        materialProgress,
                         visualScale,
                       ),
                       child: ClipPath(
@@ -450,13 +501,13 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
                           color: Color.lerp(
                             face.fill,
                             scheme.surfaceContainerHighest,
-                            progress,
+                            materialProgress,
                           )!,
                           child: Stack(
                             clipBehavior: Clip.none,
                             children: [
                               child!,
-                              if (!disableAnimations && selectedBlend.value < 1)
+                              if (!disableAnimations && faceOpacity > 0)
                                 Positioned.fromRect(
                                   key: const ValueKey('md3-select-morph-face'),
                                   rect: Rect.fromCenter(
@@ -464,7 +515,7 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
                                       rect.center.dx,
                                       anchor.center.dy +
                                           (selectedLocalY - anchor.center.dy) *
-                                              progress,
+                                              faceProgress,
                                     ),
                                     width: rect.width,
                                     height: anchor.height,
@@ -472,13 +523,13 @@ class _Md3SelectRoute<T> extends PopupRoute<T> {
                                   child: IgnorePointer(
                                     child: ExcludeSemantics(
                                       child: Opacity(
-                                        opacity: 1 - selectedBlend.value,
+                                        opacity: faceOpacity,
                                         child: _SelectFace(
                                           label:
                                               entries[safeSelectedIndex].label,
                                           style: face,
                                           scale: visualScale,
-                                          progress: progress,
+                                          progress: faceProgress,
                                           toActiveRow: activeRow != null,
                                         ),
                                       ),
@@ -685,18 +736,20 @@ class _Md3SelectMenuState<T> extends State<_Md3SelectMenu<T>> {
               
               final bool widens = widget.face.leading != null;
               final double start = widens
-                  ? math.min(.81, .60 + (distance - 1) * .045)
+                  ? math.min(.90, .46 + (distance - 1) * .14)
                   : math.min(.52, .07 + (distance - 1) * .065);
               final Animation<double> reveal = widget.animation.drive(
                 CurveTween(
                   curve: Interval(
                     start,
-                    math.min(1, start + (widens ? .19 : .42)),
-                    curve: Curves.easeOutCubic,
+                    math.min(1, start + (widens ? .20 : .42)),
+                    curve: widens
+                        ? MediaMotionTokens.surfaceOpacityCurve
+                        : MediaMotionTokens.settleCurve,
                   ),
                 ),
               );
-              final double travel = math.min(.30, .09 * distance);
+              final double travel = math.min(.18, .06 * distance);
               return FadeTransition(
                 key: ValueKey('md3-select-option-$index'),
                 opacity: reveal,

@@ -135,11 +135,11 @@ extension _PlayerRendering on _PlayerViewState {
             !isLiveCustomResize &&
             !reduceMotion
         ? (_settingsTransitionActive
-              ? MediaMotionTokens.settingsDisclosure
+              ? MediaMotionTokens.settingsDuration(isOpen)
               : AppState.layoutSwitchDuration)
         : Duration.zero;
     final frameCurve = _settingsTransitionActive
-        ? MediaMotionTokens.settingsDisclosureCurve
+        ? MediaMotionTokens.settingsSurfaceCurve
         : AppState.layoutSwitchCurve;
 
     final backgroundAnchorHeight =
