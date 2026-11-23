@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
+import 'blurredArtworkProvider.dart';
 import 'appTypography.dart';
 import 'audioOutputs.dart';
 
@@ -47,7 +48,7 @@ enum MD3Shape {
   roundedExtraLarge,
 }
 
-enum GlowMode { waterfall, wallpaper }
+enum GlowMode { waterfall, wallpaper, ambient }
 
 enum SpectrumMode { off, bars, mirror, waveform }
 
@@ -620,6 +621,59 @@ class AppState {
   static bool enableGlow = true;
   static bool enableNavigationGlass = false;
   static GlowMode glowMode = GlowMode.waterfall;
+  static bool glowCustom = false;
+  static const defaultGlowBlur = 80.0;
+  static const minGlowBlur = 28.0;
+  static const maxGlowBlur = 120.0;
+  static const defaultGlowScrim = 0.28;
+  static const minGlowScrim = 0.0;
+  static const maxGlowScrim = 0.70;
+  static const minWaterfallBand = 0.20;
+  static const maxWaterfallBand = 0.80;
+  static const minWaterfallFade = 0.20;
+  static const maxWaterfallFade = 0.80;
+  static const minWaterfallOverlap = 0.08;
+  static const maxWaterfallOverlap = 0.45;
+  static const minAmbientSaturation = 0.80;
+  static const maxAmbientSaturation = 1.60;
+  static const minAmbientContrast = 0.60;
+  static const maxAmbientContrast = 1.20;
+  static const minAmbientScale = 1.0;
+  static const maxAmbientScale = 1.20;
+  static const defaultWaterfallBand = waterfallColorBand;
+  static const defaultWaterfallFade = waterfallFadeStop;
+  static const defaultWaterfallOverlap = waterfallOverlapFraction;
+  static const defaultAmbientSaturation = ambientSaturation;
+  static const defaultAmbientContrast = ambientContrast;
+  static const defaultAmbientScale = ambientOverscale;
+  static double glowBlur = defaultGlowBlur;
+  static double glowScrim = defaultGlowScrim;
+  static double glowWaterfallBand = waterfallColorBand;
+  static double glowWaterfallFade = waterfallFadeStop;
+  static double glowWaterfallOverlap = waterfallOverlapFraction;
+  static double glowAmbientSaturation = ambientSaturation;
+  static double glowAmbientContrast = ambientContrast;
+  static double glowAmbientScale = ambientOverscale;
+  static double get activeGlowBlur =>
+      glowCustom ? glowBlur.clamp(minGlowBlur, maxGlowBlur) : defaultGlowBlur;
+  static double get activeWaterfallBand => glowCustom
+      ? glowWaterfallBand.clamp(minWaterfallBand, maxWaterfallBand)
+      : waterfallColorBand;
+  static double get activeWaterfallFade => glowCustom
+      ? glowWaterfallFade.clamp(minWaterfallFade, maxWaterfallFade)
+      : waterfallFadeStop;
+  static double get activeWaterfallOverlap => glowCustom
+      ? glowWaterfallOverlap.clamp(minWaterfallOverlap, maxWaterfallOverlap)
+      : waterfallOverlapFraction;
+  static double get activeAmbientSaturation => glowCustom
+      ? glowAmbientSaturation.clamp(minAmbientSaturation, maxAmbientSaturation)
+      : ambientSaturation;
+  static double get activeAmbientContrast => glowCustom
+      ? glowAmbientContrast.clamp(minAmbientContrast, maxAmbientContrast)
+      : ambientContrast;
+  static double get activeAmbientScale => glowCustom
+      ? glowAmbientScale.clamp(minAmbientScale, maxAmbientScale)
+      : ambientOverscale;
   static const defaultRightCoverDarkening = 0.32;
   static const defaultRightCoverFadeLength = 0.65;
   static const defaultRightCoverBlur = 1.2;
@@ -996,16 +1050,19 @@ class AppState {
     exit(0);
   }
 
-  static Future<void> sendCommand(MediaCommand command) async {
+  static Future<bool> sendCommand(MediaCommand command) async {
     trackNavigation.observe(currentPlatformTrack);
     final navigationIntent = trackNavigation.noteCommand(command);
     try {
-      if (mediaCommandSender?.call(command) == true) return;
-      if (!await mediaBackend.dispatchCommand(command)) {
+      if (mediaCommandSender?.call(command) == true) return true;
+      final accepted = await mediaBackend.dispatchCommand(command);
+      if (!accepted) {
         trackNavigation.cancelCommand(navigationIntent);
       }
+      return accepted;
     } catch (_) {
       trackNavigation.cancelCommand(navigationIntent);
+      return false;
     }
   }
 

@@ -23,6 +23,7 @@ import '../animations/layoutMorphMotion.dart';
 part 'trackProgress.dart';
 part 'trackSpectrum.dart';
 part 'trackTextParticles.dart';
+part 'trackPlaybackFeedback.dart';
 
 int get _globalSlideDirection => AppState.trackNavigation.direction;
 
@@ -52,6 +53,13 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
   late bool _hasTimeline;
   late bool _hasOutputChip;
   Timer? _timelineHideTimer;
+  Timer? _playbackIntentTimer;
+  bool? _pendingPlaying;
+  bool _playbackIntentAccepted = false;
+  int _playbackIntentSerial = 0;
+  String? _pendingPlaybackContext;
+
+  void _updatePlaybackFeedback(VoidCallback change) => setState(change);
 
   @override
   void initState() {
@@ -59,7 +67,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
     _hasTimeline = _timelineAvailable;
     _hasOutputChip = AudioOutputChip.isAvailable(AppState.audioOutputs);
     AppState.audioOutputs.addListener(_handleOutputAvailability);
-    AppState.playbackRevision.addListener(_handleTimelineAvailability);
+    AppState.playbackRevision.addListener(_handlePlaybackFeedback);
     AppState.typographyRevision.addListener(_handleTypographyChanged);
     AppState.fontsRevision.addListener(_handleTypographyChanged);
   }
@@ -103,8 +111,9 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
   @override
   void dispose() {
     _timelineHideTimer?.cancel();
+    _playbackIntentTimer?.cancel();
     AppState.audioOutputs.removeListener(_handleOutputAvailability);
-    AppState.playbackRevision.removeListener(_handleTimelineAvailability);
+    AppState.playbackRevision.removeListener(_handlePlaybackFeedback);
     AppState.typographyRevision.removeListener(_handleTypographyChanged);
     AppState.fontsRevision.removeListener(_handleTypographyChanged);
     super.dispose();
@@ -855,7 +864,7 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                   : const SizedBox.shrink(),
             ),
             Positioned.fill(
-              child: PlaybackPauseShade(paused: !AppState.isPlaying),
+              child: PlaybackPauseShade(paused: !_displayPlaying),
             ),
             MorphPositioned(
               motion: widget.layoutMotion,
@@ -878,15 +887,9 @@ class _ContinuousTrackControlsState extends State<ContinuousTrackControls> {
                       foreground: AppState.currentScheme.onPrimary,
                       icon: Icons.play_arrow_rounded,
                       iconSize: playH * 0.59,
-                      isPlaying: AppState.isPlaying,
-                      label: AppState.isPlaying ? '暂停' : '播放',
-                      onPressed: () {
-                        AppState.sendCommand(MediaCommand.togglePlayPause);
-                        setState(
-                          () => AppState.isPlaying = !AppState.isPlaying,
-                        );
-                        AppState.notifyBackgroundChanged();
-                      },
+                      isPlaying: _displayPlaying,
+                      label: _displayPlaying ? '暂停' : '播放',
+                      onPressed: _togglePlaying,
                     )
                   : const SizedBox.shrink(),
             ),

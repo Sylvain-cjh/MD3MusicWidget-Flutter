@@ -26,6 +26,7 @@ class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
     super.initState();
     AppState.spectrumRevision.addListener(_handleSpectrumChanged);
     AppState.spectrumStyleRevision.addListener(_handleSpectrumStyleChanged);
+    AppState.backgroundRevision.addListener(_handleSpectrumStyleChanged);
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 90),
@@ -75,6 +76,7 @@ class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
   void dispose() {
     AppState.spectrumRevision.removeListener(_handleSpectrumChanged);
     AppState.spectrumStyleRevision.removeListener(_handleSpectrumStyleChanged);
+    AppState.backgroundRevision.removeListener(_handleSpectrumStyleChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -84,15 +86,23 @@ class _MusicSpectrumPanelState extends State<MusicSpectrumPanel>
     final ColorScheme scheme = AppState.currentScheme;
     return SpectrumGlassSurface(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        padding: const EdgeInsets.symmetric(
+          horizontal: MediaLayoutSpacing.stripHorizontalPadding,
+          vertical: 7,
+        ),
         child: Row(
           children: [
-            Icon(
-              Icons.graphic_eq_rounded,
-              size: 20,
-              color: scheme.onSurfaceVariant,
+            SizedBox.square(
+              dimension: MediaLayoutSpacing.stripLeadingExtent,
+              child: Center(
+                child: Icon(
+                  Icons.graphic_eq_rounded,
+                  size: MediaLayoutSpacing.stripIconSize,
+                  color: scheme.primary,
+                ),
+              ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: MediaLayoutSpacing.stripLeadingGap),
             Expanded(
               child: RepaintBoundary(
                 child: CustomPaint(
@@ -155,7 +165,7 @@ class _SpectrumPainter extends CustomPainter {
     }
     final Paint paint = Paint()
       ..color = (autoContrast ? Colors.white : color).withValues(
-        alpha: hasSignal ? 0.82 : 0.26,
+        alpha: hasSignal ? 0.92 : 0.26,
       )
       ..blendMode = autoContrast ? BlendMode.difference : BlendMode.srcOver
       ..isAntiAlias = true;
@@ -193,7 +203,9 @@ class _SpectrumPainter extends CustomPainter {
         ..strokeWidth = 1.6 * thickness
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round;
+      _lightSignal(paint, Offset.zero & size, brightAtTop: true);
       canvas.drawPath(path, paint);
+      paint.shader = null;
       return;
     }
 
@@ -207,31 +219,51 @@ class _SpectrumPainter extends CustomPainter {
       if (mode == SpectrumMode.mirror) {
         final double halfHeight = size.height * 0.46 * level;
         final double center = size.height / 2.0;
-        canvas.drawRRect(
-          roundedMediaFragment(
-            Rect.fromLTWH(x, center - halfHeight - 0.5, barWidth, halfHeight),
-            horizontal: false,
-          ),
-          paint,
+        final RRect upper = roundedMediaFragment(
+          Rect.fromLTWH(x, center - halfHeight - 0.5, barWidth, halfHeight),
+          horizontal: false,
         );
-        canvas.drawRRect(
-          roundedMediaFragment(
-            Rect.fromLTWH(x, center + 0.5, barWidth, halfHeight),
-            horizontal: false,
-          ),
-          paint,
+        final RRect lower = roundedMediaFragment(
+          Rect.fromLTWH(x, center + 0.5, barWidth, halfHeight),
+          horizontal: false,
         );
+        if (hasSignal) {
+          _lightSignal(paint, upper.outerRect, brightAtTop: false);
+        }
+        canvas.drawRRect(upper, paint);
+        if (hasSignal) {
+          _lightSignal(paint, lower.outerRect, brightAtTop: true);
+        }
+        canvas.drawRRect(lower, paint);
       } else {
         final double height = size.height * level;
-        final Rect rect = Rect.fromLTWH(
-          x,
-          size.height - height,
-          barWidth,
-          height,
+        final RRect bar = roundedMediaFragment(
+          Rect.fromLTWH(x, size.height - height, barWidth, height),
+          horizontal: false,
         );
-        canvas.drawRRect(roundedMediaFragment(rect, horizontal: false), paint);
+        if (hasSignal) _lightSignal(paint, bar.outerRect, brightAtTop: true);
+        canvas.drawRRect(bar, paint);
       }
     }
+    paint.shader = null;
+  }
+
+  
+  
+  void _lightSignal(Paint paint, Rect rect, {required bool brightAtTop}) {
+    if (autoContrast || rect.width < 1 || rect.height < 1) {
+      paint.shader = null;
+      return;
+    }
+    final Color ink = paint.color;
+    paint.shader = LinearGradient(
+      begin: brightAtTop ? Alignment.topCenter : Alignment.bottomCenter,
+      end: brightAtTop ? Alignment.bottomCenter : Alignment.topCenter,
+      colors: [
+        ink,
+        ink.withValues(alpha: ink.a * 0.38),
+      ],
+    ).createShader(rect);
   }
 
   @override

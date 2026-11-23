@@ -1,5 +1,6 @@
 #include "nativeMediaBridge.h"
 #include "nativeArtworkPolicy.h"
+#include "nativeArtworkReader.h"
 #include "nativeAudioService.h"
 #include "nativeNeteaseUia.h"
 #include "nativeNeteaseUiaPolicy.h"
@@ -70,7 +71,9 @@ struct Cache {
   std::vector<uint8_t> bytes;
   double last_position = 0;
   int64_t cover_retry = 0;
+  NativeArtworkReader artwork;
   void DetachSession() {
+    artwork.Reset();
     if (session) {
       try {
         session.MediaPropertiesChanged(properties);
@@ -169,11 +172,13 @@ Choose(const GlobalSystemMediaTransportControlsSessionManager &manager,
   return chosen;
 }
 template <typename Operation>
-auto Read(const Operation &operation, const std::shared_ptr<State> &state) {
+auto Read(const Operation &operation, const std::shared_ptr<State> &state,
+          const NativeArtworkReader::Cancelled &cancelled = {}) {
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(2);
   while (operation.Status() == AsyncStatus::Started) {
-    if (state->stop || std::chrono::steady_clock::now() >= deadline) {
+    if (state->stop || (cancelled && cancelled()) ||
+        std::chrono::steady_clock::now() >= deadline) {
       operation.Cancel();
       throw hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
     }
@@ -338,33 +343,48 @@ Snapshot(const std::shared_ptr<State> &state,
       cache.identity = identity;
     }
     cache.last_position = position;
-    
-    
-    if (artwork_policy.read_thumbnail)
-      try {
-        if (const auto thumbnail = props.Thumbnail()) {
-          ++state->cover_reads;
-          const auto stream = Read(thumbnail.OpenReadAsync(), state);
-          if (stream.Size() > 20 * 1024 * 1024)
-            throw hresult_error(E_BOUNDS);
-          DataReader reader(stream.GetInputStreamAt(0));
-          const auto count = Read(
-              reader.LoadAsync(static_cast<uint32_t>(stream.Size())), state);
-          if (count != stream.Size())
-            throw hresult_error(E_FAIL);
-          std::vector<uint8_t> bytes(count);
-          reader.ReadBytes(bytes);
-          cache.cover = CoverVersion(bytes);
-          cache.bytes = std::move(bytes);
-          cache.cover_retry = cache.bytes.empty() ? now + 1500 : 0;
-        } else {
-          cache.cover.clear();
-          cache.bytes.clear();
-          cache.cover_retry = now + 1500;
-        }
-      } catch (...) {
+    const auto artwork_key = identity + "|" + std::to_string(cache.revision);
+    bool received_artwork = false;
+    if (auto completed = cache.artwork.Take(artwork_key)) {
+      received_artwork = true;
+      if (completed->succeeded) {
+        cache.cover = CoverVersion(completed->bytes);
+        cache.bytes = std::move(completed->bytes);
+        cache.cover_retry = 0;
+      } else {
         cache.cover_retry = now + 1500;
       }
+    }
+    if (artwork_policy.read_thumbnail && !received_artwork &&
+        !cache.artwork.Pending(artwork_key)) {
+      try {
+        const auto thumbnail = props.Thumbnail();
+        if (!thumbnail) {
+          cache.cover_retry = now + 1500;
+        } else {
+          const agile_ref<IRandomAccessStreamReference> reference(thumbnail);
+          std::weak_ptr<State> weak = state;
+          cache.artwork.Submit(artwork_key,
+              [reference, state](const auto &cancelled) {
+                init_apartment(apartment_type::multi_threaded);
+                struct ApartmentExit { ~ApartmentExit() { uninit_apartment(); } } exit;
+                if (cancelled()) return std::vector<uint8_t>{};
+                ++state->cover_reads;
+                const auto stream = Read(reference.get().OpenReadAsync(), state, cancelled);
+                if (stream.Size() > 20 * 1024 * 1024) throw hresult_error(E_BOUNDS);
+                DataReader reader(stream.GetInputStreamAt(0));
+                const auto count = Read(reader.LoadAsync(static_cast<uint32_t>(stream.Size())),
+                                        state, cancelled);
+                if (count != stream.Size()) throw hresult_error(E_FAIL);
+                std::vector<uint8_t> bytes(count);
+                reader.ReadBytes(bytes);
+                return bytes;
+              }, [weak] { Notify(weak, false); });
+        }
+      } catch (...) { cache.cover_retry = now + 1500; }
+    }
+    info.SetNamedValue(L"artworkPending",
+        JsonValue::CreateBooleanValue(cache.artwork.Pending(artwork_key)));
     const auto &cover = cache.cover;
     if (cover != known_cover)
       result.artwork = cache.bytes;
@@ -538,7 +558,8 @@ void Worker(std::shared_ptr<State> state) {
                 controls.IsPauseEnabled() &&
                     Read(session.TryPauseAsync(), state);
         }
-        Notify(state, true);
+        
+        Notify(state, false);
       } else
         *payload = Snapshot(state, manager, selected, known, cache);
     } catch (const hresult_error &error) {

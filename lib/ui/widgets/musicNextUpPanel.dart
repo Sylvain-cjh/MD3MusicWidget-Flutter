@@ -1,11 +1,10 @@
-import 'dart:ui' show ImageFilter;
-
 import 'package:flutter/material.dart';
 
 import '../../core/appState.dart';
 import '../../core/platformProvider.dart';
 import '../../core/nextUpPreviewController.dart';
 import '../animations/nextUpPresenceMotion.dart';
+import 'mediaGeometry.dart';
 import 'pixelAlignedText.dart';
 import 'smoothRoundedClip.dart';
 
@@ -19,10 +18,6 @@ class MusicNextUpPanel extends StatefulWidget {
 
 class _MusicNextUpPanelState extends State<MusicNextUpPanel>
     with SingleTickerProviderStateMixin {
-  static final ImageFilter _glassBlur = ImageFilter.blur(
-    sigmaX: 13,
-    sigmaY: 13,
-  );
   late final NextUpPreviewController _preview;
   late final AnimationController _localAnimation;
   Animation<double> get _animation =>
@@ -153,12 +148,10 @@ class _MusicNextUpPanelState extends State<MusicNextUpPanel>
                       color: scheme.outlineVariant.withValues(alpha: 0.28),
                     ),
                     child: BackdropFilter(
-                      filter: _glassBlur,
+                      filter: MediaStripGlass.frost,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: scheme.surfaceContainerHigh.withValues(
-                            alpha: 0.62,
-                          ),
+                          gradient: MediaStripGlass.tint(scheme),
                         ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 14),

@@ -209,12 +209,11 @@ class DynamicBackground extends StatefulWidget {
     final source = AppState.bgBlurProvider ?? AppState.coverProvider;
     if (!AppState.enableGlow || source == null) return;
     await precacheImage(
-      BlurredArtworkProvider(
+      _glowProvider(
         source: source,
         identity: AppState.currentCoverVersion.isEmpty
             ? 'fallback'
             : AppState.currentCoverVersion,
-        waterfall: AppState.glowMode == GlowMode.waterfall,
         headerHeight: AppState.glowMode == GlowMode.waterfall
             ? AppState.glowHeaderHeightOf(layout)
             : 0,
@@ -232,6 +231,32 @@ class DynamicBackground extends StatefulWidget {
 
   @override
   State<DynamicBackground> createState() => _DynamicBackgroundState();
+}
+
+BlurredArtworkProvider _glowProvider({
+  required ImageProvider source,
+  required String identity,
+  required double headerHeight,
+  required double pixelScale,
+  Rect? rasterCrop,
+}) {
+  final waterfall = AppState.glowMode == GlowMode.waterfall;
+  return BlurredArtworkProvider(
+    source: source,
+    identity: identity,
+    waterfall: waterfall,
+    ambient: AppState.glowMode == GlowMode.ambient,
+    headerHeight: waterfall ? headerHeight : 0,
+    pixelScale: pixelScale,
+    rasterCrop: rasterCrop,
+    blurSigma: AppState.activeGlowBlur,
+    colorBand: AppState.activeWaterfallBand,
+    fadeStop: AppState.activeWaterfallFade,
+    overlapFraction: AppState.activeWaterfallOverlap,
+    gradeSaturation: AppState.activeAmbientSaturation,
+    gradeContrast: AppState.activeAmbientContrast,
+    gradeScale: AppState.activeAmbientScale,
+  );
 }
 
 class _DynamicBackgroundState extends State<DynamicBackground>
@@ -261,6 +286,15 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     AppState.themeBrightness,
     AppState.enableGlow,
     AppState.glowMode,
+    AppState.glowCustom,
+    AppState.activeGlowBlur,
+    AppState.glowScrim,
+    AppState.activeWaterfallBand,
+    AppState.activeWaterfallFade,
+    AppState.activeWaterfallOverlap,
+    AppState.activeAmbientSaturation,
+    AppState.activeAmbientContrast,
+    AppState.activeAmbientScale,
     AppState.enableOledTheme,
     _layout,
     AppState.isPlaying,
@@ -395,6 +429,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
     String identity,
     double headerH,
     bool waterfall,
+    bool ambient,
   ) => LayoutBuilder(
     builder: (context, constraints) {
       const zoom = 1.25;
@@ -405,10 +440,9 @@ class _DynamicBackgroundState extends State<DynamicBackground>
         width: AppState.canvasWidth * zoom,
         height: AppState.canvasHeight * zoom,
       );
-      final full = BlurredArtworkProvider(
+      final full = _glowProvider(
         source: source,
         identity: identity,
-        waterfall: waterfall,
         headerHeight: waterfall ? headerH : 0,
         pixelScale:
             MediaQuery.devicePixelRatioOf(context) *
@@ -438,10 +472,9 @@ class _DynamicBackgroundState extends State<DynamicBackground>
           : null;
       final provider = crop == null
           ? full
-          : BlurredArtworkProvider(
+          : _glowProvider(
               source: source,
               identity: identity,
-              waterfall: waterfall,
               headerHeight: full.headerHeight,
               pixelScale: full.pixelScale,
               rasterCrop: crop,
@@ -450,7 +483,21 @@ class _DynamicBackgroundState extends State<DynamicBackground>
         fit: BoxFit.fill,
         animateReplacement: widget.animateArtworkReplacement,
         clampedImageRect: rect,
-        artworkIdentity: (source, identity, waterfall),
+        
+        
+        artworkIdentity: (
+          source,
+          identity,
+          waterfall,
+          ambient,
+          AppState.activeGlowBlur,
+          AppState.activeWaterfallBand,
+          AppState.activeWaterfallFade,
+          AppState.activeWaterfallOverlap,
+          AppState.activeAmbientSaturation,
+          AppState.activeAmbientContrast,
+          AppState.activeAmbientScale,
+        ),
         normalizedImageRegion: provider.normalizedRegion,
         deferArtworkReplacement: true,
         provider: provider,
@@ -467,6 +514,14 @@ class _DynamicBackgroundState extends State<DynamicBackground>
       provider,
       coverKey,
       AppState.glowMode,
+      AppState.glowCustom,
+      AppState.activeGlowBlur,
+      AppState.activeWaterfallBand,
+      AppState.activeWaterfallFade,
+      AppState.activeWaterfallOverlap,
+      AppState.activeAmbientSaturation,
+      AppState.activeAmbientContrast,
+      AppState.activeAmbientScale,
       headerHeight,
       MediaQuery.devicePixelRatioOf(context),
       AppState.componentScale,
@@ -485,6 +540,7 @@ class _DynamicBackgroundState extends State<DynamicBackground>
           coverKey,
           headerHeight,
           AppState.glowMode == GlowMode.waterfall,
+          AppState.glowMode == GlowMode.ambient,
         ),
       );
     }
@@ -502,16 +558,21 @@ class _DynamicBackgroundState extends State<DynamicBackground>
 
     final double luminance = AppState.currentScheme.surface.computeLuminance();
 
-    final double dynamicDarkOverlay = (0.25 + (luminance * 0.50)).clamp(
-      0.25,
-      0.75,
+    
+    
+    final double dynamicDarkOverlay = (0.12 + (luminance * 0.32)).clamp(
+      0.12,
+      0.46,
     );
-    final double dynamicLightOverlay = (0.25 + ((1.0 - luminance) * 0.40))
-        .clamp(0.25, 0.65);
+    final double dynamicLightOverlay = (0.14 + ((1.0 - luminance) * 0.24))
+        .clamp(0.14, 0.40);
 
-    final double universalDimOpacity = isDark
+    final double automaticScrim = isDark
         ? dynamicDarkOverlay
         : dynamicLightOverlay;
+    final double universalDimOpacity = AppState.glowCustom
+        ? AppState.glowScrim.clamp(AppState.minGlowScrim, AppState.maxGlowScrim)
+        : automaticScrim;
     final Color overlayColor = isDark ? Colors.black : Colors.white;
 
     

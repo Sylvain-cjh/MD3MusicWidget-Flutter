@@ -7,12 +7,59 @@ import 'artworkResources.dart';
 import 'widgetDiagnostics.dart';
 
 
+const waterfallColorBand = 0.50;
+
+
+const waterfallFadeStop = 0.42;
+
+
+const waterfallOverlapFraction = 0.22;
+
+
+
+const ambientSaturation = 1.10;
+const ambientContrast = 0.90;
+const ambientOverscale = 1.06;
+
+List<double> ambientGradeMatrix({
+  double saturation = ambientSaturation,
+  double contrast = ambientContrast,
+}) {
+  const weights = <double>[0.2126, 0.7152, 0.0722];
+  final inv = 1 - saturation;
+  final lift = (1 - contrast) / 2 * 255;
+  final matrix = <double>[];
+  for (var row = 0; row < 3; row++) {
+    for (var column = 0; column < 3; column++) {
+      final saturated =
+          inv * weights[column] + (row == column ? ambientSaturation : 0);
+      matrix.add(ambientContrast * saturated);
+    }
+    matrix
+      ..add(0)
+      ..add(lift);
+  }
+  matrix.addAll(const <double>[0, 0, 0, 1, 0]);
+  return matrix;
+}
+
+
 
 @immutable
 class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
   final ImageProvider source;
   final String identity;
   final bool waterfall;
+
+  
+  final bool ambient;
+  final double blurSigma;
+  final double colorBand;
+  final double fadeStop;
+  final double overlapFraction;
+  final double gradeSaturation;
+  final double gradeContrast;
+  final double gradeScale;
   final double headerHeight;
   final double pixelScale;
   final Size canvasSize;
@@ -28,6 +75,14 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
     required this.pixelScale,
     this.canvasSize = const Size(700, 800),
     this.rasterCrop,
+    this.ambient = false,
+    this.blurSigma = 80,
+    this.colorBand = waterfallColorBand,
+    this.fadeStop = waterfallFadeStop,
+    this.overlapFraction = waterfallOverlapFraction,
+    this.gradeSaturation = ambientSaturation,
+    this.gradeContrast = ambientContrast,
+    this.gradeScale = ambientOverscale,
   });
 
   Size get rasterSize => Size(
@@ -113,21 +168,41 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
         bounds,
         Paint()
           ..imageFilter = ui.ImageFilter.blur(
-            sigmaX: 80,
-            sigmaY: 80,
+            sigmaX: blurSigma,
+            sigmaY: blurSigma,
             tileMode: TileMode.clamp,
           ),
       );
       final input = Size(original.width.toDouble(), original.height.toDouble());
-      final paint = Paint()..filterQuality = FilterQuality.medium;
+      final paint = Paint()
+        ..filterQuality = FilterQuality.medium
+        ..colorFilter = ambient
+            ? ColorFilter.matrix(
+                ambientGradeMatrix(
+                  saturation: gradeSaturation,
+                  contrast: gradeContrast,
+                ),
+              )
+            : null;
       if (!waterfall) {
         final fitted = applyBoxFit(BoxFit.cover, input, canvasSize);
-        canvas.drawImageRect(
-          original,
-          Alignment.center.inscribe(fitted.source, Offset.zero & input),
-          bounds,
-          paint,
+        final sourceRect = Alignment.center.inscribe(
+          fitted.source,
+          Offset.zero & input,
         );
+        if (!ambient) {
+          canvas.drawImageRect(original, sourceRect, bounds, paint);
+        } else {
+          final center = bounds.center;
+          canvas
+            ..save()
+            ..clipRect(bounds)
+            ..translate(center.dx, center.dy)
+            ..scale(gradeScale)
+            ..translate(-center.dx, -center.dy)
+            ..drawImageRect(original, sourceRect, bounds, paint)
+            ..restore();
+        }
       } else {
         final header = Rect.fromLTWH(
           0,
@@ -140,31 +215,45 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
           fitted.source,
           Offset.zero & input,
         );
-        final overlap = (headerHeight * .16).clamp(24.0, 48.0);
+        final requested = headerHeight * overlapFraction;
+        final overlap =
+            (overlapFraction - waterfallOverlapFraction).abs() < 0.0001
+            ? requested.clamp(32.0, 56.0)
+            : requested.clamp(12.0, math.max(12.0, headerHeight * 0.6));
         final tail = Rect.fromLTRB(
           0,
           header.bottom - overlap,
           canvasSize.width,
           canvasSize.height,
         );
-        final row = Rect.fromLTRB(
+        
+        
+        final bandHeight = math.min(
+          crop.height,
+          math.max(crop.height * colorBand, 1),
+        );
+        final band = Rect.fromLTRB(
           crop.left,
-          crop.bottom - crop.height / headerHeight,
+          math.max(crop.top, crop.bottom - bandHeight),
           crop.right,
           crop.bottom,
         );
-        canvas.drawImageRect(original, row, tail, paint);
+        canvas.drawImageRect(original, band, tail, paint);
         canvas.saveLayer(header, Paint());
         canvas.drawImageRect(original, crop, header, paint);
         canvas.drawRect(
           header,
           Paint()
             ..blendMode = BlendMode.dstIn
-            ..shader = const LinearGradient(
+            ..shader = LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Color(0xffffffff), Color(0xffffffff), Color(0x00ffffff)],
-              stops: [0, .85, 1],
+              colors: const [
+                Color(0xffffffff),
+                Color(0xffffffff),
+                Color(0x00ffffff),
+              ],
+              stops: [0, fadeStop, 1],
             ).createShader(header),
         );
         canvas.restore();
@@ -197,6 +286,14 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
       other.source == source &&
       other.identity == identity &&
       other.waterfall == waterfall &&
+      other.ambient == ambient &&
+      other.blurSigma == blurSigma &&
+      other.colorBand == colorBand &&
+      other.fadeStop == fadeStop &&
+      other.overlapFraction == overlapFraction &&
+      other.gradeSaturation == gradeSaturation &&
+      other.gradeContrast == gradeContrast &&
+      other.gradeScale == gradeScale &&
       other.headerHeight == headerHeight &&
       other.pixelScale == pixelScale &&
       other.canvasSize == canvasSize &&
@@ -206,6 +303,14 @@ class BlurredArtworkProvider extends ImageProvider<BlurredArtworkProvider> {
     source,
     identity,
     waterfall,
+    ambient,
+    blurSigma,
+    colorBand,
+    fadeStop,
+    overlapFraction,
+    gradeSaturation,
+    gradeContrast,
+    gradeScale,
     headerHeight,
     pixelScale,
     canvasSize,

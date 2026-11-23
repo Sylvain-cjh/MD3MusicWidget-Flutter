@@ -52,6 +52,7 @@ final class MediaSnapshot {
   final String artist;
   final String trackVersion;
   final bool isPlaying;
+  final bool artworkPending;
   final String coverVersion;
   final String legacyCoverBase64;
   final double positionMs;
@@ -72,6 +73,7 @@ final class MediaSnapshot {
     required this.artist,
     required this.trackVersion,
     required this.isPlaying,
+    this.artworkPending = false,
     required this.coverVersion,
     required this.legacyCoverBase64,
     required this.positionMs,
@@ -93,6 +95,7 @@ final class MediaSnapshot {
     artist: data['artist']?.toString() ?? '未知歌手',
     trackVersion: data['trackVersion']?.toString() ?? '',
     isPlaying: data['isPlaying'] == true,
+    artworkPending: data['artworkPending'] == true,
     coverVersion: data['coverVersion']?.toString() ?? '',
     legacyCoverBase64: data['coverBase64']?.toString() ?? '',
     positionMs: (data['positionMs'] as num?)?.toDouble() ?? 0.0,
@@ -131,6 +134,7 @@ final class MediaSnapshot {
     artist: artist ?? this.artist,
     trackVersion: trackVersion,
     isPlaying: isPlaying,
+    artworkPending: artworkPending,
     coverVersion: coverVersion,
     legacyCoverBase64: legacyCoverBase64,
     positionMs: positionMs,

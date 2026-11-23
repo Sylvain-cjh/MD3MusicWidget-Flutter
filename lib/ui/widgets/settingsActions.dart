@@ -197,6 +197,34 @@ extension _SettingsActions on _SettingsPanelState {
     onChangeEnd: _finishRightArtworkChange,
   );
 
+  void _stageGlowValue(VoidCallback change, {required bool raster}) {
+    _updateState(change);
+    if (raster) {
+      _glowApplyTimer?.cancel();
+      _glowApplyTimer = Timer(const Duration(milliseconds: 280), () {
+        _glowApplyTimer = null;
+        AppState.notifyBackgroundChanged();
+      });
+    } else {
+      AppState.notifyBackgroundChanged();
+    }
+    _glowSaveTimer?.cancel();
+    _glowSaveTimer = Timer(const Duration(milliseconds: 450), () {
+      _glowSaveTimer = null;
+      unawaited(AppState.saveSettings());
+    });
+  }
+
+  void _finishGlowValue() {
+    final pendingRaster = _glowApplyTimer?.isActive == true;
+    _glowApplyTimer?.cancel();
+    _glowApplyTimer = null;
+    _glowSaveTimer?.cancel();
+    _glowSaveTimer = null;
+    if (pendingRaster) AppState.notifyBackgroundChanged();
+    unawaited(AppState.saveSettings());
+  }
+
   void _finishRightArtworkChange() {
     _rightArtworkSaveTimer?.cancel();
     _rightArtworkSaveTimer = null;

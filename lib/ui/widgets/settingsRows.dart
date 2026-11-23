@@ -156,7 +156,8 @@ extension _SettingsRows on _SettingsPanelState {
               ),
             ],
           ),
-          Text(subtitle, style: _settingSubtitleStyle()),
+          if (subtitle.isNotEmpty)
+            Text(subtitle, style: _settingSubtitleStyle()),
           JellySlider(
             sliderKey: sliderKey,
             value: displayedValue,

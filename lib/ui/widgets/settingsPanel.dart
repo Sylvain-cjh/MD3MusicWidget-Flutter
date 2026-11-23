@@ -111,6 +111,8 @@ class _SettingsPanelState extends State<SettingsPanel>
   Timer? _rightArtworkSaveTimer;
   Timer? _cacheLimitSaveTimer;
   Timer? _spectrumStyleSaveTimer;
+  Timer? _glowApplyTimer;
+  Timer? _glowSaveTimer;
   List<PerformanceProcess> _performanceProcesses = const [];
   bool _performanceProcessesLoading = false;
   bool _cacheDirectoryChanging = false;
@@ -140,6 +142,9 @@ class _SettingsPanelState extends State<SettingsPanel>
     if (_rightArtworkSaveTimer?.isActive == true) _finishRightArtworkChange();
     if (_cacheLimitSaveTimer?.isActive == true) _finishCacheLimitChange();
     if (_spectrumStyleSaveTimer?.isActive == true) _finishSpectrumStyleChange();
+    if (_glowApplyTimer?.isActive == true || _glowSaveTimer?.isActive == true) {
+      _finishGlowValue();
+    }
     AppState.playbackRevision.removeListener(_handleTimelineAvailability);
     AppState.fontsRevision.removeListener(_handleFontsChanged);
     super.dispose();

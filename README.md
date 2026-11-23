@@ -11,7 +11,7 @@
 
 <p><strong>把正在听的歌，留在桌面或直播画面里。</strong><br/>不换播放器，也不挡住你正在做的事。</p>
 
-[![版本 1.3.3](https://img.shields.io/badge/version-1.3.3-74549D?style=flat-square)](CHANGELOG.md)
+[![版本 1.3.4](https://img.shields.io/badge/version-1.3.4-74549D?style=flat-square)](CHANGELOG.md)
 [![Windows x64](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-507765?style=flat-square)](#开始使用)
 [![Flutter](https://img.shields.io/badge/UI-Flutter-74549D?style=flat-square&logo=flutter&logoColor=white)](#工作原理)
 [![内置音乐采集](https://img.shields.io/badge/capture-SMTC%20%2B%20WASAPI-507765?style=flat-square)](docs/native_capture.md)
@@ -30,14 +30,14 @@
 
 **第一次用，建议先选无模型版。** 它保留封面、歌词、频谱、性能监视器和普通 3D 悬浮效果。只有想让封面里的主体和背景产生不同深度的视差时，才需要分层模型。
 
-| 1.3.3 套件 | 适合谁 |
+| 1.3.4 套件 | 适合谁 |
 | --- | --- |
 | **无分层模型版** · `Without-Layer-Models` | 想看歌曲、封面、歌词、频谱，或给直播做展示。 |
 | **有分层模型版** · `With-Layer-Models` | 想让封面主体与背景有不同景深；需要兼容核显。 |
 
 两种版本都有 `Setup.exe` 安装包和 `Portable.zip` 免安装包，任选其一即可。源码 ZIP 不用于直接运行。已发布的附件见 [GitHub 发行页](https://github.com/Sylvain-cjh/MD3MusicWidget-Flutter/releases)。
 
-1.3.3 的有模型版沿用上一版的正式模型，本次不单独发行 cover-layers。需要模型请选有模型版，详见 [分层模型说明](docs/layer_models.md)。
+1.3.4 的有模型版沿用上一版的正式模型，本次不单独发行 cover-layers。需要模型请选有模型版，详见 [分层模型说明](docs/layer_models.md)。
 
 > [!IMPORTANT]
 > 主程序要求 **Windows 10 2004（Build 19041）或更新版本，包括 Windows 11，x64**。播放器需要开启系统媒体控制，挂件才能读取正在播放的信息。指定进程频谱和可选分层另有系统或硬件要求。

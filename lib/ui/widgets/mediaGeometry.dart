@@ -1,6 +1,28 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
+
+
+
+
+abstract final class MediaStripGlass {
+  static final ImageFilter frost = ImageFilter.blur(sigmaX: 8, sigmaY: 8);
+
+  static Gradient tint(ColorScheme scheme) => LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [
+      scheme.surfaceContainerHighest.withValues(alpha: 0.30),
+      scheme.surfaceContainerHigh.withValues(alpha: 0.68),
+      Color.alphaBlend(
+        scheme.primary.withValues(alpha: 0.12),
+        scheme.surface,
+      ).withValues(alpha: 0.76),
+    ],
+    stops: const [0.0, 0.42, 1.0],
+  );
+}
 
 abstract final class MediaLayoutSpacing {
   static const metadataGap = 4.0;
@@ -9,6 +31,10 @@ abstract final class MediaLayoutSpacing {
   static const portraitArtworkGap = 16.0;
   static const portraitProgressGap = 12.0;
   static const portraitTransportGap = 16.0;
+  static const stripHorizontalPadding = 14.0;
+  static const stripLeadingExtent = 27.0;
+  static const stripLeadingGap = 8.0;
+  static const stripIconSize = 20.0;
 
   static double edge(bool vertical) => vertical ? portraitEdge : landscapeEdge;
 }

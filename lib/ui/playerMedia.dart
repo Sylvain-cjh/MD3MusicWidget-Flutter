@@ -205,6 +205,12 @@ extension _PlayerMedia on _PlayerViewState {
       } else {
         unawaited(_loadCover(snapshot.coverVersion));
       }
+    } else if (snapshot.artworkPending) {
+      
+      
+      _missingCoverTimer?.cancel();
+      _missingCoverTimer = null;
+      _missingCoverIdentity = null;
     } else if (snapshot.coverVersion.isEmpty &&
         snapshot.legacyCoverBase64.isNotEmpty) {
       unawaited(_loadLegacyCover(snapshot.legacyCoverBase64));

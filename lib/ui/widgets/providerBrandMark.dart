@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'lawniconsBrandGeometry.dart';
+import 'mediaGeometry.dart';
 
 
 class ProviderBrandMark extends StatelessWidget {
@@ -10,12 +11,12 @@ class ProviderBrandMark extends StatelessWidget {
     super.key,
     required this.source,
     required this.scheme,
-    this.size = 27,
+    this.size = MediaLayoutSpacing.stripLeadingExtent,
   });
 
   @override
   Widget build(BuildContext context) {
-    final ink = scheme.onSurface;
+    final ink = scheme.primary;
     return SizedBox.square(
       dimension: size,
       child: Padding(
@@ -64,24 +65,21 @@ class ProviderBrandPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final scale = size.shortestSide / LawniconsBrandGeometry.viewport;
+    final path = source == 'qqMusic'
+        ? LawniconsBrandGeometry.qqMusic
+        : LawniconsBrandGeometry.neteaseCloud;
+    final center = path.getBounds().center;
     canvas.save();
-    canvas.translate(
-      (size.width - size.shortestSide) / 2,
-      (size.height - size.shortestSide) / 2,
-    );
+    canvas.translate(size.width / 2, size.height / 2);
     canvas.scale(scale);
+    canvas.translate(-center.dx, -center.dy);
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = LawniconsBrandGeometry.strokeWidth
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
-    canvas.drawPath(
-      source == 'qqMusic'
-          ? LawniconsBrandGeometry.qqMusic
-          : LawniconsBrandGeometry.neteaseCloud,
-      paint,
-    );
+    canvas.drawPath(path, paint);
     canvas.restore();
   }
 

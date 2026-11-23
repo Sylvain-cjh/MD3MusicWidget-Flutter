@@ -398,6 +398,58 @@ class _AppSettings {
         return value.toDouble().clamp(min, max);
       }
 
+      final glowCustom = snapshot != null
+          ? snapshot['glowCustom']
+          : p.get('glowCustom');
+      AppState.glowCustom = glowCustom is bool ? glowCustom : false;
+      AppState.glowBlur = boundedArtworkSetting(
+        'glowBlur',
+        AppState.defaultGlowBlur,
+        AppState.minGlowBlur,
+        AppState.maxGlowBlur,
+      );
+      AppState.glowScrim = boundedArtworkSetting(
+        'glowScrim',
+        AppState.defaultGlowScrim,
+        AppState.minGlowScrim,
+        AppState.maxGlowScrim,
+      );
+      AppState.glowWaterfallBand = boundedArtworkSetting(
+        'glowWaterfallBand',
+        AppState.defaultWaterfallBand,
+        AppState.minWaterfallBand,
+        AppState.maxWaterfallBand,
+      );
+      AppState.glowWaterfallFade = boundedArtworkSetting(
+        'glowWaterfallFade',
+        AppState.defaultWaterfallFade,
+        AppState.minWaterfallFade,
+        AppState.maxWaterfallFade,
+      );
+      AppState.glowWaterfallOverlap = boundedArtworkSetting(
+        'glowWaterfallOverlap',
+        AppState.defaultWaterfallOverlap,
+        AppState.minWaterfallOverlap,
+        AppState.maxWaterfallOverlap,
+      );
+      AppState.glowAmbientSaturation = boundedArtworkSetting(
+        'glowAmbientSaturation',
+        AppState.defaultAmbientSaturation,
+        AppState.minAmbientSaturation,
+        AppState.maxAmbientSaturation,
+      );
+      AppState.glowAmbientContrast = boundedArtworkSetting(
+        'glowAmbientContrast',
+        AppState.defaultAmbientContrast,
+        AppState.minAmbientContrast,
+        AppState.maxAmbientContrast,
+      );
+      AppState.glowAmbientScale = boundedArtworkSetting(
+        'glowAmbientScale',
+        AppState.defaultAmbientScale,
+        AppState.minAmbientScale,
+        AppState.maxAmbientScale,
+      );
       AppState.rightCoverDarkening = boundedArtworkSetting(
         'rightCoverDarkening',
         AppState.defaultRightCoverDarkening,
@@ -663,6 +715,15 @@ class _AppSettings {
     'enableGlow': AppState.enableGlow,
     'enableNavigationGlass': AppState.enableNavigationGlass,
     'glowMode': AppState.glowMode.name,
+    'glowCustom': AppState.glowCustom,
+    'glowBlur': AppState.glowBlur,
+    'glowScrim': AppState.glowScrim,
+    'glowWaterfallBand': AppState.glowWaterfallBand,
+    'glowWaterfallFade': AppState.glowWaterfallFade,
+    'glowWaterfallOverlap': AppState.glowWaterfallOverlap,
+    'glowAmbientSaturation': AppState.glowAmbientSaturation,
+    'glowAmbientContrast': AppState.glowAmbientContrast,
+    'glowAmbientScale': AppState.glowAmbientScale,
     'rightCoverDarkening': AppState.rightCoverDarkening,
     'rightCoverFadeLength': AppState.rightCoverFadeLength,
     'rightCoverFadeLinked': AppState.rightCoverFadeLinked,

@@ -63,6 +63,16 @@ final class SettingsLabels {
   static const glowMode = '背景渲染模式';
   static const glowWaterfall = '瀑布';
   static const glowWallpaper = '全屏';
+  static const glowAmbient = '氛围';
+  static const glowCustom = '自定义背景';
+  static const glowBlur = '模糊强度';
+  static const glowScrim = '遮罩浓度';
+  static const glowWaterfallBand = '瀑布色带';
+  static const glowWaterfallFade = '瀑布淡出';
+  static const glowWaterfallOverlap = '瀑布衔接';
+  static const glowAmbientSaturation = '氛围饱和';
+  static const glowAmbientContrast = '氛围对比';
+  static const glowAmbientScale = '氛围放大';
   static const coverParallax = '3D 悬浮封面';
   static const coverLayers = '封面分层视差 beta';
   static const coverLayerStatus = '最近分层结果';

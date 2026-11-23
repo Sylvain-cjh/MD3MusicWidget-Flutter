@@ -13,6 +13,7 @@ final class NativeMediaBackend implements MediaCaptureBackend {
   final _events = StreamController<MediaProviderEvent>.broadcast(sync: true);
   Timer? _timer;
   Timer? _spectrumTimer;
+  Timer? _confirmationTimer;
   bool _refreshQueued = false,
       _spectrumEnabled = false,
       _spectrumReading = false;
@@ -33,6 +34,7 @@ final class NativeMediaBackend implements MediaCaptureBackend {
   String? _bridgeError;
   int? _lastCommand;
   String? _lastCommandResult;
+  double? _lastSnapshotReadMs, _lastCommandAckMs;
   MusicSourceSnapshot _sources = const MusicSourceSnapshot(
     selectedSourceAppId: '',
     sources: [],
@@ -124,6 +126,10 @@ final class NativeMediaBackend implements MediaCaptureBackend {
           : audioStatus,
       'audioFrames': audioFrames,
       'audioProcessId': audioProcessId,
+      'latency': {
+        'snapshotMs': _lastSnapshotReadMs,
+        'commandAckMs': _lastCommandAckMs,
+      },
     };
   }
 
@@ -162,6 +168,7 @@ final class NativeMediaBackend implements MediaCaptureBackend {
 
   Future<bool> _read() async {
     final generation = _generation;
+    final clock = Stopwatch()..start();
     try {
       final response = await channel
           .invokeMapMethod<String, dynamic>('snapshot', {
@@ -196,6 +203,7 @@ final class NativeMediaBackend implements MediaCaptureBackend {
         _clearAudioSample();
       }
       _diagnosticSnapshot = snapshot;
+      _lastSnapshotReadMs = clock.elapsedMicroseconds / 1000;
       _bridgeError = null;
       if (_playing != snapshot.isPlaying) {
         _playing = snapshot.isPlaying;
@@ -249,6 +257,7 @@ final class NativeMediaBackend implements MediaCaptureBackend {
     if (id.length > 512) throw ArgumentError('Source ID too long');
     if (isConnected && _selectionGeneration == null && id == _source) return;
     final generation = ++_generation;
+    _confirmationTimer?.cancel();
     _selectionGeneration = generation;
     _audioGeneration++;
     _clearAudioSample();
@@ -372,6 +381,38 @@ final class NativeMediaBackend implements MediaCaptureBackend {
   }
 
   Future<bool> setPlaying(bool playing) => _dispatch(playing ? 4 : 5);
+
+  void _confirmCommand(int generation, int command, MediaSnapshot? before) {
+    _confirmationTimer?.cancel();
+    if (before == null) return;
+    final expectedPlaying = switch (command) {
+      2 => !before.isPlaying,
+      4 => true,
+      5 => false,
+      _ => null,
+    };
+    var attempts = 0;
+    _confirmationTimer = Timer.periodic(const Duration(milliseconds: 250), (
+      timer,
+    ) {
+      final current = _diagnosticSnapshot;
+      final confirmed = expectedPlaying != null
+          ? current?.isPlaying == expectedPlaying
+          : current?.trackVersion != before.trackVersion;
+      if (_closed ||
+          generation != _generation ||
+          confirmed ||
+          attempts++ >= 3) {
+        timer.cancel();
+        return;
+      }
+      
+      
+      _refreshQueued = true;
+      _drainRefresh();
+    });
+  }
+
   Future<bool> _dispatch(int command) {
     if (_closed || _selectionGeneration != null || _commandsPending >= 4) {
       return Future.value(false);
@@ -379,13 +420,18 @@ final class NativeMediaBackend implements MediaCaptureBackend {
     final result = Completer<bool>();
     final generation = _generation;
     _commandsPending++;
+    _confirmationTimer?.cancel();
     _commandTail = _commandTail.then((_) async {
+      bool succeeded = false;
+      MediaSnapshot? before;
       try {
         await _reading;
         if (_closed || generation != _generation) {
           result.complete(false);
           return;
         }
+        before = _diagnosticSnapshot;
+        final clock = Stopwatch()..start();
         final accepted = await channel
             .invokeMethod<bool>('command', {
               'source': _source,
@@ -395,7 +441,9 @@ final class NativeMediaBackend implements MediaCaptureBackend {
         if (!_closed && generation == _generation) {
           _lastCommand = command;
           _lastCommandResult = accepted == true ? 'accepted' : 'notAccepted';
+          _lastCommandAckMs = clock.elapsedMicroseconds / 1000;
         }
+        succeeded = accepted == true;
         result.complete(
           !_closed && generation == _generation && accepted == true,
         );
@@ -410,6 +458,7 @@ final class NativeMediaBackend implements MediaCaptureBackend {
         if (_commandsPending == 0 && !_closed) {
           _refreshQueued = false;
           unawaited(_refresh());
+          if (succeeded) _confirmCommand(generation, command, before);
         }
       }
     });
@@ -425,6 +474,7 @@ final class NativeMediaBackend implements MediaCaptureBackend {
     _diagnosticSnapshot = null;
     _timer?.cancel();
     _spectrumTimer?.cancel();
+    _confirmationTimer?.cancel();
     channel.setMethodCallHandler(null);
     try {
       await channel

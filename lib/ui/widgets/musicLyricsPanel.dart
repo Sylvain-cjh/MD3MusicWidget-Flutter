@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
@@ -7,6 +6,7 @@ import '../../core/appState.dart';
 import '../../core/lyricsCoordinator.dart';
 import '../animations/lyricsContentTransition.dart';
 import '../animations/lyricsSmokeMotion.dart';
+import 'mediaGeometry.dart';
 import 'pixelAlignedText.dart';
 import 'smoothRoundedClip.dart';
 import 'providerBrandMark.dart';
@@ -21,10 +21,6 @@ class MusicLyricsPanel extends StatefulWidget {
 }
 
 class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
-  static final ImageFilter _glassBlur = ImageFilter.blur(
-    sigmaX: 13,
-    sigmaY: 13,
-  );
   Timer? _timelineTimer;
   Timer? _cooldownDisplayTimer;
   LyricsState? _retainedState;
@@ -261,21 +257,14 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
         color: scheme.outlineVariant.withValues(alpha: 0.28),
       ),
       child: BackdropFilter(
-        filter: _glassBlur,
+        filter: MediaStripGlass.frost,
         child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                scheme.surfaceContainerHigh.withValues(alpha: 0.60),
-                scheme.primaryContainer.withValues(alpha: 0.20),
-                scheme.surface.withValues(alpha: 0.46),
-              ],
-            ),
-          ),
+          decoration: BoxDecoration(gradient: MediaStripGlass.tint(scheme)),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+            padding: const EdgeInsets.symmetric(
+              horizontal: MediaLayoutSpacing.stripHorizontalPadding,
+              vertical: 5,
+            ),
             child: Row(
               children: [
                 AnimatedSwitcher(
@@ -291,7 +280,7 @@ class _MusicLyricsPanelState extends State<MusicLyricsPanel> {
                     child: _sourceIcon(state, scheme),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: MediaLayoutSpacing.stripLeadingGap),
                 Expanded(
                   
                   
